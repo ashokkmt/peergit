@@ -1,0 +1,9 @@
+assets/
+graphify-out/
+plans/
+
+
+.env
+
+
+!.gitignore
