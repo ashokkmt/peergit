@@ -3,23 +3,28 @@ package health
 import (
 	"log/slog"
 	"net/http"
+	"peergit/internal/platform/errormanager"
 	"peergit/internal/platform/http/response"
 )
 
 type Handler struct {
-	logger *slog.Logger
+	logger       *slog.Logger
+	errorManager *errormanager.Manager
 }
 
-func NewHandler(logger *slog.Logger) *Handler {
+func NewHandler(logger *slog.Logger, errors *errormanager.Manager) *Handler {
 	return &Handler{
-		logger: logger,
+		logger:       logger,
+		errorManager: errors,
 	}
 }
 
 func (h Handler) Healthz(w http.ResponseWriter, r *http.Request) {
-	h.logger.Debug("health check requested")
+	h.logger.Debug("health check requested", "request_id", r.Header.Get("X-Request-ID"))
 
-	response.OK(w, Response{
+	if err := response.OK(w, Response{
 		Status: "ok",
-	})
+	}); err != nil {
+		h.errorManager.Handle(w, r, err)
+	}
 }

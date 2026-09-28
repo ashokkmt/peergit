@@ -5,13 +5,7 @@ import (
 	"os"
 )
 
-func New(environment string) *slog.Logger {
-	level := slog.LevelInfo
-
-	if environment == "development" {
-		level = slog.LevelDebug
-	}
-
+func New(environment string, level slog.Level) *slog.Logger {
 	opts := &slog.HandlerOptions{
 		Level: level,
 	}

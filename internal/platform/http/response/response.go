@@ -2,30 +2,59 @@ package response
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 )
 
 type Envelope struct {
-	Data any `json:"data"`
+	Data      any        `json:"data"`
+	Error     *ErrorBody `json:"error"`
+	RequestID string     `json:"request_id,omitempty"`
 }
 
-func JSON(w http.ResponseWriter, status int, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-
-	_ = json.NewEncoder(w).Encode(Envelope{
-		Data: data,
-	})
+type ErrorBody struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
-func OK(w http.ResponseWriter, data any) {
-	JSON(w, http.StatusOK, data)
+func JSON(w http.ResponseWriter, status int, data any) error {
+	return write(w, status, Envelope{Data: data, RequestID: requestID(w)})
 }
 
-func Created(w http.ResponseWriter, data any) {
-	JSON(w, http.StatusCreated, data)
+func OK(w http.ResponseWriter, data any) error {
+	return JSON(w, http.StatusOK, data)
+}
+
+func Created(w http.ResponseWriter, data any) error {
+	return JSON(w, http.StatusCreated, data)
 }
 
 func NoContent(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func WriteError(w http.ResponseWriter, status int, code, message string) error {
+	return write(w, status, Envelope{
+		Error:     &ErrorBody{Code: code, Message: message},
+		RequestID: requestID(w),
+	})
+}
+
+func requestID(w http.ResponseWriter) string {
+	return w.Header().Get("X-Request-ID")
+}
+
+func write(w http.ResponseWriter, status int, envelope Envelope) error {
+	if status < 100 || status > 999 {
+		return errors.New("invalid HTTP status code")
+	}
+	body, err := json.Marshal(envelope)
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(status)
+	_, err = w.Write(append(body, '\n'))
+	return err
 }
