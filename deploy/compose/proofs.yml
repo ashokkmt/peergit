@@ -1,0 +1,39 @@
+name: peergit-proofs
+services:
+  postgres:
+    image: postgres:18@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
+    environment:
+      POSTGRES_USER: proofs
+      POSTGRES_PASSWORD: proof-local-only
+      POSTGRES_DB: peergit_proofs
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U proofs -d peergit_proofs"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    mem_limit: 512m
+  objects:
+    image: chrislusf/seaweedfs@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882
+    command: ["mini", "-dir=/data"]
+    environment:
+      AWS_ACCESS_KEY_ID: proof-local
+      AWS_SECRET_ACCESS_KEY: proof-local-only
+      S3_BUCKET: proofs
+    ports:
+      - "127.0.0.1:58333:8333"
+    volumes:
+      - object-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9333/cluster/status"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    # The S3 emulator buffers concurrent PUTs; ten 100 MiB fixtures need headroom.
+    mem_limit: 2g
+volumes:
+  postgres-data:
+  object-data:

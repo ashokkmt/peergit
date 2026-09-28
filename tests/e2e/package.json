@@ -1,0 +1,6 @@
+{
+  "name": "peergit-browser-checks",
+  "private": true,
+  "scripts": { "test": "node walkthrough.cjs" },
+  "devDependencies": { "playwright": "1.63.0" }
+}

@@ -4,6 +4,12 @@ plans/
 
 
 .env
+.env.verify
+.secrets/
+.proofs/
+/cmd/verify/
+/docs/verification/
+**/node_modules/
 
 
 !.gitignore
