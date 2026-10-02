@@ -14,12 +14,16 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"peergit/internal/campus"
 	"peergit/internal/health"
+	"peergit/internal/identity"
+	"peergit/internal/media"
 	"peergit/internal/platform/config"
 	"peergit/internal/platform/database"
 	"peergit/internal/platform/errormanager"
 	httpserver "peergit/internal/platform/http"
 	"peergit/internal/platform/logging"
+	"peergit/internal/platform/storage"
 )
 
 func main() {
@@ -48,7 +52,18 @@ func run() error {
 		defer pool.Close()
 	}
 	healthHandler := health.NewHandler(logger, errorManager, pool)
-	router := httpserver.NewRouter(healthHandler, logger, errorManager)
+	identityHandler := identity.NewHandler(pool, identity.Config{
+		Issuer: cfg.GoogleIssuer, ClientID: cfg.GoogleClientID, ClientSecret: cfg.GoogleClientSecret,
+		RedirectURL: cfg.GoogleRedirectURL, AppOrigin: cfg.AppOrigin, CookieSecure: cfg.CookieSecure,
+		SessionHashKey: cfg.SessionHashKey, MFAEncryptionKey: cfg.MFAEncryptionKey,
+	}, logger, errorManager)
+	campusHandler := campus.NewHandler(pool, identityHandler, cfg.AppOrigin, errorManager)
+	var objectStore *storage.Store
+	if cfg.ObjectEndpoint != "" {
+		objectStore = storage.New(cfg.ObjectEndpoint, cfg.ObjectBucket, cfg.ObjectRegion, cfg.ObjectAccessKey, cfg.ObjectSecretKey)
+	}
+	mediaHandler := media.NewHandler(pool, objectStore, identityHandler, errorManager)
+	router := httpserver.NewRouter(healthHandler, logger, errorManager, identityHandler.Register, campusHandler.Register, mediaHandler.Register)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {

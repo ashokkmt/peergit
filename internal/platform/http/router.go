@@ -22,7 +22,7 @@ type Router struct {
 	errors       atomic.Uint64
 }
 
-func NewRouter(healthHandler *health.Handler, logger *slog.Logger, errorManager *errormanager.Manager) http.Handler {
+func NewRouter(healthHandler *health.Handler, logger *slog.Logger, errorManager *errormanager.Manager, routes ...func(chi.Router)) http.Handler {
 	router := &Router{logger: logger, errorManager: errorManager}
 	r := chi.NewRouter()
 	r.Use(router.requestID)
@@ -38,6 +38,13 @@ func NewRouter(healthHandler *health.Handler, logger *slog.Logger, errorManager 
 	r.Get("/healthz", healthHandler.Healthz)
 	r.Get("/readyz", healthHandler.Readyz)
 	r.Get("/metrics", router.metrics)
+	if len(routes) > 0 {
+		r.Route("/api/v1", func(api chi.Router) {
+			for _, register := range routes {
+				register(api)
+			}
+		})
+	}
 	return r
 }
 

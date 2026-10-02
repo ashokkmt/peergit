@@ -39,8 +39,8 @@ func TestPlatformMigrationsAndDurableWork(t *testing.T) {
 		t.Fatalf("repeat migrations: %v", err)
 	}
 	var migrationCount int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&migrationCount); err != nil || migrationCount != 3 {
-		t.Fatalf("migration history count=%d err=%v, want 3", migrationCount, err)
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&migrationCount); err != nil || migrationCount != 4 {
+		t.Fatalf("migration history count=%d err=%v, want 4", migrationCount, err)
 	}
 
 	queue := jobs.Queue{Pool: pool}

@@ -32,6 +32,14 @@ func TestRunInstallsConfiguredLoggerBeforeListenFailure(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://peergit:local-development-only@127.0.0.1:5432/peergit?sslmode=disable")
 	t.Setenv("DATABASE_MAX_CONNS", "1")
 	t.Setenv("CURSOR_SIGNING_KEY", "test-only-production-cursor-key-0123456789")
+	t.Setenv("APP_ORIGIN", "https://example.edu")
+	t.Setenv("COOKIE_SECURE", "true")
+	t.Setenv("SESSION_HASH_KEY", "test-only-session-hash-key-0123456789")
+	t.Setenv("MFA_ENCRYPTION_KEY", "test-only-mfa-encryption-key-0123456789")
+	t.Setenv("GOOGLE_OIDC_ISSUER", "https://accounts.google.com")
+	t.Setenv("GOOGLE_OIDC_CLIENT_ID", "test-client-id")
+	t.Setenv("GOOGLE_OIDC_CLIENT_SECRET", "test-client-secret")
+	t.Setenv("GOOGLE_OIDC_REDIRECT_URL", "https://example.edu/api/v1/auth/callback")
 	previousLogger, previousStdout := slog.Default(), os.Stdout
 	reader, writer, err := os.Pipe()
 	if err != nil {

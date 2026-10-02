@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: PeerGit Platform API
   version: 0.1.0
-  description: Health and readiness endpoints available during Phase 1. Product routes are added with their owning phases.
+  description: Health endpoints plus the Phase 2 identity, campus-administration, and profile-media contract.
 servers:
   - url: https://peergit.localhost
 paths:
@@ -41,8 +41,300 @@ paths:
           content:
             text/plain:
               schema: { type: string }
+  /api/v1/auth/google:
+    get:
+      operationId: startGoogleSignIn
+      summary: Start a state- and PKCE-protected Google OIDC sign-in
+      parameters:
+        - in: query
+          name: invite
+          schema: { type: string, maxLength: 128 }
+          description: Optional single-use invitation token.
+      responses:
+        '302': { description: Redirect to the identity provider }
+        '429': { description: Sign-in rate limit reached }
+        '503': { description: OIDC is not configured or provider is unavailable }
+  /api/v1/auth/callback:
+    get:
+      operationId: finishGoogleSignIn
+      summary: Verify the OIDC response and establish an opaque server session
+      parameters:
+        - in: query
+          name: code
+          required: true
+          schema: { type: string }
+        - in: query
+          name: state
+          required: true
+          schema: { type: string }
+      responses:
+        '303': { description: Sign-in completed; session cookie set }
+        '401': { description: Invalid, expired, replayed, or unverified sign-in }
+        '403': { description: Email domain or invitation not allowed }
+  /api/v1/session:
+    get:
+      operationId: currentSession
+      summary: Read authentication and onboarding state; return a fresh CSRF token
+      responses:
+        '200': { description: Authenticated or anonymous session state }
+  /api/v1/me:
+    get:
+      operationId: currentProfile
+      summary: Read the current account profile, skills, roles, and consent state
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: Profile data }
+        '401': { description: Authentication required }
+  /api/v1/me/profile:
+    patch:
+      operationId: updateProfile
+      summary: Update profile fields and self-reported skills
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProfileUpdate' }
+      responses:
+        '200': { description: Profile updated }
+        '400': { description: Invalid profile fields }
+        '403': { description: CSRF or media-ownership check failed }
+  /api/v1/me/consent:
+    put:
+      operationId: updateConsent
+      summary: Grant or revoke versioned purpose-specific consent
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConsentUpdate' }
+      responses:
+        '200': { description: Consent updated }
+        '400': { description: Invalid or unsupported policy version }
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      summary: Revoke the current server-side session
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      responses:
+        '204': { description: Session revoked and cookie cleared }
+  /api/v1/auth/mfa/enroll:
+    post:
+      operationId: enrollMfa
+      summary: Begin or replace the current user's TOTP setup
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      responses:
+        '200': { description: One-time TOTP setup secret }
+        '403': { description: Existing MFA must be freshly verified before replacement }
+  /api/v1/auth/mfa/confirm:
+    post:
+      operationId: confirmMfa
+      summary: Confirm TOTP setup and issue one-time recovery codes
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MfaCode' }
+      responses:
+        '200': { description: MFA enabled; recovery codes shown once }
+        '401': { description: Code invalid }
+  /api/v1/auth/mfa/verify:
+    post:
+      operationId: verifyMfa
+      summary: Elevate the current session for ten minutes using TOTP or a recovery code
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MfaCode' }
+      responses:
+        '200': { description: MFA verified }
+        '401': { description: Code invalid }
+  /api/v1/organizations:
+    get:
+      operationId: listOrganizations
+      summary: List organizations for the authenticated campus
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: Tenant-scoped organizations }
+        '403': { description: Campus scope or policy acceptance required }
+  /api/v1/admin/invitations:
+    post:
+      operationId: createInvitation
+      summary: Create a single-use campus or scoped-external invitation
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvitationCreate' }
+      responses:
+        '201': { description: Invitation created; URL returned once to the administrator }
+        '403': { description: Campus administrator, consent, and recent MFA required }
+  /api/v1/admin/invitations/{id}/revoke:
+    post:
+      operationId: revokeInvitation
+      summary: Revoke an unused invitation in the current campus
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      responses:
+        '204': { description: Invitation revoked }
+        '404': { description: Invitation not found, used, or belongs to another campus }
+  /api/v1/admin/organizations:
+    post:
+      operationId: createOrganization
+      summary: Create a tenant-owned campus organization
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrganizationCreate' }
+      responses:
+        '201': { description: Organization created and audited }
+        '409': { description: Slug already exists in the campus }
+  /api/v1/admin/roles:
+    post:
+      operationId: grantCampusRole
+      summary: Grant a non-administrator campus role to an active campus user
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoleGrant' }
+      responses:
+        '200': { description: Role granted and audited }
+        '404': { description: Target account is outside the current campus }
+  /api/v1/admin/users:
+    get:
+      operationId: listCampusUsers
+      summary: Search a bounded page of current-campus users
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { in: query, name: q, schema: { type: string, maxLength: 80 } }
+        - { in: query, name: cursor, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: At most 50 tenant-scoped accounts and an opaque next ID }
+  /api/v1/admin/users/{id}/status:
+    post:
+      operationId: changeCampusUserStatus
+      summary: Suspend or reactivate a non-administrator campus account
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [suspended], properties: { suspended: { type: boolean } } }
+      responses:
+        '200': { description: Status changed, sessions revoked on suspension, and action audited }
+        '409': { description: Self-suspension or administrator suspension requires break-glass review }
+  /api/v1/media:
+    post:
+      operationId: uploadProfileImage
+      summary: Upload a bounded PNG/JPEG image that is decoded and re-encoded before storage
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+                visibility: { type: string, enum: [private, campus] }
+      responses:
+        '201': { description: Verified media metadata }
+        '413': { description: Upload exceeds 5 MiB }
+        '415': { description: Invalid or unsupported image }
+        '429': { description: Local upload capacity is full }
+  /api/v1/media/{id}:
+    get:
+      operationId: downloadProfileImage
+      summary: Download owner media or consented same-campus media after current authorization checks
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Verified raster image bytes }
+        '404': { description: Media is absent or not visible to this account }
 components:
+  parameters:
+    CsrfToken:
+      in: header
+      name: X-CSRF-Token
+      required: true
+      schema: { type: string }
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-peergit_session
   schemas:
+    ProfileUpdate:
+      type: object
+      required: [display_name]
+      properties:
+        display_name: { type: string, minLength: 1, maxLength: 120 }
+        headline: { type: string, maxLength: 160 }
+        bio: { type: string, maxLength: 2000 }
+        avatar_media_id: { type: string, format: uuid }
+        skills: { type: array, maxItems: 30, items: { type: string, minLength: 2, maxLength: 60 } }
+    ConsentUpdate:
+      type: object
+      required: [purpose, policy_version, granted]
+      properties:
+        purpose: { type: string, enum: [terms, privacy, profile_discovery, portfolio, recruiter_discovery, analytics] }
+        policy_version: { type: string, maxLength: 40 }
+        granted: { type: boolean }
+    MfaCode:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, minLength: 6, maxLength: 32 }
+    InvitationCreate:
+      type: object
+      required: [email, account_type]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        account_type: { type: string, enum: [campus, external] }
+        role: { type: string, enum: [student, faculty, alumni_mentor, moderator] }
+        external_access_kind: { type: string, enum: [mentor, recruiter, organization_guest] }
+        organization_id: { type: string, format: uuid }
+        expires_hours: { type: integer, minimum: 1, maximum: 168, default: 72 }
+    OrganizationCreate:
+      type: object
+      required: [kind, slug, name]
+      properties:
+        kind: { type: string, enum: [department, club, innovation_cell, placement_cell, event_body] }
+        slug: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', minLength: 2, maxLength: 80 }
+        name: { type: string, minLength: 2, maxLength: 160 }
+        description: { type: string, maxLength: 2000 }
+    RoleGrant:
+      type: object
+      required: [user_id, role]
+      properties:
+        user_id: { type: string, format: uuid }
+        role: { type: string, enum: [student, faculty, alumni_mentor, moderator] }
     SuccessEnvelope:
       type: object
       required: [data]

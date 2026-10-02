@@ -21,6 +21,15 @@ Keep entries brief. Combine tightly related work completed together; create sepa
 
 ## Entries
 
+### 2026-10-02T14:47Z — Implement Phase 2 identity, campus, and media foundation
+
+- **Phase/area:** Phase 2 / identity, campus authorization, and media.
+- **Summary:** Added Google OIDC with state/nonce/S256 PKCE and verified-email checks; opaque hashed sessions with CSRF/origin enforcement and immediate suspension/domain-revocation checks; campus invitations, organizations, profiles, skills, consent, MFA, audited administration, and private image uploads with raster re-encoding and hash-verified downloads. Added host-configured local/staging/production identity settings and responsive account/policy screens. Fixed live-test defects in invitation expiry binding and nullable MFA freshness; normalized client ports for rate limiting and pruned expired buckets.
+- **Files/components:** `internal/identity`, `internal/campus`, `internal/media`, `migrations/0004_identity_campus_media.sql`, `cmd/api`, `apps/web`, `api/openapi.yaml`, `ops/identity-and-media.md`, `tests/integration`, config and migration docs.
+- **Validation:** With Docker PostgreSQL 18 and local object storage running, `go test ./... -count=1` passed with database integration enabled, including blank-to-head/repeat migrations, session/consent/profile, tenant constraints, audited campus-role grant, unverified-MFA admin denial, private-media denial, and a local fake OIDC provider checking state, nonce, verified email, S256 PKCE, invited external acceptance/scoped access, session issue, and replay. `go vet ./...`, `staticcheck ./...`, `git diff --check`, and `docker compose -f deploy/compose/local.yml config --quiet` passed. Next.js typecheck/build and `npm --prefix tests/e2e test` passed at desktop and mobile sizes. Graphify code-only and clustering refreshed the map to 531 nodes/1,408 edges/26 communities; its SQL parser and Graphify MCP were unavailable, so migration relationships are not represented.
+- **Follow-up:** Google production credentials and legally approved terms/privacy versions remain release setup. Campus-admin promotion is still bootstrap/operator-only: automatic approval review rejected enabling a one-person campus-admin grant through the role endpoint because it could enable privilege escalation; use a safer dual-control workflow. Login rate limits normalize source ports, but a reverse-proxy deployment still needs a trusted-client-address policy to avoid treating all proxy traffic as one address. The local Compose stack remains running for development.
+- **References:** `plans/implementation-phases.md` Phase 2; `plans/plan-new.md` §§4.1, 8, 11–14.
+
 ### 2026-10-02T06:20Z — Complete local Phase 1 platform foundation
 
 - **Phase/area:** Phase 1 / local platform foundation.

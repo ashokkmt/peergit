@@ -48,6 +48,9 @@ func TestConfigValidation(t *testing.T) {
 	valid := Config{
 		AppEnv: "production", HTTPAddr: "127.0.0.1:8080", LogLevel: slog.LevelInfo,
 		DatabaseURL: "postgres://user:pass@localhost/peergit", CursorKey: "0123456789abcdef0123456789abcdef",
+		AppOrigin: "https://example.edu", CookieSecure: true,
+		SessionHashKey: "0123456789abcdef0123456789abcdef", MFAEncryptionKey: "abcdef0123456789abcdef0123456789",
+		GoogleIssuer: "https://accounts.google.com", GoogleClientID: "client-id", GoogleClientSecret: "client-secret", GoogleRedirectURL: "https://example.edu/api/v1/auth/callback",
 	}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
@@ -67,5 +70,20 @@ func TestConfigValidation(t *testing.T) {
 	valid.CursorKey = "local-development-only-cursor-key-change-before-deploy"
 	if err := valid.Validate(); err == nil {
 		t.Fatal("production must reject the example development signing key")
+	}
+	valid.CursorKey = "0123456789abcdef0123456789abcdef"
+	valid.GoogleRedirectURL = "https://attacker.example/api/v1/auth/callback"
+	if err := valid.Validate(); err == nil {
+		t.Fatal("OIDC callback on another origin was accepted")
+	}
+	dev := Config{AppEnv: "development", HTTPAddr: "127.0.0.1:8080", AppOrigin: "https://localhost", LogLevel: slog.LevelInfo}
+	dev.GoogleClientID = "partial-client"
+	if err := dev.Validate(); err == nil {
+		t.Fatal("partial Google OIDC configuration was accepted")
+	}
+	dev.GoogleClientID = ""
+	dev.ObjectEndpoint = "http://127.0.0.1:8333"
+	if err := dev.Validate(); err == nil {
+		t.Fatal("partial object storage configuration was accepted")
 	}
 }

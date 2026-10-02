@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { AccountPanel } from "./account";
 
 type ServiceState = "checking" | "ready" | "unavailable";
 
@@ -49,6 +50,8 @@ export default function Home() {
           {requestID && <span className="request-id">Request ID: {requestID}</span>}
         </div>
       </section>
+
+      <AccountPanel />
 
       <section className="content" id="projects" aria-labelledby="projects-title">
         <div className="section-heading">
