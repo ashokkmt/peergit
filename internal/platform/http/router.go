@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -17,6 +18,8 @@ import (
 type Router struct {
 	logger       *slog.Logger
 	errorManager *errormanager.Manager
+	requests     atomic.Uint64
+	errors       atomic.Uint64
 }
 
 func NewRouter(healthHandler *health.Handler, logger *slog.Logger, errorManager *errormanager.Manager) http.Handler {
@@ -33,6 +36,8 @@ func NewRouter(healthHandler *health.Handler, logger *slog.Logger, errorManager 
 	})
 
 	r.Get("/healthz", healthHandler.Healthz)
+	r.Get("/readyz", healthHandler.Readyz)
+	r.Get("/metrics", router.metrics)
 	return r
 }
 
@@ -59,6 +64,10 @@ func (router *Router) accessLog(next http.Handler) http.Handler {
 			if status == 0 {
 				status = http.StatusOK
 			}
+			router.requests.Add(1)
+			if status >= http.StatusInternalServerError {
+				router.errors.Add(1)
+			}
 			router.logger.InfoContext(r.Context(), "http request completed",
 				"request_id", w.Header().Get("X-Request-ID"),
 				"method", r.Method,
@@ -70,6 +79,12 @@ func (router *Router) accessLog(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(wrapped, r)
 	})
+}
+
+func (router *Router) metrics(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = fmt.Fprintf(w, "peergit_http_requests_total %d\npeergit_http_errors_total %d\n", router.requests.Load(), router.errors.Load())
 }
 
 func (router *Router) recoverPanics(next http.Handler) http.Handler {

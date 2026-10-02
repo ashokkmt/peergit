@@ -45,7 +45,10 @@ func TestLoadDefaultsAndHonorsLogLevel(t *testing.T) {
 }
 
 func TestConfigValidation(t *testing.T) {
-	valid := Config{AppEnv: "production", HTTPAddr: "127.0.0.1:8080", LogLevel: slog.LevelInfo}
+	valid := Config{
+		AppEnv: "production", HTTPAddr: "127.0.0.1:8080", LogLevel: slog.LevelInfo,
+		DatabaseURL: "postgres://user:pass@localhost/peergit", CursorKey: "0123456789abcdef0123456789abcdef",
+	}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
 	}
@@ -57,5 +60,12 @@ func TestConfigValidation(t *testing.T) {
 		if err := cfg.Validate(); err == nil {
 			t.Errorf("invalid config accepted: %#v", cfg)
 		}
+	}
+	if err := (Config{AppEnv: "staging", HTTPAddr: ":8080"}).Validate(); err == nil {
+		t.Fatal("staging must require production-shaped database and cursor configuration")
+	}
+	valid.CursorKey = "local-development-only-cursor-key-change-before-deploy"
+	if err := valid.Validate(); err == nil {
+		t.Fatal("production must reject the example development signing key")
 	}
 }

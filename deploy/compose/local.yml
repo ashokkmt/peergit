@@ -1,0 +1,58 @@
+name: peergit-local
+services:
+  postgres:
+    image: postgres:18@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
+    environment:
+      POSTGRES_USER: peergit
+      POSTGRES_PASSWORD: local-development-only
+      POSTGRES_DB: peergit
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["postgres-data:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U peergit -d peergit"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    mem_limit: 1g
+
+  objects:
+    image: chrislusf/seaweedfs@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882
+    command: ["mini", "-dir=/data"]
+    environment:
+      AWS_ACCESS_KEY_ID: local-object-access
+      AWS_SECRET_ACCESS_KEY: local-object-secret
+      S3_BUCKET: peergit-local
+    ports: ["127.0.0.1:8333:8333"]
+    volumes: ["object-data:/data"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9333/cluster/status"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    mem_limit: 2g
+
+  mailpit:
+    image: axllent/mailpit@sha256:6abc8e633df15eaf785cfcf38bae48e66f64beecdc03121e249d0f9ec15f0707
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+
+  caddy:
+    image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    ports:
+      - "127.0.0.1:80:80"
+      - "127.0.0.1:443:443"
+    volumes:
+      - ../caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  object-data:
+  caddy-data:
+  caddy-config:

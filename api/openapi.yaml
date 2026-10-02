@@ -1,0 +1,68 @@
+openapi: 3.1.0
+info:
+  title: PeerGit Platform API
+  version: 0.1.0
+  description: Health and readiness endpoints available during Phase 1. Product routes are added with their owning phases.
+servers:
+  - url: https://peergit.localhost
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      summary: Check whether the API process is responding
+      responses:
+        '200':
+          description: API process is healthy
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessEnvelope' }
+  /readyz:
+    get:
+      operationId: readinessCheck
+      summary: Check whether the API can reach required dependencies
+      responses:
+        '200':
+          description: API and database are ready
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SuccessEnvelope' }
+        '503':
+          description: A required dependency is unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+  /metrics:
+    get:
+      operationId: metrics
+      summary: Read minimal process metrics
+      responses:
+        '200':
+          description: Prometheus text exposition
+          content:
+            text/plain:
+              schema: { type: string }
+components:
+  schemas:
+    SuccessEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [status]
+          properties:
+            status: { type: string }
+        request_id: { type: string }
+        error: { type: 'null' }
+    ErrorEnvelope:
+      type: object
+      required: [error, request_id]
+      properties:
+        data: { type: 'null' }
+        request_id: { type: string }
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }

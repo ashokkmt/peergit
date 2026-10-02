@@ -67,3 +67,13 @@ func TestNoContentWritesNoBody(t *testing.T) {
 		t.Fatalf("unexpected no-content response: status=%d body=%q", w.Code, w.Body.String())
 	}
 }
+
+func TestVersionSetsStrongETagAndRejectsInvalidVersion(t *testing.T) {
+	w := httptest.NewRecorder()
+	if err := Version(w, 7); err != nil || w.Header().Get("ETag") != `"v7"` {
+		t.Fatalf("ETag=%q err=%v", w.Header().Get("ETag"), err)
+	}
+	if err := Version(w, 0); err == nil {
+		t.Fatal("non-positive version accepted")
+	}
+}

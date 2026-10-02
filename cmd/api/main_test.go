@@ -29,6 +29,9 @@ func TestRunInstallsConfiguredLoggerBeforeListenFailure(t *testing.T) {
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("LOG_LEVEL", "error")
 	t.Setenv("HTTP_ADDR", listener.Addr().String())
+	t.Setenv("DATABASE_URL", "postgres://peergit:local-development-only@127.0.0.1:5432/peergit?sslmode=disable")
+	t.Setenv("DATABASE_MAX_CONNS", "1")
+	t.Setenv("CURSOR_SIGNING_KEY", "test-only-production-cursor-key-0123456789")
 	previousLogger, previousStdout := slog.Default(), os.Stdout
 	reader, writer, err := os.Pipe()
 	if err != nil {

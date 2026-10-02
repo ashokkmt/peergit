@@ -21,7 +21,7 @@ func TestRouterAddsRequestIDAndLogsRequest(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logs, nil))
 	manager := errormanager.NewManager(logger)
-	router := NewRouter(health.NewHandler(logger, manager), logger, manager)
+	router := NewRouter(health.NewHandler(logger, manager, nil), logger, manager)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 
@@ -127,7 +127,7 @@ func TestStreamingPanicAbortsNetworkResponse(t *testing.T) {
 func TestRouterFallbacksUseErrorEnvelope(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	manager := errormanager.NewManager(logger)
-	router := NewRouter(health.NewHandler(logger, manager), logger, manager)
+	router := NewRouter(health.NewHandler(logger, manager, nil), logger, manager)
 	for _, tt := range []struct {
 		method, path, code string
 		status             int

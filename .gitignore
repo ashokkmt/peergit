@@ -7,6 +7,7 @@ plans/
 .env.verify
 .secrets/
 .proofs/
+.backups/
 /cmd/verify/
 /docs/verification/
 **/node_modules/

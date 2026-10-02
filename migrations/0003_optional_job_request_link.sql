@@ -1,0 +1,1 @@
+ALTER TABLE jobs ALTER COLUMN idempotency_id DROP NOT NULL;

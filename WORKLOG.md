@@ -21,6 +21,15 @@ Keep entries brief. Combine tightly related work completed together; create sepa
 
 ## Entries
 
+### 2026-10-02T06:20Z — Complete local Phase 1 platform foundation
+
+- **Phase/area:** Phase 1 / local platform foundation.
+- **Summary:** Added the explicit migration runner, PostgreSQL pool/readiness, HTTP idempotency response replay and expiry cleanup, independent job deduplication, fenced job/outbox leases and repair commands, append-only audit, cursors/version helpers, metrics, and the host-run worker/API/web stack. Added the responsive accessible app shell, OpenAPI contract, local operations/backup/alerts guides, and CI/browser smoke workflow. Kept the existing logger, error manager, and request/response helpers.
+- **Files/components:** `cmd/api`, `cmd/worker`, `cmd/migrate`, `cmd/jobctl`, `internal/platform`, `internal/health`, `migrations/0001_platform.sql`–`0003_optional_job_request_link.sql`, `apps/web`, `api/openapi.yaml`, `deploy/compose/local.yml`, `deploy/caddy`, `ops`, `.github/workflows/ci.yml`, `tests/integration`, `tests/e2e`, `.env.example`, `.gitignore`, `plans/implementation-phases.md` (local ignored roadmap only).
+- **Validation:** `docker compose -f deploy/compose/local.yml up -d --wait` and config checks passed; PostgreSQL 18, SeaweedFS, Mailpit and Caddy were healthy. The current migrator applied all three migrations to a fresh schema and repeated successfully; the existing local database upgraded additively. `go test ./... -count=1`, `go vet ./...`, and `staticcheck ./...` passed with PostgreSQL integration enabled, including an abruptly exited child worker after a durable side effect, lease reclaim/stale fencing, HTTP replay/expiry, concurrent claims, outbox retry/repair, and append-only audit. Next.js typecheck/build passed, `npm audit` reported zero vulnerabilities, and Playwright passed desktop/mobile keyboard/search/request-ID/unavailable-state checks. Live API/Caddy readiness returned 200 with request IDs; Caddy and backup-script syntax, OpenAPI/CI YAML parsing, and `git diff --check` passed. Graphify code-only refresh and clustering completed (390 nodes/914 edges/19 communities); its SQL parser is unavailable, so it omitted the three migration files from the graph. Graphify MCP is not exposed in this environment.
+- **Follow-up:** Hosted CI has not run yet. Domain workflows remain in their planned Phases 2–8; production hosting/provider qualification and timed independent backup/restore remain later gates. The two local migration smoke schemas are preserved; no data volumes were removed.
+- **References:** `plans/implementation-phases.md` Phase 1; `plans/plan-new.md` repository layout and local environment contract.
+
 ### 2026-10-02T04:54Z — Complete local Phase 0 and GitHub App revocation proofs
 
 - **Phase/area:** Phase 0 risk proofs and local storage decision.

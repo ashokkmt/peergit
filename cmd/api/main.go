@@ -12,8 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"peergit/internal/health"
 	"peergit/internal/platform/config"
+	"peergit/internal/platform/database"
 	"peergit/internal/platform/errormanager"
 	httpserver "peergit/internal/platform/http"
 	"peergit/internal/platform/logging"
@@ -34,7 +37,17 @@ func run() error {
 	logger := logging.New(cfg.AppEnv, cfg.LogLevel)
 	slog.SetDefault(logger)
 	errorManager := errormanager.NewManager(logger)
-	healthHandler := health.NewHandler(logger, errorManager)
+	var pool *pgxpool.Pool
+	if cfg.DatabaseURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		pool, err = database.Open(ctx, cfg.DatabaseURL, cfg.DatabaseMax)
+		cancel()
+		if err != nil {
+			return err
+		}
+		defer pool.Close()
+	}
+	healthHandler := health.NewHandler(logger, errorManager, pool)
 	router := httpserver.NewRouter(healthHandler, logger, errorManager)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)

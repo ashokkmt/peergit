@@ -1,0 +1,14 @@
+{
+	admin off
+}
+
+http://localhost {
+	redir https://{host}{uri} permanent
+}
+
+https://localhost {
+	tls internal
+	@api path /api/* /healthz /readyz /metrics
+	reverse_proxy @api host.docker.internal:8080
+	reverse_proxy host.docker.internal:3000
+}

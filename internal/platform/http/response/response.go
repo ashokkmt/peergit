@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 )
 
 type Envelope struct {
@@ -33,6 +34,14 @@ func NoContent(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func Version(w http.ResponseWriter, version int64) error {
+	if version < 1 {
+		return errors.New("version must be positive")
+	}
+	w.Header().Set("ETag", `"v`+strconv.FormatInt(version, 10)+`"`)
+	return nil
+}
+
 func WriteError(w http.ResponseWriter, status int, code, message string) error {
 	return write(w, status, Envelope{
 		Error:     &ErrorBody{Code: code, Message: message},
@@ -45,7 +54,7 @@ func requestID(w http.ResponseWriter) string {
 }
 
 func write(w http.ResponseWriter, status int, envelope Envelope) error {
-	if status < 100 || status > 999 {
+	if status < 100 || status > 599 {
 		return errors.New("invalid HTTP status code")
 	}
 	body, err := json.Marshal(envelope)
