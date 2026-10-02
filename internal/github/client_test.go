@@ -78,6 +78,24 @@ func TestRateLimitIsNotRevocationAndErrorsAreSafe(t *testing.T) {
 	}
 }
 
+func TestInstallationReadsScopeWithAppJWT(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/app/installations/42" || r.Header.Get("Authorization") != "Bearer app-jwt" {
+			t.Fatal("installation request did not use the App JWT and exact installation path")
+		}
+		_, _ = io.WriteString(w, `{"repository_selection":"selected","permissions":{"contents":"read","metadata":"read"}}`)
+	}))
+	defer server.Close()
+	c := &Client{HTTP: server.Client(), API: server.URL}
+	installation, err := c.Installation(context.Background(), "42", "app-jwt")
+	if err != nil || installation.RepositorySelection != "selected" || installation.Permissions["contents"] != "read" {
+		t.Fatalf("installation = %#v, %v", installation, err)
+	}
+	if _, err = c.Installation(context.Background(), "not-numeric", "app-jwt"); err == nil {
+		t.Fatal("non-numeric installation ID accepted")
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

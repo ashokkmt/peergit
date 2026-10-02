@@ -30,6 +30,10 @@ type Repository struct {
 	ID      int64 `json:"id"`
 	Private bool  `json:"private"`
 }
+type Installation struct {
+	RepositorySelection string            `json:"repository_selection"`
+	Permissions         map[string]string `json:"permissions"`
+}
 type HTTPError struct {
 	Status      int
 	RateLimited bool
@@ -138,6 +142,18 @@ func (c *Client) Token(ctx context.Context, installation, jwt string) (string, e
 		return "", errors.New("installation token missing")
 	}
 	return out.Token, nil
+}
+func (c *Client) Installation(ctx context.Context, installation, jwt string) (Installation, error) {
+	if !regexp.MustCompile(`^[1-9][0-9]*$`).MatchString(installation) {
+		return Installation{}, errors.New("installation ID must be numeric")
+	}
+	resp, err := c.request(ctx, http.MethodGet, "/app/installations/"+installation, jwt)
+	if err != nil {
+		return Installation{}, err
+	}
+	var out Installation
+	err = decode(resp, &out)
+	return out, err
 }
 func repoPath(repo string) (string, error) {
 	if !regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`).MatchString(repo) {
