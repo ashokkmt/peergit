@@ -92,6 +92,9 @@ func (h *Handler) createRole(w http.ResponseWriter, r *http.Request) {
 		h.err.Handle(w, r, err)
 		return
 	}
+	if in.PrerequisiteSkills == nil {
+		in.PrerequisiteSkills = []string{}
+	}
 	in.Title = strings.TrimSpace(in.Title)
 	in.Description = strings.TrimSpace(in.Description)
 	if in.Difficulty == "" {

@@ -21,6 +21,15 @@ Keep entries brief. Combine tightly related work completed together; create sepa
 
 ## Entries
 
+### 2026-10-03T13:44Z — Fix role creation without prerequisite skills
+
+- **Phase/area:** Phase 3 / recruitment.
+- **Summary:** The CI migration command succeeded; the following integration test failed because an omitted `prerequisite_skills` request decoded to a nil slice and was explicitly inserted as SQL NULL into a NOT NULL array column. Normalize omission to an empty slice and assert that role creation stores an empty array.
+- **Files/components:** `internal/recruitment/handler.go`, `tests/integration/phase3_test.go`, `plans/peergit-test.md`.
+- **Validation:** Local PostgreSQL started healthy. The focused Phase 3 test passed end to end; all five verbose integration tests passed with no skips; `go test ./... -count=1` with `TEST_DATABASE_URL`, `go vet ./...`, and `staticcheck ./...` passed. `go run ./cmd/migrate` passed twice against the local database. Formatting and diff checks passed.
+- **Follow-up:** Rerun CI on this revision to confirm the hosted environment matches the local PostgreSQL result.
+- **References:** Attached CI log from 2026-10-03T13:37Z.
+
 ### 2026-10-03T13:29Z — Repair Phase 3 CSRF integration fixture and document pre-commit checks
 
 - **Phase/area:** Phase 3 / integration testing and contributor workflow.

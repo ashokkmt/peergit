@@ -36,7 +36,7 @@ Confirm the relevant named tests say `PASS` and none say `SKIP`. The integration
 go test ./tests/integration -run '^TestPhase3ProjectRecruitmentAndOwnershipFlows$' -count=1 -v
 ```
 
-After the focused test passes, run the full integration package and baseline Go checks. Remove the variable when finished in that shell:
+The Phase 3 test includes role creation with omitted prerequisite skills, application decisions, invitation acceptance, and concurrent capacity checks. After the focused test passes, run the full integration package and baseline Go checks. Remove the variable when finished in that shell:
 
 ```powershell
 Remove-Item Env:TEST_DATABASE_URL
@@ -53,13 +53,12 @@ docker compose -f deploy/compose/local.yml up -d --wait postgres
 $env:DATABASE_URL = 'postgres://peergit:local-development-only@127.0.0.1:5432/peergit?sslmode=disable'
 $env:TEST_DATABASE_URL = $env:DATABASE_URL
 go run ./cmd/migrate
-go run ./cmd/migrate
 go test ./tests/integration -run '^TestPlatformMigrationsAndDurableWork$' -count=1 -v
 Remove-Item Env:DATABASE_URL
 Remove-Item Env:TEST_DATABASE_URL
 ```
 
-The second migration run proves repeat behavior against the local database. This section is conditional because most code changes add no SQL; it is not unsafe to repeat migrations. Do not reset volumes or run migrations against production as a pre-commit check.
+The isolated integration test proves blank-to-head and repeat behavior. This section is conditional because most code changes add no SQL; it is not unsafe to repeat migrations. Do not reset volumes or run migrations against production as a pre-commit check.
 
 ## Frontend — when `apps/web` or browser behavior changes
 

@@ -135,6 +135,10 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 	}
 	hiddenProjectID := decodeID(call("lead", http.MethodPost, "/api/v1/projects", `{"slug":"phase3-private","title":"Private notes","summary":"A private workspace","project_type":"side_project","visibility":"private","lifecycle":"active"}`, http.StatusCreated), "id")
 	hiddenRoleID := decodeID(call("lead", http.MethodPost, "/api/v1/projects/"+hiddenProjectID+"/roles", `{"title":"Private role","description":"Do not disclose this role","openings":1}`, http.StatusCreated), "id")
+	var prerequisiteCount int
+	if err := pool.QueryRow(ctx, `SELECT cardinality(prerequisite_skills) FROM project_roles WHERE id=$1`, hiddenRoleID).Scan(&prerequisiteCount); err != nil || prerequisiteCount != 0 {
+		t.Fatalf("role without prerequisite_skills stored %d skills: %v", prerequisiteCount, err)
+	}
 	visibleRoles := call("applicant", http.MethodGet, "/api/v1/projects/"+hiddenProjectID+"/roles", "", http.StatusOK)
 	var roleEnvelope struct {
 		Data struct {
