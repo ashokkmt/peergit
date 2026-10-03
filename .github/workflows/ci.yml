@@ -20,39 +20,5 @@ jobs:
           cache-dependency-path: |
             apps/web/package-lock.json
             tests/e2e/package-lock.json
-      - name: Check formatting
-        shell: bash
-        run: test -z "$(gofmt -l $(find . -name '*.go' -not -path './.git/*' -not -path '*/vendor/*'))"
-      - name: Install staticcheck
-        run: go install honnef.co/go/tools/cmd/staticcheck@2026.2.1
-      - name: Start local services
-        run: docker compose -f deploy/compose/local.yml up -d --wait
-      - name: Migrate and test
-        env:
-          DATABASE_URL: postgres://peergit:local-development-only@127.0.0.1:5432/peergit?sslmode=disable
-          TEST_DATABASE_URL: postgres://peergit:local-development-only@127.0.0.1:5432/peergit?sslmode=disable
-        run: |
-          go run ./cmd/migrate
-          go test ./...
-          go vet ./...
-          staticcheck ./...
-      - name: Build web
-        run: npm --prefix apps/web ci && npm --prefix apps/web run typecheck && npm --prefix apps/web run build
-      - name: Install browser test dependencies
-        run: |
-          npm --prefix tests/e2e ci
-          cd tests/e2e
-          npx playwright install --with-deps chromium
-      - name: Test responsive web shell
-        run: |
-          npm --prefix apps/web run start > /tmp/peergit-web.log 2>&1 &
-          echo $! > /tmp/peergit-web.pid
-          for attempt in $(seq 1 30); do curl --fail http://127.0.0.1:3000/ >/dev/null && break; sleep 1; done
-          npm --prefix tests/e2e test
-      - name: Validate Compose
-        run: docker compose -f deploy/compose/local.yml config --quiet
-      - name: Stop local services
-        if: always()
-        run: |
-          if [ -f /tmp/peergit-web.pid ]; then kill "$(cat /tmp/peergit-web.pid)" || true; fi
-          docker compose -f deploy/compose/local.yml down
+      - name: Run the shared CI and pre-commit test script
+        run: node scripts/test.mjs

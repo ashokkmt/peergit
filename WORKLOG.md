@@ -21,6 +21,15 @@ Keep entries brief. Combine tightly related work completed together; create sepa
 
 ## Entries
 
+### 2026-10-03T14:16Z — Add shared cross-platform CI test runner
+
+- **Phase/area:** CI and pre-commit verification.
+- **Summary:** Added `scripts/test.mjs` as the common Windows/macOS/Linux test entry point and changed GitHub Actions to call it. CI always makes clean npm/browser installs; local runs reuse node_modules when package files match and reuse the installed Playwright browser. Fixed the browser test to use explicit guest-session mocks and scope readiness checks to the readiness status element; documented the script and its focused checks.
+- **Files/components:** `scripts/test.mjs`, `.github/workflows/ci.yml`, `tests/e2e/walkthrough.cjs`, `plans/peergit-test.md`.
+- **Validation:** Two final `node scripts/test.mjs` runs passed on Windows through Go formatting, migrations, all Go tests with PostgreSQL and caching disabled, vet, staticcheck, web typecheck/build, Playwright desktop/mobile and unavailable-service checks, Compose validation, and `git diff --check`. The second run confirmed local npm packages and Chromium were reused. Node syntax checks passed. Graphify refreshed to 634 nodes and 1,788 edges; cluster report regenerated.
+- **Follow-up:** The GitHub workflow now runs this same script after installing Go and Node. macOS execution has not been exercised locally.
+- **References:** CI browser failure log provided 2026-10-03.
+
 ### 2026-10-03T13:44Z — Fix role creation without prerequisite skills
 
 - **Phase/area:** Phase 3 / recruitment.

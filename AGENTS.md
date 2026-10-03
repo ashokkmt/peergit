@@ -15,6 +15,8 @@ These instructions apply to the entire repository. Follow the current repository
 
 ## Test rules
 
+- Keep `plans/peergit-test.md` as the authoritative list of test commands and their purpose. Whenever a change adds or changes tests, test setup, or test commands, update this guide in the same change. If the shared cross-platform test runner or CI workflow needs a new command or setup step to run those tests, update it too so local and CI coverage stay aligned. Explain tests that are intentionally optional and why.
+
 - Before every commit or handoff, follow the required checks and applicable conditional checks in `plans/peergit-test.md`. When adding or changing tests, test prerequisites, or test commands, update that guide in the same change. Never report a database test as passed if it skipped for lack of `TEST_DATABASE_URL`.
 - If an agent writes code that needs test coverage, the agent must add or update appropriate test files in the same change.
 - Run the relevant tests after every meaningful code change. Start with the narrowest affected test, then run the broader applicable suite before handoff.
