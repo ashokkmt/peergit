@@ -32,11 +32,6 @@ CREATE TABLE project_members (
 );
 CREATE INDEX project_members_user_idx ON project_members(college_id, user_id, project_id);
 
-CREATE TABLE skills (
-    id uuid PRIMARY KEY DEFAULT uuidv7(),
-    slug text NOT NULL UNIQUE CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
-    name text NOT NULL UNIQUE CHECK (length(btrim(name)) BETWEEN 1 AND 80)
-);
 CREATE TABLE project_skills (
     college_id uuid NOT NULL,
     project_id uuid NOT NULL,

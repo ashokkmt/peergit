@@ -124,7 +124,18 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 	if len(roleEnvelope.Data.Items) != 0 {
 		t.Fatalf("private project exposed roles to a non-member: role=%s", hiddenRoleID)
 	}
+	var existingSkillID string
+	if err := pool.QueryRow(ctx, `INSERT INTO skills(slug,name) VALUES('go','Go') RETURNING id::text`).Scan(&existingSkillID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO user_skills(user_id,skill_id) VALUES($1,$2)`, users["lead"], existingSkillID); err != nil {
+		t.Fatal(err)
+	}
 	projectID := decodeID(call("lead", http.MethodPost, "/api/v1/projects", `{"slug":"phase3-robots","title":"Robotics team","summary":"Build helpful robots","project_type":"side_project","visibility":"campus","lifecycle":"active","skills":["Go","CAD"]}`, http.StatusCreated), "id")
+	var projectSkillID string
+	if err := pool.QueryRow(ctx, `SELECT ps.skill_id::text FROM project_skills ps JOIN skills s ON s.id=ps.skill_id WHERE ps.project_id=$1 AND s.slug='go'`, projectID).Scan(&projectSkillID); err != nil || projectSkillID != existingSkillID {
+		t.Fatalf("project skill=%q err=%v, want existing user skill %q", projectSkillID, err, existingSkillID)
+	}
 	roleID := decodeID(call("lead", http.MethodPost, "/api/v1/projects/"+projectID+"/roles", `{"title":"Builder","description":"Build a robot module","openings":2,"good_first_task":true,"difficulty":"beginner"}`, http.StatusCreated), "id")
 	call("applicant", http.MethodGet, "/api/v1/projects/"+projectID+"/applications", "", http.StatusForbidden)
 	call("applicant", http.MethodGet, "/api/v1/projects/"+projectID+"/people?q=cam", "", http.StatusForbidden)

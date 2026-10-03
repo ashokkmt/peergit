@@ -67,7 +67,7 @@ docker compose -f deploy/compose/local.yml exec -T objects wget -q -O - http://1
 go run ./cmd/migrate
 ```
 
-The migrator applies all SQL files through `0005_projects_recruitment.sql` and is safe to rerun. The API does not migrate on startup. If the command cannot connect, check `docker compose -f deploy/compose/local.yml ps` and the `DATABASE_URL` in `.env`.
+The migrator applies all SQL files through `0005_projects_recruitment.sql` and is safe to rerun. The API does not migrate on startup. If the command cannot connect, check `docker compose -f deploy/compose/local.yml ps` and the `DATABASE_URL` in `.env`. If a migration fails, its SQL transaction rolls back; fix or update the migration source and rerun the command. Do not erase the database volume to recover from a failed migration.
 
 ## 5. Add one local campus for browser testing
 

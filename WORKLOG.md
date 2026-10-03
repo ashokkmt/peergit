@@ -21,6 +21,15 @@ Keep entries brief. Combine tightly related work completed together; create sepa
 
 ## Entries
 
+### 2026-10-03T13:17Z — Repair Phase 3 migration collision in CI
+
+- **Phase/area:** Phase 3 / PostgreSQL migration and shared skills.
+- **Summary:** Removed the duplicate `CREATE TABLE skills` from migration 0005 so project skills reference the table created in 0004. Added an integration assertion that a project reuses a skill already assigned to a user, and clarified failed-migration retry instructions. The failed 0005 transaction leaves no migration history row, so the corrected migration can be retried without clearing local data.
+- **Files/components:** `migrations/0005_projects_recruitment.sql`, `migrations/README.md`, `tests/integration/phase3_test.go`, `plans/peergit-run.md`.
+- **Validation:** `go test ./... -count=1`, `go vet ./...`, `staticcheck ./...`, Compose configuration, `git diff --check`, and a scan of migration table/index declarations passed. The focused Phase 3 test compiled but skipped because `TEST_DATABASE_URL` is unset; `docker info` cannot reach the Docker Desktop Linux engine here, so the corrected SQL has not yet executed against PostgreSQL in this environment.
+- **Follow-up:** Rerun `go run ./cmd/migrate` and the focused PostgreSQL integration tests on the local stack, then rerun CI. Do not reset the database volume for this transactionally rolled-back migration.
+- **References:** Reported CI failure at `0005_projects_recruitment.sql`; `plans/implementation-phases.md` Phase 3.
+
 ### 2026-10-03T13:06Z — Document local Phase 3 startup and services
 
 - **Phase/area:** Phase 3 / local development handoff.
