@@ -21,6 +21,15 @@ Keep entries brief. Combine tightly related work completed together; create sepa
 
 ## Entries
 
+### 2026-10-03T13:29Z — Repair Phase 3 CSRF integration fixture and document pre-commit checks
+
+- **Phase/area:** Phase 3 / integration testing and contributor workflow.
+- **Summary:** The Phase 3 test now obtains each actor's real CSRF token from the session endpoint instead of sending a short placeholder rejected by the API. Added a canonical PowerShell pre-commit test guide and required agents to follow and update it; clarified that repeated unchanged migrations are safe and that database/browser checks are conditional.
+- **Files/components:** `tests/integration/phase3_test.go`, `plans/peergit-test.md`, `plans/peergit-run.md`, `AGENTS.md`, `.gitignore`.
+- **Validation:** Focused Phase 3 test compiled but skipped without `TEST_DATABASE_URL`. `go test ./... -count=1`, `go vet ./...`, `staticcheck ./...`, `gofmt` check, Compose config, `git diff --check`, and parsing all nine PowerShell examples passed. `docker info` could not reach the Docker Desktop Linux engine, so the PostgreSQL-backed Phase 3 flow remains unverified locally.
+- **Follow-up:** Run the focused Phase 3 test and full integration suite with `TEST_DATABASE_URL` against the local Compose PostgreSQL service, then rerun CI. A skipped integration test is not a passing database check.
+- **References:** Reported CI `csrf_rejected` failure; `plans/peergit-test.md`.
+
 ### 2026-10-03T13:17Z — Repair Phase 3 migration collision in CI
 
 - **Phase/area:** Phase 3 / PostgreSQL migration and shared skills.

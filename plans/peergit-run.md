@@ -149,6 +149,8 @@ The current screen uses sections rather than separate tabs. It shows API conflic
 
 ## 8. Run the PostgreSQL integration checks
 
+For the full pre-commit checklist and conditional checks, see [the test guide](peergit-test.md).
+
 The Phase 3 integration test creates a temporary schema in the local PostgreSQL database and drops it afterward. Run it only against this local development database:
 
 ```powershell

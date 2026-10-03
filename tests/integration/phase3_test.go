@@ -45,6 +45,7 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 	key := []byte("phase3 integration session signing key with entropy")
 	users := map[string]string{}
 	tokens := map[string]string{}
+	csrfTokens := map[string]string{}
 	for _, name := range []string{"lead", "applicant", "applicant2", "invitee", "race"} {
 		email := name + "@phase3.test"
 		var id string
@@ -72,6 +73,28 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 	mediaHandler := media.NewHandler(pool, storage.New("http://127.0.0.1:1", "test", "us-east-1", "key", "secret"), auth, errs)
 	campusHandler := campus.NewHandler(pool, auth, "http://peergit.test", errs)
 	router := httpserver.NewRouter(health.NewHandler(logger, errs, pool), logger, errs, auth.Register, campusHandler.Register, mediaHandler.Register, projectHandler.Register, recruitmentHandler.Register)
+	loadCSRF := func(actor string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "http://peergit.test/api/v1/session", nil)
+		req.AddCookie(&http.Cookie{Name: "peergit_session", Value: tokens[actor]})
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("session for %s status=%d body=%s", actor, res.Code, res.Body.String())
+		}
+		var envelope struct {
+			Data struct {
+				CSRFToken string `json:"csrf_token"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(res.Body.Bytes(), &envelope); err != nil || len(envelope.Data.CSRFToken) < 32 {
+			t.Fatalf("session for %s did not return a valid CSRF token: %v", actor, err)
+		}
+		csrfTokens[actor] = envelope.Data.CSRFToken
+	}
+	for actor := range tokens {
+		loadCSRF(actor)
+	}
 	call := func(actor, method, path, body string, want int) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(method, "http://peergit.test"+path, bytes.NewBufferString(body))
@@ -79,7 +102,7 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 		if method != "GET" {
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Origin", "http://peergit.test")
-			req.Header.Set("X-CSRF-Token", "phase3-csrf-"+actor)
+			req.Header.Set("X-CSRF-Token", csrfTokens[actor])
 		}
 		res := httptest.NewRecorder()
 		router.ServeHTTP(res, req)
@@ -160,7 +183,7 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "http://peergit.test/api/v1/projects/"+projectID+"/applications/"+app+"/decision", bytes.NewBufferString(`{"decision":"accepted","version":1}`))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Origin", "http://peergit.test")
-			req.Header.Set("X-CSRF-Token", "phase3-csrf-lead")
+			req.Header.Set("X-CSRF-Token", csrfTokens["lead"])
 			req.AddCookie(&http.Cookie{Name: "peergit_session", Value: tokens["lead"]})
 			res := httptest.NewRecorder()
 			router.ServeHTTP(res, req)
@@ -229,5 +252,6 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO sessions(user_id,college_id,token_hash,csrf_hash,expires_at) VALUES($1,$2,$3,$4,now()+interval '1 hour')`, otherUser, otherCollege, sessionHash(key, otherToken), sessionHash(key, "phase3-csrf-other")); err != nil {
 		t.Fatal(err)
 	}
+	loadCSRF("other")
 	call("other", http.MethodGet, "/api/v1/projects/"+projectID, "", http.StatusNotFound)
 }

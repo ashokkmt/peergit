@@ -15,6 +15,7 @@ These instructions apply to the entire repository. Follow the current repository
 
 ## Test rules
 
+- Before every commit or handoff, follow the required checks and applicable conditional checks in `plans/peergit-test.md`. When adding or changing tests, test prerequisites, or test commands, update that guide in the same change. Never report a database test as passed if it skipped for lack of `TEST_DATABASE_URL`.
 - If an agent writes code that needs test coverage, the agent must add or update appropriate test files in the same change.
 - Run the relevant tests after every meaningful code change. Start with the narrowest affected test, then run the broader applicable suite before handoff.
 - For Go changes, run formatting and the configured lint/test checks. When available, the baseline is `gofmt`, `go vet ./...`, `staticcheck ./...`, and `go test ./...`.

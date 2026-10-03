@@ -5,6 +5,7 @@ plans/
 plans/*
 !plans/implementation-phases.md
 !plans/peergit-run.md
+!plans/peergit-test.md
 !plans/local-services.md
 
 
