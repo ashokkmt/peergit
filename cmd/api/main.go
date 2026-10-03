@@ -24,6 +24,8 @@ import (
 	httpserver "peergit/internal/platform/http"
 	"peergit/internal/platform/logging"
 	"peergit/internal/platform/storage"
+	"peergit/internal/project"
+	"peergit/internal/recruitment"
 )
 
 func main() {
@@ -63,7 +65,9 @@ func run() error {
 		objectStore = storage.New(cfg.ObjectEndpoint, cfg.ObjectBucket, cfg.ObjectRegion, cfg.ObjectAccessKey, cfg.ObjectSecretKey)
 	}
 	mediaHandler := media.NewHandler(pool, objectStore, identityHandler, errorManager)
-	router := httpserver.NewRouter(healthHandler, logger, errorManager, identityHandler.Register, campusHandler.Register, mediaHandler.Register)
+	projectHandler := project.NewHandler(pool, identityHandler, logger, errorManager)
+	recruitmentHandler := recruitment.NewHandler(pool, identityHandler, logger, errorManager)
+	router := httpserver.NewRouter(healthHandler, logger, errorManager, identityHandler.Register, campusHandler.Register, mediaHandler.Register, projectHandler.Register, recruitmentHandler.Register)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {

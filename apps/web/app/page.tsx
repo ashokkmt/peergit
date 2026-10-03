@@ -1,15 +1,14 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { AccountPanel } from "./account";
+import { ProjectsPanel } from "./projects";
 
 type ServiceState = "checking" | "ready" | "unavailable";
 
 export default function Home() {
   const [service, setService] = useState<ServiceState>("checking");
   const [requestID, setRequestID] = useState("");
-  const [query, setQuery] = useState("");
-  const [submittedQuery, setSubmittedQuery] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -22,11 +21,6 @@ export default function Home() {
       .catch(() => active && setService("unavailable"));
     return () => { active = false; };
   }, []);
-
-  function search(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSubmittedQuery(query.trim());
-  }
 
   return (
     <main>
@@ -53,21 +47,7 @@ export default function Home() {
 
       <AccountPanel />
 
-      <section className="content" id="projects" aria-labelledby="projects-title">
-        <div className="section-heading">
-          <div><p className="eyebrow">Find your next step</p><h2 id="projects-title">Explore projects</h2></div>
-          <span className="result-count">0 projects</span>
-        </div>
-        <form className="search" onSubmit={search} role="search">
-          <label htmlFor="project-search">Search projects</label>
-          <div className="search-row"><input id="project-search" name="q" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Try design, robotics, or research" /><button type="submit">Search</button></div>
-        </form>
-        <div className="empty-state" aria-live="polite">
-          <span className="empty-icon" aria-hidden="true">✳</span>
-          <h3>{submittedQuery ? `No projects found for “${submittedQuery}”` : "Your next idea starts here"}</h3>
-          <p>{submittedQuery ? "Try a different search. Projects will appear here when they are available." : "Project listings are not connected yet. This preview shows where campus opportunities will live."}</p>
-        </div>
-      </section>
+      <ProjectsPanel />
 
       <section className="how" id="how-it-works" aria-labelledby="how-title">
         <p className="eyebrow">A shared starting point</p><h2 id="how-title">Make your work count.</h2>

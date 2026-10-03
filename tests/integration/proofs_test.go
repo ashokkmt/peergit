@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/url"
 	"os"
@@ -38,9 +39,13 @@ func TestPlatformMigrationsAndDurableWork(t *testing.T) {
 	if err := migrations.Apply(ctx, pool, migrations.Files); err != nil {
 		t.Fatalf("repeat migrations: %v", err)
 	}
+	migrationFiles, err := fs.Glob(migrations.Files, "*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var migrationCount int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&migrationCount); err != nil || migrationCount != 4 {
-		t.Fatalf("migration history count=%d err=%v, want 4", migrationCount, err)
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&migrationCount); err != nil || migrationCount != len(migrationFiles) {
+		t.Fatalf("migration history count=%d err=%v, want %d", migrationCount, err, len(migrationFiles))
 	}
 
 	queue := jobs.Queue{Pool: pool}

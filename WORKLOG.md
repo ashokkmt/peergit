@@ -21,6 +21,24 @@ Keep entries brief. Combine tightly related work completed together; create sepa
 
 ## Entries
 
+### 2026-10-03T13:06Z — Document local Phase 3 startup and services
+
+- **Phase/area:** Phase 3 / local development handoff.
+- **Summary:** Checked the four implemented Phase 3 roadmap items while leaving its live completion gate open. Added Windows PowerShell instructions for the host API/web/worker, individually started Docker services, local Google/campus setup, browser walkthrough, integration checks, and shutdown. Documented each container's current purpose and production counterpart; clarified that Phase 3 invitation email is not yet sent. Updated migration history coverage to derive its expected count from the embedded SQL files.
+- **Files/components:** `plans/implementation-phases.md`, `plans/peergit-run.md`, `plans/local-services.md`, `.gitignore`, `.env.example`, `ops/local-development.md`, `tests/integration/proofs_test.go`.
+- **Validation:** `go test ./... -count=1`, `go vet ./...`, `staticcheck ./...`, `docker compose -f deploy/compose/local.yml config --quiet`, and `git diff --check` passed. All 15 PowerShell examples parsed and local guide links resolved. Both focused PostgreSQL tests compiled but reported `SKIP` because `TEST_DATABASE_URL` is unset; `docker info` could not connect to the Docker Desktop Linux engine, so migrations, concurrency, and interactive browser journeys were not run live. Graphify code-only refresh and clustering completed (616 nodes, 1,761 edges, 34 communities); SQL extraction and Graphify MCP were unavailable.
+- **Follow-up:** Start Docker Desktop, follow `plans/peergit-run.md`, run the two focused PostgreSQL tests and the Phase 3 browser walkthrough, then sign off the completion gate only if they pass. Production email, storage, hosting, and recovery remain later gates.
+- **References:** `plans/implementation-phases.md` Phase 3; `plans/plan-new.md` §§4.2, 8, 13.
+
+### 2026-10-03T12:44Z — Implement Phase 3 projects and recruitment
+
+- **Phase/area:** Phase 3 / projects, teams, and recruitment.
+- **Summary:** Added the tenant-safe projects/team/recruitment schema and usable project discovery, lifecycle, membership, invitation, role, and application flows. Split role and application APIs into the planned `internal/recruitment` module; locked project mutations against concurrent manager revocation, protected private-project roles, and added optimistic versions, audit/outbox writes, and capacity/last-owner safeguards.
+- **Files/components:** `migrations/0005_projects_recruitment.sql`, `internal/project`, `internal/recruitment`, `cmd/api`, `tests/integration/phase3_test.go`, `apps/web/app/projects.tsx`, `api/openapi.yaml`, migration docs.
+- **Validation:** `go test ./... -count=1`, `go vet ./...`, `staticcheck ./...`, frontend typecheck/build, `docker compose -f deploy/compose/local.yml config --quiet`, and `git diff --check` passed. The Phase 3 database integration test compiled but skipped because `TEST_DATABASE_URL` is unset; Docker reports no running Desktop Linux engine, so migration/concurrency behavior was not exercised against PostgreSQL in this turn. Graphify CLI code-only refresh and clustering completed (616 nodes, 1,760 edges, 35 communities); SQL graph extraction and Graphify MCP were unavailable.
+- **Follow-up:** Start the local Docker stack and run `TEST_DATABASE_URL=... go test ./tests/integration -run TestPhase3ProjectRecruitmentAndOwnershipFlows -count=1 -v`; keep the Phase 3 completion gate open until it passes. Then run the broader integration suite and update the Phase 3 checkboxes based on evidence.
+- **References:** `plans/implementation-phases.md` Phase 3; `plans/plan-new.md` §§3.1–3.3, 3.9, 4.2, 4.5–4.6, 8.
+
 ### 2026-10-02T14:47Z — Implement Phase 2 identity, campus, and media foundation
 
 - **Phase/area:** Phase 2 / identity, campus authorization, and media.

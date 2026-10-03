@@ -1,18 +1,18 @@
 # Local development
 
-The API, worker, and Next.js app run on the host. Docker Compose provides PostgreSQL 18, SeaweedFS (S3-compatible), Mailpit, and Caddy. No production data belongs in this environment.
+The API, worker, and Next.js app run on the host. Docker Compose provides PostgreSQL 18, SeaweedFS (S3-compatible), Mailpit, and Caddy. No production data belongs in this environment. For the complete Windows setup and Phase 3 walkthrough, see [the local run guide](../plans/peergit-run.md) and [service guide](../plans/local-services.md).
 
 ## Start
 
 In PowerShell at the repository root:
 
 ```powershell
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 docker compose -f deploy/compose/local.yml up -d --wait
 go run ./cmd/migrate
 ```
 
-The migration command is explicit and repeatable. The API never runs migrations on startup. In separate host terminals:
+The Go commands load `.env` from the repository root. The migration command is explicit and repeatable. The API never runs migrations on startup. In separate host terminals:
 
 ```powershell
 go run ./cmd/api
@@ -62,7 +62,7 @@ That removes the local PostgreSQL and object-storage volumes. Restart with `up -
 |---|---|---|
 | PostgreSQL | `127.0.0.1:5432` | Application state and durable jobs/outbox |
 | SeaweedFS S3 API | `127.0.0.1:8333` | Local object storage |
-| Mailpit SMTP/UI | `127.0.0.1:1025` / `127.0.0.1:8025` | Captured development email |
+| Mailpit SMTP/UI | `127.0.0.1:1025` / `127.0.0.1:8025` | Local email sink; current Phase 3 invitation links are shared manually because no sender is registered yet |
 | Caddy | `https://localhost` | Same-origin local HTTPS proxy |
 
 Compose files bind host ports to loopback. The PostgreSQL Compose credentials are development-only.

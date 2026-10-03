@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: PeerGit Platform API
   version: 0.1.0
-  description: Health endpoints plus the Phase 2 identity, campus-administration, and profile-media contract.
+  description: Health endpoints, identity and campus administration, media, and Phase 3 project/team/recruitment workflows.
 servers:
   - url: https://peergit.localhost
 paths:
@@ -277,6 +277,218 @@ paths:
       responses:
         '200': { description: Verified raster image bytes }
         '404': { description: Media is absent or not visible to this account }
+  /api/v1/projects:
+    get:
+      operationId: listCampusProjects
+      summary: Search active campus projects using a signed cursor
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { in: query, name: q, schema: { type: string, maxLength: 100 } }
+        - { in: query, name: cursor, schema: { type: string } }
+      responses:
+        '200': { description: Projects and next signed cursor }
+        '401': { description: Sign-in required }
+    post:
+      operationId: createProject
+      summary: Create a project, owner membership, skills, media links, audit entry, and outbox event atomically
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectCreate' }
+      responses:
+        '201': { description: Project created }
+        '409': { description: Project slug already exists }
+  /api/v1/projects/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getCampusProject
+      summary: Read an active visible project or a project team member's private project
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: Project, team, visibility, and lifecycle; roles are read separately }
+        '404': { description: Project is missing or not visible }
+    patch:
+      operationId: updateCampusProject
+      summary: Update project details and lifecycle with optimistic concurrency
+      security: [{ sessionCookie: [] }]
+      parameters: [{ $ref: '#/components/parameters/CsrfToken' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectUpdate' }
+      responses:
+        '200': { description: Project updated; inactive lifecycle closes open roles }
+        '409': { description: Stale version or insufficient project permission }
+  /api/v1/projects/{id}/roles:
+    get:
+      operationId: listVisibleProjectRoles
+      summary: List roles visible with an active campus project or to its team
+      security: [{ sessionCookie: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200': { description: Open roles for visible projects or all roles for project members }
+    post:
+      operationId: createProjectRole
+      summary: Publish a project role with openings, difficulty, and beginner-task details
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectRoleCreate' }
+      responses:
+        '201': { description: Role created }
+        '404': { description: Project is missing or caller cannot manage it }
+  /api/v1/projects/{id}/applications:
+    get:
+      operationId: listProjectApplications
+      summary: Read applications for a project as its owner or maintainer
+      security: [{ sessionCookie: [] }]
+      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200': { description: Private project applications }
+        '403': { description: Project manager access required }
+    post:
+      operationId: applyToProjectRole
+      summary: Submit one pending application for an open role
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectApplicationCreate' }
+      responses:
+        '201': { description: Application submitted }
+        '409': { description: Duplicate pending application or unavailable role }
+  /api/v1/my/project-invitations:
+    get:
+      operationId: listMyProjectInvitations
+      summary: List unexpired invitations for the authenticated campus user
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: Invitation IDs, projects, roles, and expiry; token must be supplied from the one-time link }
+  /api/v1/project-invitations/{id}/accept:
+    post:
+      operationId: acceptProjectInvitation
+      summary: Explicitly accept an invitation with its one-time token; add team membership atomically
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [token], properties: { token: { type: string, minLength: 32, maxLength: 128 } } }
+      responses:
+        '200': { description: Invitation accepted and membership created }
+        '404': { description: Token, tenant, invited user, or expiry does not match }
+  /api/v1/projects/{id}/roles/{roleID}:
+    patch:
+      operationId: updateProjectRole
+      summary: Change role capacity/open status using the current role version
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: roleID, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [openings, status, version]
+              properties:
+                openings: { type: integer, minimum: 1, maximum: 20 }
+                status: { type: string, enum: [open, closed] }
+                version: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: Role updated }
+        '409': { description: Stale version, exhausted capacity, or forbidden project transition }
+  /api/v1/projects/{id}/applications/{applicationID}/decision:
+    post:
+      operationId: decideProjectApplication
+      summary: Accept or reject an application with atomic capacity, membership, audit, and outbox writes
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: applicationID, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, version]
+              properties:
+                decision: { type: string, enum: [accepted, rejected] }
+                version: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: Application decision saved }
+        '409': { description: Stale application, full/closed role, or membership conflict }
+  /api/v1/projects/{id}/applications/{applicationID}/withdraw:
+    post:
+      operationId: withdrawProjectApplication
+      summary: Withdraw the current user's pending application
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: applicationID, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [version], properties: { version: { type: integer, minimum: 1 } } }
+      responses:
+        '200': { description: Application withdrawn }
+        '409': { description: Application is no longer pending or version changed }
+  /api/v1/my/applications:
+    get:
+      operationId: listMyProjectApplications
+      summary: List the authenticated user's application history
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: Application states and versions }
+  /api/v1/projects/{id}/invitations:
+    post:
+      operationId: inviteProjectMember
+      summary: Invite an active campus member using a one-time acceptance token
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/CsrfToken' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [user_id, role], properties: { user_id: { type: string, format: uuid }, role: { type: string, enum: [maintainer, member, mentor] } } }
+      responses:
+        '201': { description: Invitation created; one-time token returned to the inviter for sharing }
+        '404': { description: Project or same-campus account not found }
+  /api/v1/projects/{id}/people:
+    get:
+      operationId: searchProjectInvitees
+      summary: Search active same-campus accounts that are not already in the project
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+        - { in: query, name: q, required: true, schema: { type: string, minLength: 2, maxLength: 80 } }
+      responses:
+        '200': { description: Up to 20 eligible campus users }
 components:
   parameters:
     CsrfToken:
@@ -290,6 +502,44 @@ components:
       in: cookie
       name: __Host-peergit_session
   schemas:
+    ProjectCreate:
+      type: object
+      required: [slug, title, summary]
+      properties:
+        slug: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', minLength: 2, maxLength: 80 }
+        title: { type: string, minLength: 3, maxLength: 120 }
+        summary: { type: string, minLength: 1, maxLength: 500 }
+        description: { type: string, maxLength: 12000 }
+        project_type: { type: string, enum: [side_project, coursework, research, startup, open_source, hackathon] }
+        visibility: { type: string, enum: [private, campus, public] }
+        lifecycle: { type: string, enum: [draft, active, on_hold, completed, archived] }
+        skills: { type: array, maxItems: 20, items: { type: string, minLength: 1, maxLength: 80 } }
+        media_ids: { type: array, maxItems: 10, items: { type: string, format: uuid } }
+    ProjectUpdate:
+      type: object
+      required: [summary, description, visibility, lifecycle, version]
+      properties:
+        summary: { type: string, minLength: 1, maxLength: 500 }
+        description: { type: string, maxLength: 12000 }
+        visibility: { type: string, enum: [private, campus, public] }
+        lifecycle: { type: string, enum: [draft, active, on_hold, completed, archived] }
+        version: { type: integer, minimum: 1 }
+    ProjectRoleCreate:
+      type: object
+      required: [title, description, openings]
+      properties:
+        title: { type: string, minLength: 2, maxLength: 100 }
+        description: { type: string, minLength: 1, maxLength: 3000 }
+        openings: { type: integer, minimum: 1, maximum: 20 }
+        difficulty: { type: string, enum: [novice, beginner, intermediate, advanced] }
+        good_first_task: { type: boolean }
+        prerequisite_skills: { type: array, maxItems: 20, items: { type: string, maxLength: 80 } }
+    ProjectApplicationCreate:
+      type: object
+      required: [role_id, message]
+      properties:
+        role_id: { type: string, format: uuid }
+        message: { type: string, minLength: 1, maxLength: 2000 }
     ProfileUpdate:
       type: object
       required: [display_name]

@@ -1,6 +1,11 @@
 assets/
 graphify-out/
 plans/
+!plans/
+plans/*
+!plans/implementation-phases.md
+!plans/peergit-run.md
+!plans/local-services.md
 
 
 .env
