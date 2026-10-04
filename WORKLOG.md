@@ -21,6 +21,15 @@ Keep entries brief. Combine tightly related work completed together; create sepa
 
 ## Entries
 
+### 2026-10-04T19:10Z — Avoid GitHub Actions environment collision
+
+- **Phase/area:** Test configuration and CI migrations.
+- **Summary:** GitHub Actions sets its own `GITHUB_API_URL`, which PeerGit mistakenly read as a test endpoint and rejected during migration. Renamed PeerGit’s fake GitHub endpoint variables with a `PEERGIT_` prefix and added a regression test; production/test-only endpoint validation remains enforced.
+- **Files/components:** `internal/platform/config/config.go`, `internal/platform/config/config_test.go`, `scripts/test.mjs`, ignored `plans/peergit-test.md`, `WORKLOG.md`.
+- **Validation:** `go test ./internal/platform/config ./cmd/migrate -count=1`, `node scripts/test.mjs`, and `go run ./cmd/migrate` with `APP_ENV=development` and GitHub Actions-style `GITHUB_API_URL=https://api.github.com` passed; the full script included integration, staticcheck, frontend, browser, Compose, and diff checks.
+- **Follow-up:** Push the fix and rerun GitHub Actions; local tests simulate the reserved variable but cannot replace the hosted-run result.
+- **References:** User-provided CI log.
+
 ### 2026-10-04T18:44Z — Isolate OTP browser contract test
 
 - **Phase/area:** Phase 2 campus verification browser tests.

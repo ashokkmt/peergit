@@ -44,6 +44,24 @@ func TestLoadDefaultsAndHonorsLogLevel(t *testing.T) {
 	}
 }
 
+func TestLoadIgnoresGitHubActionsDefaultAPIURL(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("HTTP_ADDR", "127.0.0.1:8080")
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("GITHUB_API_URL", "https://api.github.com")
+	t.Setenv("PEERGIT_GITHUB_AUTHORIZE_URL", "")
+	t.Setenv("PEERGIT_GITHUB_TOKEN_URL", "")
+	t.Setenv("PEERGIT_GITHUB_API_URL", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("GitHub Actions' built-in GITHUB_API_URL must not be treated as a PeerGit test override: %v", err)
+	}
+	if cfg.GitHubAPIURL != "" {
+		t.Fatalf("GitHub API override = %q, want empty", cfg.GitHubAPIURL)
+	}
+}
+
 func TestConfigValidation(t *testing.T) {
 	valid := Config{
 		AppEnv: "production", HTTPAddr: "127.0.0.1:8080", LogLevel: slog.LevelInfo,
