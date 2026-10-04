@@ -12,10 +12,17 @@ const npm = windows ? 'npm.cmd' : 'npm';
 const npmCLI = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
 const composeFile = 'deploy/compose/local.yml';
 const localDatabase = 'postgres://peergit:local-development-only@127.0.0.1:5432/peergit?sslmode=disable';
-const env = { ...process.env, CI: 'true', DATABASE_URL: localDatabase, TEST_DATABASE_URL: localDatabase };
+const env = { ...process.env, CI: 'true', API_ORIGIN: 'http://127.0.0.1:8080', API_PROXY_ORIGIN: 'http://127.0.0.1:8080', DATABASE_URL: localDatabase, TEST_DATABASE_URL: localDatabase };
 const temporary = mkdtempSync(join(tmpdir(), 'peergit-test-'));
 const webLogPath = join(temporary, 'web.log');
+const apiLogPath = join(temporary, 'api.log');
+const workerLogPath = join(temporary, 'worker.log');
+const migrationBinary = join(root, `.peergit-migrate-${process.pid}${windows ? '.exe' : ''}`);
+const apiBinary = join(root, `.peergit-api-${process.pid}${windows ? '.exe' : ''}`);
+const workerBinary = join(root, `.peergit-worker-${process.pid}${windows ? '.exe' : ''}`);
 let webProcess;
+let apiProcess;
+let workerProcess;
 let composeServicesBefore = [];
 let composeStateCaptured = false;
 
@@ -152,6 +159,76 @@ async function stopWeb() {
   if (webProcess.exitCode === null) webProcess.kill('SIGKILL');
 }
 
+function testApplicationEnv() {
+  return {
+    ...env,
+    APP_ENV: 'test',
+    APP_ORIGIN: 'http://127.0.0.1:3000',
+    COOKIE_SECURE: 'false',
+    HTTP_ADDR: '127.0.0.1:8080',
+    SESSION_HASH_KEY: 'test-only-session-hash-key-with-sufficient-entropy',
+    MFA_ENCRYPTION_KEY: 'test-only-mfa-key-with-sufficient-entropy-12345',
+    CAMPUS_VERIFICATION_HASH_KEY: 'test-only-campus-hash-key-with-sufficient-entropy',
+    VERIFICATION_EMAIL_ENCRYPTION_KEY: 'test-only-email-encryption-key-with-sufficient-entropy',
+    GITHUB_CLIENT_ID: 'peergit-e2e-client',
+    GITHUB_CLIENT_SECRET: 'peergit-e2e-secret',
+    GITHUB_REDIRECT_URL: 'http://127.0.0.1:3000/api/v1/auth/github/callback',
+    GITHUB_AUTHORIZE_URL: 'http://127.0.0.1:8090/login/oauth/authorize',
+    GITHUB_TOKEN_URL: 'http://127.0.0.1:8090/login/oauth/access_token',
+    GITHUB_API_URL: 'http://127.0.0.1:8090',
+    SMTP_HOST: '127.0.0.1:1025',
+    SMTP_FROM: 'PeerGit Test <noreply@localhost>',
+    SMTP_TLS_MODE: 'none',
+  };
+}
+
+function startHostProcess(binary, logPath, childEnv) {
+  const log = createWriteStream(logPath);
+  const child = spawn(binary, [], { cwd: root, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+  child.stdout.pipe(log);
+  child.stderr.pipe(log);
+  return child;
+}
+
+async function waitForAPI() {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (apiProcess.exitCode !== null) throw new Error(`PeerGit API exited early with code ${apiProcess.exitCode}`);
+    try {
+      const response = await fetch('http://127.0.0.1:8080/healthz');
+      if (response.ok) return;
+    } catch { /* The API is still starting. */ }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 500));
+  }
+  throw new Error('PeerGit API did not become ready on 127.0.0.1:8080 within 30 seconds');
+}
+
+async function stopProcess(child) {
+  if (!child || child.exitCode !== null) return;
+  child.kill('SIGTERM');
+  await Promise.race([
+    new Promise((resolveWait) => child.once('close', resolveWait)),
+    new Promise((resolveWait) => setTimeout(resolveWait, 5000)),
+  ]);
+  if (child.exitCode === null) child.kill('SIGKILL');
+}
+
+function assertTestPortFree(url) {
+  const result = spawnSync(process.execPath, ['-e', `fetch(${JSON.stringify(url)}).then(()=>process.exit(0)).catch(()=>process.exit(1))`], { encoding: 'utf8' });
+  if (result.status === 0) throw new Error(`${url} is already in use. Stop the existing service before running the test script.`);
+}
+
+async function startTestAPIAndWorker() {
+  assertTestPortFree('http://127.0.0.1:8080/healthz');
+  await run('docker', ['compose', '-f', composeFile, 'exec', '-T', 'postgres', 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'peergit', '-d', 'peergit', '-c', "INSERT INTO colleges(slug,name) VALUES('local-campus','Local Test Campus') ON CONFLICT(slug) DO NOTHING; INSERT INTO college_domains(college_id,domain,verified_at) SELECT id,'local.edu',now() FROM colleges WHERE slug='local-campus' ON CONFLICT(college_id,domain) DO UPDATE SET verified_at=COALESCE(college_domains.verified_at,EXCLUDED.verified_at);"]);
+  await run('go', ['build', '-o', apiBinary, './cmd/api']);
+  await run('go', ['build', '-o', workerBinary, './cmd/worker']);
+  const childEnv = testApplicationEnv();
+  apiProcess = startHostProcess(apiBinary, apiLogPath, childEnv);
+  await waitForAPI();
+  workerProcess = startHostProcess(workerBinary, workerLogPath, childEnv);
+}
+
 async function cleanupCompose() {
   if (!composeStateCaptured) return;
   const now = capture('docker', ['compose', '-f', composeFile, 'ps', '--services', '--status', 'running']);
@@ -179,7 +256,13 @@ try {
   composeStateCaptured = true;
   await run('docker', ['compose', '-f', composeFile, 'up', '-d', '--wait']);
 
-  await run('go', ['run', './cmd/migrate']);
+  if (windows) {
+    // Some Windows Application Control policies block Go's %TEMP% go-run executable.
+    await run('go', ['build', '-o', migrationBinary, './cmd/migrate']);
+    await run(migrationBinary, []);
+  } else {
+    await run('go', ['run', './cmd/migrate']);
+  }
   await run('go', ['test', './...', '-count=1']);
   await run('go', ['vet', './...']);
   await run(await staticcheckPath(), ['./...']);
@@ -201,6 +284,7 @@ try {
     console.log(`\n> Reusing Playwright Chromium at ${browserPath}`);
   }
 
+  await startTestAPIAndWorker();
   webLog = startWeb();
   await waitForWeb();
   await run(npm, ['test'], { cwd: e2eDirectory });
@@ -213,9 +297,17 @@ try {
     const logs = readFileSync(webLogPath, 'utf8');
     if (logs) console.error(`\nNext.js log:\n${logs}`);
   }
+  for (const [label, path] of [['API', apiLogPath], ['worker', workerLogPath]]) {
+    if (existsSync(path)) {
+      const logs = readFileSync(path, 'utf8');
+      if (logs) console.error(`\n${label} log:\n${logs}`);
+    }
+  }
   process.exitCode = 1;
 } finally {
   await stopWeb().catch((error) => console.error(`Could not stop Next.js cleanly: ${error.message}`));
+  await stopProcess(workerProcess).catch((error) => console.error(`Could not stop test worker cleanly: ${error.message}`));
+  await stopProcess(apiProcess).catch((error) => console.error(`Could not stop test API cleanly: ${error.message}`));
   try {
     await cleanupCompose();
   } catch (error) {
@@ -223,4 +315,7 @@ try {
     process.exitCode = 1;
   }
   rmSync(temporary, { recursive: true, force: true });
+  rmSync(migrationBinary, { force: true });
+  rmSync(apiBinary, { force: true });
+  rmSync(workerBinary, { force: true });
 }

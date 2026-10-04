@@ -15,25 +15,34 @@ import (
 )
 
 type Config struct {
-	AppEnv             string
-	HTTPAddr           string
-	DatabaseURL        string
-	DatabaseMax        int32
-	CursorKey          string
-	AppOrigin          string
-	CookieSecure       bool
-	SessionHashKey     string
-	MFAEncryptionKey   string
-	GoogleIssuer       string
-	GoogleClientID     string
-	GoogleClientSecret string
-	GoogleRedirectURL  string
-	ObjectEndpoint     string
-	ObjectRegion       string
-	ObjectBucket       string
-	ObjectAccessKey    string
-	ObjectSecretKey    string
-	LogLevel           slog.Level
+	AppEnv               string
+	HTTPAddr             string
+	DatabaseURL          string
+	DatabaseMax          int32
+	CursorKey            string
+	AppOrigin            string
+	CookieSecure         bool
+	SessionHashKey       string
+	MFAEncryptionKey     string
+	GitHubClientID       string
+	GitHubClientSecret   string
+	GitHubRedirectURL    string
+	GitHubAuthorizeURL   string
+	GitHubTokenURL       string
+	GitHubAPIURL         string
+	SMTPHost             string
+	SMTPFrom             string
+	SMTPUsername         string
+	SMTPPassword         string
+	SMTPTLSMode          string
+	VerificationHashKey  string
+	VerificationEmailKey string
+	ObjectEndpoint       string
+	ObjectRegion         string
+	ObjectBucket         string
+	ObjectAccessKey      string
+	ObjectSecretKey      string
+	LogLevel             slog.Level
 }
 
 func Load() (*Config, error) {
@@ -59,25 +68,34 @@ func Load() (*Config, error) {
 		return nil, errors.New("COOKIE_SECURE must be true or false")
 	}
 	cfg := &Config{
-		AppEnv:             appEnv,
-		HTTPAddr:           getEnv("HTTP_ADDR", ":8080"),
-		DatabaseURL:        getEnv("DATABASE_URL", ""),
-		DatabaseMax:        int32(databaseMax),
-		CursorKey:          getEnv("CURSOR_SIGNING_KEY", ""),
-		AppOrigin:          getEnv("APP_ORIGIN", "https://localhost"),
-		CookieSecure:       cookieSecure,
-		SessionHashKey:     getEnv("SESSION_HASH_KEY", "local-development-only-session-hash-key"),
-		MFAEncryptionKey:   getEnv("MFA_ENCRYPTION_KEY", "local-development-only-mfa-encryption-key"),
-		GoogleIssuer:       getEnv("GOOGLE_OIDC_ISSUER", "https://accounts.google.com"),
-		GoogleClientID:     getEnv("GOOGLE_OIDC_CLIENT_ID", ""),
-		GoogleClientSecret: getEnv("GOOGLE_OIDC_CLIENT_SECRET", ""),
-		GoogleRedirectURL:  getEnv("GOOGLE_OIDC_REDIRECT_URL", ""),
-		ObjectEndpoint:     getEnv("OBJECT_ENDPOINT", ""),
-		ObjectRegion:       getEnv("OBJECT_REGION", "auto"),
-		ObjectBucket:       getEnv("OBJECT_BUCKET", ""),
-		ObjectAccessKey:    getEnv("OBJECT_ACCESS_KEY", ""),
-		ObjectSecretKey:    getEnv("OBJECT_SECRET_KEY", ""),
-		LogLevel:           logLevel,
+		AppEnv:               appEnv,
+		HTTPAddr:             getEnv("HTTP_ADDR", ":8080"),
+		DatabaseURL:          getEnv("DATABASE_URL", ""),
+		DatabaseMax:          int32(databaseMax),
+		CursorKey:            getEnv("CURSOR_SIGNING_KEY", ""),
+		AppOrigin:            getEnv("APP_ORIGIN", "https://localhost"),
+		CookieSecure:         cookieSecure,
+		SessionHashKey:       getEnv("SESSION_HASH_KEY", "local-development-only-session-hash-key"),
+		MFAEncryptionKey:     getEnv("MFA_ENCRYPTION_KEY", "local-development-only-mfa-encryption-key"),
+		GitHubClientID:       getEnv("GITHUB_CLIENT_ID", ""),
+		GitHubClientSecret:   getEnv("GITHUB_CLIENT_SECRET", ""),
+		GitHubRedirectURL:    getEnv("GITHUB_REDIRECT_URL", ""),
+		GitHubAuthorizeURL:   getEnv("GITHUB_AUTHORIZE_URL", ""),
+		GitHubTokenURL:       getEnv("GITHUB_TOKEN_URL", ""),
+		GitHubAPIURL:         getEnv("GITHUB_API_URL", ""),
+		SMTPHost:             getEnv("SMTP_HOST", "127.0.0.1:1025"),
+		SMTPFrom:             getEnv("SMTP_FROM", "PeerGit <noreply@localhost>"),
+		SMTPUsername:         getEnv("SMTP_USERNAME", ""),
+		SMTPPassword:         getEnv("SMTP_PASSWORD", ""),
+		SMTPTLSMode:          getEnv("SMTP_TLS_MODE", "none"),
+		VerificationHashKey:  getEnv("CAMPUS_VERIFICATION_HASH_KEY", "local-development-only-verification-hash-key"),
+		VerificationEmailKey: getEnv("VERIFICATION_EMAIL_ENCRYPTION_KEY", "local-development-only-verification-encryption-key"),
+		ObjectEndpoint:       getEnv("OBJECT_ENDPOINT", ""),
+		ObjectRegion:         getEnv("OBJECT_REGION", "auto"),
+		ObjectBucket:         getEnv("OBJECT_BUCKET", ""),
+		ObjectAccessKey:      getEnv("OBJECT_ACCESS_KEY", ""),
+		ObjectSecretKey:      getEnv("OBJECT_SECRET_KEY", ""),
+		LogLevel:             logLevel,
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -114,24 +132,37 @@ func (c Config) Validate() error {
 			strings.HasPrefix(c.SessionHashKey, "local-development-only") || strings.HasPrefix(c.MFAEncryptionKey, "local-development-only") {
 			return errors.New("staging and production require secure cookies and unique session/MFA keys of at least 32 bytes")
 		}
-		if c.GoogleClientID == "" || c.GoogleClientSecret == "" || c.GoogleRedirectURL == "" {
-			return errors.New("google OIDC client ID, client secret, and redirect URL are required in staging and production")
+		if c.GitHubClientID == "" || c.GitHubClientSecret == "" || c.GitHubRedirectURL == "" {
+			return errors.New("GitHub client ID, client secret, and redirect URL are required in staging and production")
 		}
 	}
 	origin, err := url.Parse(c.AppOrigin)
 	if err != nil || origin.Scheme == "" || origin.Host == "" || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" || (origin.Scheme != "https" && c.AppEnv != "development" && c.AppEnv != "test") {
 		return errors.New("APP_ORIGIN must be an origin URL without path, query, or fragment")
 	}
-	if (c.GoogleClientID == "") != (c.GoogleClientSecret == "") || (c.GoogleClientID == "") != (c.GoogleRedirectURL == "") {
-		return errors.New("google OIDC client ID, secret, and redirect URL must be configured together")
+	if (c.GitHubClientID == "") != (c.GitHubClientSecret == "") || (c.GitHubClientID == "") != (c.GitHubRedirectURL == "") {
+		return errors.New("GitHub client ID, secret, and redirect URL must be configured together")
 	}
-	if c.GoogleClientID != "" {
-		redirect, err := url.Parse(c.GoogleRedirectURL)
-		if err != nil || redirect.Scheme != origin.Scheme || redirect.Host != origin.Host || redirect.Path != "/api/v1/auth/callback" || redirect.RawQuery != "" || redirect.Fragment != "" {
-			return errors.New("GOOGLE_OIDC_REDIRECT_URL must use APP_ORIGIN and /api/v1/auth/callback")
+	if c.GitHubClientID != "" {
+		redirect, err := url.Parse(c.GitHubRedirectURL)
+		if err != nil || redirect.Scheme != origin.Scheme || redirect.Host != origin.Host || redirect.Path != "/api/v1/auth/github/callback" || redirect.RawQuery != "" || redirect.Fragment != "" {
+			return errors.New("GITHUB_REDIRECT_URL must use APP_ORIGIN and /api/v1/auth/github/callback")
 		}
-		if c.AppEnv != "development" && c.AppEnv != "test" && c.GoogleIssuer != "https://accounts.google.com" {
-			return errors.New("GOOGLE_OIDC_ISSUER must be https://accounts.google.com outside development and test")
+	}
+	if c.SMTPTLSMode != "none" && c.SMTPTLSMode != "starttls" && c.SMTPTLSMode != "tls" {
+		return errors.New("SMTP_TLS_MODE must be none, starttls, or tls")
+	}
+	if (c.SMTPUsername == "") != (c.SMTPPassword == "") {
+		return errors.New("SMTP_USERNAME and SMTP_PASSWORD must be configured together")
+	}
+	if c.AppEnv == "production" || c.AppEnv == "staging" {
+		if c.SMTPTLSMode == "none" || c.SMTPFrom == "" || len(c.VerificationHashKey) < 32 || len(c.VerificationEmailKey) < 32 || strings.HasPrefix(c.VerificationHashKey, "local-development-only") || strings.HasPrefix(c.VerificationEmailKey, "local-development-only") {
+			return errors.New("staging and production require authenticated mail configuration and unique verification keys")
+		}
+	}
+	for _, endpoint := range []string{c.GitHubAuthorizeURL, c.GitHubTokenURL, c.GitHubAPIURL} {
+		if endpoint != "" && c.AppEnv != "test" {
+			return errors.New("GitHub endpoint overrides are allowed only in APP_ENV=test")
 		}
 	}
 	objectParts := 0

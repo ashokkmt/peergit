@@ -1,12 +1,6 @@
 assets/
 graphify-out/
 plans/
-!plans/
-plans/*
-!plans/implementation-phases.md
-!plans/peergit-run.md
-!plans/peergit-test.md
-!plans/local-services.md
 
 
 .env
@@ -17,6 +11,10 @@ plans/*
 /cmd/verify/
 /docs/verification/
 **/node_modules/
+/.peergit-migrate-*
+/.peergit-api-*
+/.peergit-worker-*
+/.tmp-migrate.*
 
 
 !.gitignore

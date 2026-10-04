@@ -22,7 +22,7 @@ CREATE TABLE users (
     email_normalized text NOT NULL UNIQUE,
     display_name text NOT NULL CHECK (length(btrim(display_name)) BETWEEN 1 AND 120),
     handle text NOT NULL UNIQUE CHECK (handle ~ '^[a-z0-9_]{3,30}$'),
-    account_type text NOT NULL DEFAULT 'campus' CHECK (account_type IN ('campus','external','platform')),
+    account_type text NOT NULL DEFAULT 'unverified' CHECK (account_type IN ('unverified','campus','external','platform')),
     status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended','deletion_pending','deleted')),
     email_verified_at timestamptz,
     profile jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -31,14 +31,15 @@ CREATE TABLE users (
     deleted_at timestamptz,
     UNIQUE (id, college_id),
     CHECK ((account_type = 'campus' AND college_id IS NOT NULL) OR
-           (account_type IN ('external','platform') AND college_id IS NULL))
+           (account_type IN ('unverified','external','platform') AND college_id IS NULL))
 );
 CREATE INDEX users_campus_idx ON users(college_id, id) WHERE status = 'active';
 
 CREATE TABLE campus_verifications (
     college_id uuid NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
     user_id uuid NOT NULL,
-    source text NOT NULL CHECK (source IN ('verified_domain','administrator_invitation')),
+    source text NOT NULL CHECK (source IN ('campus_email_link','campus_email_otp','administrator_review')),
+    campus_email_id uuid,
     verified_by uuid REFERENCES users(id) ON DELETE SET NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     revoked_at timestamptz,
@@ -58,7 +59,7 @@ CREATE TABLE external_college_access (
 CREATE TABLE user_identities (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    provider text NOT NULL CHECK (provider = 'google'),
+    provider text NOT NULL CHECK (provider = 'github'),
     subject text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (provider, subject),
@@ -75,21 +76,94 @@ CREATE TABLE sessions (
     expires_at timestamptz NOT NULL,
     last_seen_at timestamptz NOT NULL DEFAULT now(),
     created_at timestamptz NOT NULL DEFAULT now(),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id, college_id) REFERENCES users(id, college_id) ON DELETE CASCADE
 );
 CREATE INDEX sessions_user_idx ON sessions(user_id, expires_at);
 
-CREATE TABLE oidc_login_states (
+CREATE TABLE github_login_states (
     state_hash bytea PRIMARY KEY CHECK (octet_length(state_hash) = 32),
-    nonce text NOT NULL,
     pkce_verifier text NOT NULL,
     invitation_token_hash bytea,
     expires_at timestamptz NOT NULL
 );
-CREATE INDEX oidc_login_states_expiry_idx ON oidc_login_states(expires_at);
+CREATE INDEX github_login_states_expiry_idx ON github_login_states(expires_at);
+
+CREATE TABLE campus_emails (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    college_id uuid NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
+    email_normalized text NOT NULL,
+    verified_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (college_id, email_normalized),
+    UNIQUE (id, college_id),
+    UNIQUE (user_id, id)
+);
+ALTER TABLE campus_verifications ADD CONSTRAINT campus_verifications_email_fk
+    FOREIGN KEY (campus_email_id, college_id) REFERENCES campus_emails(id, college_id);
+
+CREATE TABLE campus_email_challenges (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    college_id uuid NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
+    campus_email_id uuid NOT NULL REFERENCES campus_emails(id) ON DELETE CASCADE,
+    link_hash bytea NOT NULL UNIQUE CHECK (octet_length(link_hash)=32),
+    otp_hash bytea NOT NULL CHECK (octet_length(otp_hash)=32),
+    expires_at timestamptz NOT NULL,
+    consumed_at timestamptz,
+    superseded_at timestamptz,
+    failed_attempts smallint NOT NULL DEFAULT 0 CHECK (failed_attempts BETWEEN 0 AND 5),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    FOREIGN KEY (user_id, campus_email_id) REFERENCES campus_emails(user_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (campus_email_id, college_id) REFERENCES campus_emails(id, college_id) ON DELETE CASCADE
+);
+CREATE INDEX campus_challenges_pending_idx ON campus_email_challenges(user_id, created_at DESC)
+    WHERE consumed_at IS NULL AND superseded_at IS NULL;
+
+CREATE TABLE campus_email_deliveries (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    challenge_id uuid NOT NULL REFERENCES campus_email_challenges(id) ON DELETE CASCADE,
+    generation bigint NOT NULL DEFAULT 1,
+    encrypted_payload bytea NOT NULL,
+    expires_at timestamptz NOT NULL,
+    sent_at timestamptz,
+    attempts smallint NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 3),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (challenge_id, generation)
+);
+
+CREATE TABLE campus_review_requests (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    college_id uuid NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
+    requested_email text NOT NULL,
+    reason text NOT NULL CHECK (length(btrim(reason)) BETWEEN 8 AND 2000),
+    state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','approved','rejected','withdrawn')),
+    reviewed_by uuid REFERENCES users(id) ON DELETE SET NULL,
+    reviewed_at timestamptz,
+    review_reason text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CHECK ((state='pending' AND reviewed_at IS NULL) OR (state<>'pending' AND reviewed_at IS NOT NULL))
+);
+CREATE INDEX campus_review_queue_idx ON campus_review_requests(college_id, created_at)
+    WHERE state='pending';
+CREATE UNIQUE INDEX campus_review_one_pending_per_user ON campus_review_requests(user_id) WHERE state='pending';
+
+CREATE TABLE media_upload_intents (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    college_id uuid,
+    purpose text NOT NULL CHECK (purpose='profile_image'),
+    visibility text NOT NULL CHECK (visibility IN ('private','campus')),
+    expires_at timestamptz NOT NULL,
+    consumed_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    FOREIGN KEY (user_id, college_id) REFERENCES users(id, college_id) ON DELETE CASCADE
+);
 
 CREATE TABLE campus_roles (
-    college_id uuid NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
+	college_id uuid NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
     user_id uuid NOT NULL,
     role text NOT NULL CHECK (role IN ('student','faculty','alumni_mentor','moderator','campus_admin')),
     granted_by uuid REFERENCES users(id) ON DELETE SET NULL,
@@ -190,7 +264,7 @@ CREATE INDEX login_rate_limits_window_idx ON login_rate_limits(window_started_at
 
 CREATE TABLE media (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
-    college_id uuid NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
+    college_id uuid REFERENCES colleges(id) ON DELETE CASCADE,
     owner_user_id uuid NOT NULL,
     object_key text NOT NULL UNIQUE,
     mime_type text NOT NULL CHECK (mime_type IN ('image/png','image/jpeg')),
@@ -199,5 +273,6 @@ CREATE TABLE media (
     scan_status text NOT NULL CHECK (scan_status IN ('pending','clean','rejected')),
     visibility text NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','campus')),
     created_at timestamptz NOT NULL DEFAULT now(),
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (owner_user_id, college_id) REFERENCES users(id, college_id) ON DELETE CASCADE
 );

@@ -111,10 +111,8 @@ func (in *createProjectRequest) Validate() error {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	s, ok := h.session(w, r)
-	if !ok {
-		return
-	}
+	s, authenticated := identity.CurrentSession(r.Context())
+	campusAccess := authenticated && s.CollegeID != "" && s.TermsAccepted && s.PrivacyAccepted
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if len(q) > 100 {
 		h.fail(w, r, 400, "query_invalid", "search query is too long", nil)
@@ -123,20 +121,38 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	cursorToken := r.URL.Query().Get("cursor")
 	cursorID := ""
 	if cursorToken != "" {
-		payload, decodeErr := cursor.Decode(s.CSRFHash, cursorToken)
-		if decodeErr != nil || !uuidOK(string(payload)) {
+		if authenticated {
+			payload, decodeErr := cursor.Decode(s.CSRFHash, cursorToken)
+			if decodeErr != nil || !uuidOK(string(payload)) {
+				h.fail(w, r, 400, "cursor_invalid", "project cursor is invalid", nil)
+				return
+			}
+			cursorID = string(payload)
+		} else if !uuidOK(cursorToken) {
 			h.fail(w, r, 400, "cursor_invalid", "project cursor is invalid", nil)
 			return
+		} else {
+			cursorID = cursorToken
 		}
-		cursorID = string(payload)
 	}
-	rows, err := h.pool.Query(r.Context(), `SELECT p.id::text,p.slug,p.title,p.summary,p.project_type,p.visibility,p.lifecycle,p.version,p.updated_at,
+	var rows pgx.Rows
+	var err error
+	if campusAccess {
+		rows, err = h.pool.Query(r.Context(), `SELECT p.id::text,p.slug,p.title,p.summary,p.project_type,p.visibility,p.lifecycle,p.version,p.updated_at,
 		EXISTS(SELECT 1 FROM project_roles rr WHERE rr.project_id=p.id AND rr.status='open') AS recruiting,
 		COALESCE(array_agg(DISTINCT sk.name) FILTER(WHERE sk.name IS NOT NULL),'{}'::text[])
 		FROM projects p LEFT JOIN project_skills ps ON ps.project_id=p.id LEFT JOIN skills sk ON sk.id=ps.skill_id
-		WHERE p.college_id=$1 AND ($2::uuid IS NULL OR p.id<$2) AND ($3='' OR p.title ILIKE '%'||$3||'%' OR p.summary ILIKE '%'||$3||'%')
-		AND ((p.lifecycle='active' AND p.visibility IN ('campus','public')) OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$4))
+		WHERE ((p.visibility='public' AND p.lifecycle='active') OR (p.college_id=$1 AND ((p.lifecycle='active' AND p.visibility='campus') OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$4))))
+		AND ($2::uuid IS NULL OR p.id<$2) AND ($3='' OR p.title ILIKE '%'||$3||'%' OR p.summary ILIKE '%'||$3||'%')
 		GROUP BY p.id ORDER BY p.id DESC LIMIT 51`, s.CollegeID, nullUUID(cursorID), q, s.UserID)
+	} else {
+		rows, err = h.pool.Query(r.Context(), `SELECT p.id::text,p.slug,p.title,p.summary,p.project_type,p.visibility,p.lifecycle,p.version,p.updated_at,
+		EXISTS(SELECT 1 FROM project_roles rr WHERE rr.project_id=p.id AND rr.status='open') AS recruiting,
+		COALESCE(array_agg(DISTINCT sk.name) FILTER(WHERE sk.name IS NOT NULL),'{}'::text[])
+		FROM projects p LEFT JOIN project_skills ps ON ps.project_id=p.id LEFT JOIN skills sk ON sk.id=ps.skill_id
+		WHERE p.visibility='public' AND p.lifecycle='active' AND ($1='' OR p.title ILIKE '%'||$1||'%' OR p.summary ILIKE '%'||$1||'%')
+		AND ($2::uuid IS NULL OR p.id<$2) GROUP BY p.id ORDER BY p.id DESC LIMIT 51`, q, nullUUID(cursorID))
+	}
 	if err != nil {
 		h.err.Handle(w, r, err)
 		return
@@ -157,10 +173,14 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	next := ""
 	if len(items) > 50 {
-		next, err = cursor.Encode(s.CSRFHash, []byte(items[49].ID))
-		if err != nil {
-			h.err.Handle(w, r, err)
-			return
+		if authenticated {
+			next, err = cursor.Encode(s.CSRFHash, []byte(items[49].ID))
+			if err != nil {
+				h.err.Handle(w, r, err)
+				return
+			}
+		} else {
+			next = items[49].ID
 		}
 		items = items[:50]
 	}
@@ -182,23 +202,33 @@ type projectView struct {
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
-	s, ok := h.session(w, r)
-	if !ok {
-		return
-	}
+	s, authenticated := identity.CurrentSession(r.Context())
+	campusAccess := authenticated && s.CollegeID != "" && s.TermsAccepted && s.PrivacyAccepted
 	id := chi.URLParam(r, "id")
 	var v projectView
-	var description, creator string
-	err := h.pool.QueryRow(r.Context(), `SELECT p.id::text,p.slug,p.title,p.summary,p.description,p.project_type,p.visibility,p.lifecycle,p.version,p.updated_at,p.created_by::text,
+	var description, creator, projectCollegeID string
+	var err error
+	if campusAccess {
+		err = h.pool.QueryRow(r.Context(), `SELECT p.id::text,p.slug,p.title,p.summary,p.description,p.project_type,p.visibility,p.lifecycle,p.version,p.updated_at,p.created_by::text,p.college_id::text,
 		EXISTS(SELECT 1 FROM project_roles rr WHERE rr.project_id=p.id AND rr.status='open'),COALESCE(array_agg(DISTINCT sk.name) FILTER(WHERE sk.name IS NOT NULL),'{}'::text[])
 		FROM projects p LEFT JOIN project_skills ps ON ps.project_id=p.id LEFT JOIN skills sk ON sk.id=ps.skill_id
-		WHERE p.id=$1 AND p.college_id=$2 AND ((p.lifecycle='active' AND p.visibility IN ('campus','public')) OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$3)) GROUP BY p.id`, id, s.CollegeID, s.UserID).Scan(&v.ID, &v.Slug, &v.Title, &v.Summary, &description, &v.Type, &v.Visibility, &v.Lifecycle, &v.Version, &v.UpdatedAt, &creator, &v.Recruiting, &v.Skills)
+		WHERE p.id=$1 AND ((p.visibility='public' AND p.lifecycle='active') OR (p.college_id=$2 AND ((p.lifecycle='active' AND p.visibility='campus') OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$3)))) GROUP BY p.id`, id, s.CollegeID, s.UserID).Scan(&v.ID, &v.Slug, &v.Title, &v.Summary, &description, &v.Type, &v.Visibility, &v.Lifecycle, &v.Version, &v.UpdatedAt, &creator, &projectCollegeID, &v.Recruiting, &v.Skills)
+	} else {
+		err = h.pool.QueryRow(r.Context(), `SELECT p.id::text,p.slug,p.title,p.summary,p.project_type,p.visibility,p.lifecycle,p.version,p.updated_at,
+		EXISTS(SELECT 1 FROM project_roles rr WHERE rr.project_id=p.id AND rr.status='open'),COALESCE(array_agg(DISTINCT sk.name) FILTER(WHERE sk.name IS NOT NULL),'{}'::text[])
+		FROM projects p LEFT JOIN project_skills ps ON ps.project_id=p.id LEFT JOIN skills sk ON sk.id=ps.skill_id
+		WHERE p.id=$1 AND p.visibility='public' AND p.lifecycle='active' GROUP BY p.id`, id).Scan(&v.ID, &v.Slug, &v.Title, &v.Summary, &v.Type, &v.Visibility, &v.Lifecycle, &v.Version, &v.UpdatedAt, &v.Recruiting, &v.Skills)
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		h.fail(w, r, 404, "project_not_found", "project not found", nil)
 		return
 	}
 	if err != nil {
 		h.err.Handle(w, r, err)
+		return
+	}
+	if !campusAccess || projectCollegeID != s.CollegeID {
+		_ = response.OK(w, map[string]any{"project": v, "description": "", "created_by": "", "viewer_role": "", "members": []any{}})
 		return
 	}
 	var members []map[string]any

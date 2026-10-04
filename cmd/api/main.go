@@ -55,11 +55,12 @@ func run() error {
 	}
 	healthHandler := health.NewHandler(logger, errorManager, pool)
 	identityHandler := identity.NewHandler(pool, identity.Config{
-		Issuer: cfg.GoogleIssuer, ClientID: cfg.GoogleClientID, ClientSecret: cfg.GoogleClientSecret,
-		RedirectURL: cfg.GoogleRedirectURL, AppOrigin: cfg.AppOrigin, CookieSecure: cfg.CookieSecure,
+		GitHubClientID: cfg.GitHubClientID, GitHubClientSecret: cfg.GitHubClientSecret, GitHubRedirectURL: cfg.GitHubRedirectURL,
+		GitHubAuthorizeURL: cfg.GitHubAuthorizeURL, GitHubTokenURL: cfg.GitHubTokenURL, GitHubAPIURL: cfg.GitHubAPIURL,
+		AppOrigin: cfg.AppOrigin, CookieSecure: cfg.CookieSecure,
 		SessionHashKey: cfg.SessionHashKey, MFAEncryptionKey: cfg.MFAEncryptionKey,
 	}, logger, errorManager)
-	campusHandler := campus.NewHandler(pool, identityHandler, cfg.AppOrigin, errorManager)
+	campusHandler := campus.NewHandler(pool, identityHandler, cfg.AppOrigin, errorManager, cfg.VerificationHashKey, cfg.VerificationEmailKey)
 	var objectStore *storage.Store
 	if cfg.ObjectEndpoint != "" {
 		objectStore = storage.New(cfg.ObjectEndpoint, cfg.ObjectBucket, cfg.ObjectRegion, cfg.ObjectAccessKey, cfg.ObjectSecretKey)

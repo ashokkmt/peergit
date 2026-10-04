@@ -20,20 +20,27 @@ import (
 )
 
 type Handler struct {
-	pool   *pgxpool.Pool
-	auth   *identity.Handler
-	origin string
-	err    *errormanager.Manager
+	pool                   *pgxpool.Pool
+	auth                   *identity.Handler
+	origin                 string
+	err                    *errormanager.Manager
+	hashKey, encryptionKey string
 }
 
-func NewHandler(pool *pgxpool.Pool, auth *identity.Handler, origin string, errors *errormanager.Manager) *Handler {
-	return &Handler{pool: pool, auth: auth, origin: origin, err: errors}
+func NewHandler(pool *pgxpool.Pool, auth *identity.Handler, origin string, errors *errormanager.Manager, hashKey, encryptionKey string) *Handler {
+	return &Handler{pool: pool, auth: auth, origin: origin, err: errors, hashKey: hashKey, encryptionKey: encryptionKey}
 }
 
 func (h *Handler) Register(r chi.Router) {
 	r.Group(func(private chi.Router) {
 		private.Use(h.auth.Middleware)
 		private.Get("/organizations", h.organizations)
+		private.Get("/me/onboarding", h.onboarding)
+		private.With(h.auth.RequireCSRF).Post("/me/campus-verification/challenges", h.startCampusChallenge)
+		private.With(h.auth.RequireCSRF).Post("/me/campus-verification/confirm", h.confirmCampusChallenge)
+		private.With(h.auth.RequireCSRF).Post("/me/campus-review-requests", h.createCampusReview)
+		private.Get("/admin/campus-review-requests", h.listCampusReviews)
+		private.With(h.auth.RequireCSRF).Post("/admin/campus-review-requests/{id}/decision", h.decideCampusReview)
 		private.With(h.auth.RequireCSRF).Post("/admin/invitations", h.createInvitation)
 		private.With(h.auth.RequireCSRF).Post("/admin/invitations/{id}/revoke", h.revokeInvitation)
 		private.With(h.auth.RequireCSRF).Post("/admin/organizations", h.createOrganization)
@@ -166,7 +173,7 @@ func (h *Handler) createInvitation(w http.ResponseWriter, r *http.Request) {
 		h.err.Handle(w, r, err)
 		return
 	}
-	link := strings.TrimRight(h.origin, "/") + "/api/v1/auth/google?invite=" + url.QueryEscape(token)
+	link := strings.TrimRight(h.origin, "/") + "/api/v1/auth/github?invite=" + url.QueryEscape(token)
 	_ = response.Created(w, map[string]any{"id": id, "email": email, "expires_hours": input.ExpiresHours, "invitation_url": link})
 }
 

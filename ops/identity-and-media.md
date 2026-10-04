@@ -1,17 +1,16 @@
 # Identity, campus setup, and profile media
 
-Phase 2 uses Google OpenID Connect, PostgreSQL sessions and invitations, and the local S3-compatible object service for profile images. Configure local values in the ignored `.env`; use separate credentials for staging and production.
+Phase 2 uses GitHub App user authorization, PostgreSQL sessions and campus verification, and the local S3-compatible object service for profile images. Configure local values in the ignored `.env`; use separate GitHub App credentials and secrets for staging and production. See [GitHub OAuth setup](../plans/setup-github-oauth.md) for App registration and callback setup.
 
-## Google sign-in
+## GitHub sign-in
 
-Create a Google OAuth **Web application** client. Register the exact JavaScript origin and callback URL for each environment. Local Caddy serves the app at `https://localhost`, so use:
+Create a GitHub App with user authorization enabled and read-only Email addresses access. Register the exact callback URL for each environment. Local Caddy serves the app at `https://localhost`, so use:
 
 ```text
-Authorized JavaScript origin: https://localhost
-Authorized redirect URI:     https://localhost/api/v1/auth/callback
+Callback URL: https://localhost/api/v1/auth/github/callback
 ```
 
-Set `GOOGLE_OIDC_ISSUER=https://accounts.google.com`, the client ID, client secret, and the matching redirect URL in `.env`. `APP_ORIGIN` must be the browser-visible origin. Keep `COOKIE_SECURE=true` when using Caddy TLS. Leave all Google OIDC values blank together to run the application without sign-in configured; sign-in then returns a clear unavailable response.
+Set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `GITHUB_REDIRECT_URL` in `.env`. Use `APP_ORIGIN=https://localhost` and keep `COOKIE_SECURE=true` with Caddy TLS. Leave all three GitHub values blank together to run without sign-in configured. PeerGit identifies accounts by GitHub's numeric ID and obtains the verified primary address from the authenticated email API; it never grants campus membership from the GitHub email domain.
 
 `SESSION_HASH_KEY` and `MFA_ENCRYPTION_KEY` must each be unique random values of at least 32 bytes in staging and production. For example, generate each independently with `openssl rand -base64 48`. Do not use the development examples outside a local environment. Session values and MFA seeds are stored as keyed hashes or authenticated ciphertext; do not rotate these keys without a planned session invalidation and MFA re-enrollment procedure.
 
@@ -28,33 +27,44 @@ VALUES ('<college-id>','example.edu',now());
 COMMIT;
 ```
 
-The first administrator signs in with a Google account whose verified email matches the configured domain. Then grant the initial campus administrator role in a recorded operator session. This is a one-time bootstrap because the public role endpoint deliberately cannot promote accounts to campus administrator:
+The first administrator creates an account with GitHub and proves campus affiliation through the campus-email challenge. If no administrator exists yet, an authorized institution operator verifies the person's identity out of band, then performs the one-time audited bootstrap below using that account's PeerGit ID. This bootstrap procedure is distinct from normal self-service role APIs, which cannot grant campus administrator:
 
 ```sql
 BEGIN;
 WITH target AS (
-  SELECT u.id AS user_id,u.college_id
-  FROM users u JOIN college_domains d ON d.college_id=u.college_id
-  WHERE u.email_normalized='admin@example.edu'
-    AND d.domain='example.edu' AND d.verified_at IS NOT NULL
-    AND u.status='active'
+  SELECT u.id AS user_id,'<college-id>'::uuid AS college_id
+  FROM users u
+  WHERE u.id='<verified-user-id>' AND u.status='active'
+    AND u.account_type='unverified' AND u.college_id IS NULL
   FOR UPDATE
 ), grant_role AS (
+  UPDATE users SET college_id=(SELECT college_id FROM target),account_type='campus',updated_at=now()
+  WHERE id=(SELECT user_id FROM target)
+  RETURNING id,college_id
+), proof AS (
+  INSERT INTO campus_verifications(college_id,user_id,source,verified_by)
+  SELECT college_id,id,'administrator_review',id FROM grant_role
+  RETURNING college_id,user_id
+), student_role AS (
   INSERT INTO campus_roles(college_id,user_id,role)
-  SELECT college_id,user_id,'campus_admin' FROM target
+  SELECT college_id,user_id,'student' FROM proof ON CONFLICT DO NOTHING
+  RETURNING college_id,user_id
+), grant_admin AS (
+  INSERT INTO campus_roles(college_id,user_id,role)
+  SELECT college_id,user_id,'campus_admin' FROM student_role
   ON CONFLICT DO NOTHING
   RETURNING college_id,user_id
 )
 INSERT INTO audit_log(tenant_id,actor_id,action,resource_type,resource_id,details)
 SELECT college_id,user_id,'campus_admin.bootstrapped','user',user_id,
-       '{"reason":"initial campus administrator bootstrap"}'::jsonb
-FROM grant_role;
+       '{"reason":"institution-approved initial administrator bootstrap; mailbox proof recorded separately if performed"}'::jsonb
+FROM grant_admin;
 COMMIT;
 ```
 
 After sign-in, the administrator sets up TOTP MFA and saves the one-time recovery codes. Administrative APIs require a fresh MFA verification. Regular campus administrators can create campus invitations, scoped external invitations, organizations, grant non-admin campus roles, and suspend/reactivate non-admin accounts. Suspending an account revokes its sessions immediately. Administrator suspension/promotion requires the separately documented break-glass operator procedure.
 
-Invitations are email-bound, single-use links that expire within seven days. The current screen returns the link once for the administrator to share through an approved channel; it is never logged or stored in plaintext by PeerGit. Production invitation delivery through the transactional email provider remains an operational integration gate.
+Campus verification email delivers the expiring link and OTP through the PostgreSQL-backed worker. Administrative approval is audited and does not claim mailbox ownership. Email-bound invitations still require GitHub identity matching and do not bypass campus verification; external grants remain scoped. Production delivery requires an approved authenticated-TLS email provider.
 
 ## Local object storage and image rules
 

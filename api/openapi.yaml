@@ -41,10 +41,10 @@ paths:
           content:
             text/plain:
               schema: { type: string }
-  /api/v1/auth/google:
+  /api/v1/auth/github:
     get:
-      operationId: startGoogleSignIn
-      summary: Start a state- and PKCE-protected Google OIDC sign-in
+      operationId: startGitHubSignIn
+      summary: Start a state- and S256-PKCE-protected GitHub App user authorization flow
       parameters:
         - in: query
           name: invite
@@ -53,11 +53,11 @@ paths:
       responses:
         '302': { description: Redirect to the identity provider }
         '429': { description: Sign-in rate limit reached }
-        '503': { description: OIDC is not configured or provider is unavailable }
-  /api/v1/auth/callback:
+        '503': { description: GitHub sign-in is not configured or provider is unavailable }
+  /api/v1/auth/github/callback:
     get:
-      operationId: finishGoogleSignIn
-      summary: Verify the OIDC response and establish an opaque server session
+      operationId: finishGitHubSignIn
+      summary: Resolve the immutable GitHub user ID and verified primary email and establish a limited opaque session
       parameters:
         - in: query
           name: code
@@ -70,7 +70,29 @@ paths:
       responses:
         '303': { description: Sign-in completed; session cookie set }
         '401': { description: Invalid, expired, replayed, or unverified sign-in }
-        '403': { description: Email domain or invitation not allowed }
+        '403': { description: GitHub account lacks an authenticated verified primary email }
+  /api/v1/me/onboarding:
+    get:
+      operationId: campusOnboardingStatus
+      summary: Read limited-account campus verification status and masked challenge metadata
+      responses:
+        '200': { description: Current user's onboarding status }
+        '401': { description: Authentication required }
+  /api/v1/me/campus-verification/challenges:
+    post:
+      operationId: createCampusEmailChallenge
+      summary: Queue a ten-minute campus email link and OTP challenge
+      responses:
+        '201': { description: Challenge queued; response contains no credentials }
+        '422': { description: Campus domain is not supported }
+        '429': { description: Verification send limit or cooldown reached }
+  /api/v1/me/campus-verification/confirm:
+    post:
+      operationId: confirmCampusEmail
+      summary: Consume a link token or OTP with the current account's CSRF-protected session
+      responses:
+        '200': { description: Campus student access granted }
+        '422': { description: Invalid, expired, superseded, or locked challenge }
   /api/v1/session:
     get:
       operationId: currentSession

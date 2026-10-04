@@ -12,7 +12,6 @@ import (
 	"image/png"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -20,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"peergit/internal/identity"
 	"peergit/internal/platform/errormanager"
+	"peergit/internal/platform/http/request"
 	"peergit/internal/platform/http/response"
 	"peergit/internal/platform/storage"
 )
@@ -44,7 +44,8 @@ func NewHandler(pool *pgxpool.Pool, store *storage.Store, auth *identity.Handler
 func (h *Handler) Register(r chi.Router) {
 	r.Group(func(private chi.Router) {
 		private.Use(h.auth.Middleware)
-		private.With(h.auth.RequireCSRF).Post("/media", h.upload)
+		private.With(h.auth.RequireCSRF).Post("/media/intents", h.createUploadIntent)
+		private.With(h.auth.RequireCSRF).Post("/media/intents/{intent}/content", h.upload)
 		private.Get("/media/{id}", h.download)
 	})
 }
@@ -55,12 +56,19 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, http.StatusUnauthorized, "authentication_required", "sign in is required", nil)
 		return
 	}
-	if s.CollegeID == "" {
-		h.fail(w, r, http.StatusForbidden, "campus_scope_required", "media uploads require a campus account", nil)
+	var collegeID, visibility string
+	err := h.pool.QueryRow(r.Context(), `SELECT COALESCE(college_id::text,''),visibility FROM media_upload_intents WHERE id=$1 AND user_id=$2 AND consumed_at IS NULL AND expires_at>now()`, chi.URLParam(r, "intent"), s.UserID).Scan(&collegeID, &visibility)
+	if err != nil {
+		h.fail(w, r, http.StatusForbidden, "upload_intent_invalid", "upload intent is missing, expired, or already used", err)
 		return
 	}
-	if !s.TermsAccepted || !s.PrivacyAccepted {
-		h.fail(w, r, http.StatusForbidden, "policy_consent_required", "accept the Terms and Privacy Notice to use media", nil)
+	tag, err := h.pool.Exec(r.Context(), `UPDATE media_upload_intents SET consumed_at=now() WHERE id=$1 AND user_id=$2 AND consumed_at IS NULL AND expires_at>now()`, chi.URLParam(r, "intent"), s.UserID)
+	if err != nil || tag.RowsAffected() != 1 {
+		h.fail(w, r, http.StatusConflict, "upload_intent_invalid", "upload intent was already used or expired", err)
+		return
+	}
+	if collegeID != "" && (!s.TermsAccepted || !s.PrivacyAccepted) {
+		h.fail(w, r, http.StatusForbidden, "policy_consent_required", "accept the Terms and Privacy Notice to use campus media", nil)
 		return
 	}
 	if h.store == nil {
@@ -114,14 +122,6 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, http.StatusUnsupportedMediaType, "media_type_unsupported", "only valid PNG and JPEG images are accepted", err)
 		return
 	}
-	visibility := strings.TrimSpace(r.FormValue("visibility"))
-	if visibility == "" {
-		visibility = "private"
-	}
-	if visibility != "private" && visibility != "campus" {
-		h.fail(w, r, http.StatusBadRequest, "media_visibility_invalid", "visibility must be private or campus", nil)
-		return
-	}
 	if visibility == "campus" {
 		var consent bool
 		if err := h.pool.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM consent_records WHERE user_id=$1 AND purpose='profile_discovery' AND revoked_at IS NULL)`, s.UserID).Scan(&consent); err != nil {
@@ -133,7 +133,11 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	object, err := h.store.Capture(r.Context(), bytes.NewReader(clean), "quarantine/"+s.CollegeID, maxUploadBytes)
+	prefix := "profile/" + s.UserID
+	if collegeID != "" {
+		prefix = "quarantine/" + collegeID
+	}
+	object, err := h.store.Capture(r.Context(), bytes.NewReader(clean), prefix, maxUploadBytes)
 	if err != nil {
 		h.fail(w, r, http.StatusBadGateway, "media_store_failed", "image could not be stored safely", err)
 		return
@@ -146,13 +150,47 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	var id string
 	err = h.pool.QueryRow(r.Context(), `INSERT INTO media(college_id,owner_user_id,object_key,mime_type,byte_size,sha256,scan_status,visibility)
-		VALUES($1,$2,$3,$4,$5,$6,'clean',$7) RETURNING id::text`, s.CollegeID, s.UserID, object.Key, mimeType, object.Bytes, hash, visibility).Scan(&id)
+		VALUES(NULLIF($1,'')::uuid,$2,$3,$4,$5,$6,'clean',$7) RETURNING id::text`, collegeID, s.UserID, object.Key, mimeType, object.Bytes, hash, visibility).Scan(&id)
 	if err != nil {
 		_ = h.store.Delete(context.WithoutCancel(r.Context()), object.Key)
 		h.err.Handle(w, r, err)
 		return
 	}
 	_ = response.Created(w, map[string]any{"id": id, "mime_type": mimeType, "bytes": object.Bytes, "sha256": object.SHA256, "visibility": visibility, "url": "/api/v1/media/" + id})
+}
+
+func (h *Handler) createUploadIntent(w http.ResponseWriter, r *http.Request) {
+	s, ok := identity.CurrentSession(r.Context())
+	if !ok {
+		h.fail(w, r, http.StatusUnauthorized, "authentication_required", "sign in is required", nil)
+		return
+	}
+	input, err := request.Decode[struct {
+		Visibility string `json:"visibility"`
+	}](r)
+	if err != nil {
+		h.err.Handle(w, r, err)
+		return
+	}
+	visibility := input.Visibility
+	if visibility == "" {
+		visibility = "private"
+	}
+	if visibility != "private" && visibility != "campus" {
+		h.fail(w, r, http.StatusBadRequest, "media_visibility_invalid", "visibility must be private or campus", nil)
+		return
+	}
+	if visibility == "campus" && (s.CollegeID == "" || !s.TermsAccepted || !s.PrivacyAccepted) {
+		h.fail(w, r, http.StatusForbidden, "campus_scope_required", "campus-visible media requires verified campus access and policy consent", nil)
+		return
+	}
+	var id string
+	err = h.pool.QueryRow(r.Context(), `INSERT INTO media_upload_intents(user_id,college_id,purpose,visibility,expires_at) VALUES($1,NULLIF($2,'')::uuid,'profile_image',$3,now()+interval '5 minutes') RETURNING id::text`, s.UserID, s.CollegeID, visibility).Scan(&id)
+	if err != nil {
+		h.err.Handle(w, r, err)
+		return
+	}
+	_ = response.Created(w, map[string]any{"id": id, "expires_in_seconds": 300, "visibility": visibility, "upload_url": "/api/v1/media/intents/" + id + "/content"})
 }
 
 func sanitize(input []byte) ([]byte, string, error) {
@@ -197,7 +235,7 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 	}
 	var owner, college, key, mimeType string
 	var size int64
-	err := h.pool.QueryRow(r.Context(), `SELECT owner_user_id::text,college_id::text,object_key,mime_type,byte_size FROM media WHERE id=$1 AND scan_status='clean'`, chi.URLParam(r, "id")).Scan(&owner, &college, &key, &mimeType, &size)
+	err := h.pool.QueryRow(r.Context(), `SELECT owner_user_id::text,COALESCE(college_id::text,''),object_key,mime_type,byte_size FROM media WHERE id=$1 AND scan_status='clean'`, chi.URLParam(r, "id")).Scan(&owner, &college, &key, &mimeType, &size)
 	if err != nil {
 		h.fail(w, r, http.StatusNotFound, "media_not_found", "media not found", err)
 		return

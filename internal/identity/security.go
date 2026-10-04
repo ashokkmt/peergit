@@ -29,6 +29,10 @@ func keyedHash(key, value []byte) []byte {
 	return h.Sum(nil)
 }
 
+func sessionCSRFToken(key []byte, sessionToken string) string {
+	return base64.RawURLEncoding.EncodeToString(keyedHash(key, []byte("peergit-csrf:"+sessionToken)))
+}
+
 func pkceChallenge(verifier string) string {
 	h := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(h[:])

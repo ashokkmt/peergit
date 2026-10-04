@@ -21,6 +21,44 @@ Keep entries brief. Combine tightly related work completed together; create sepa
 
 ## Entries
 
+### 2026-10-04T06:56Z — Implement GitHub signup and campus verification
+
+- **Phase/area:** Phase 2 identity, campus verification, media and Phase 3 regression.
+- **Summary:** Replaced Google login with GitHub authorization-code/S256 PKCE using immutable GitHub IDs and verified primary emails, introduced unverified accounts and explicit campus-email onboarding, encrypted asynchronous link/OTP delivery, audited administrator review, limited-account/public-access guards, and short-lived sanitized profile-image uploads. Fixed a real onboarding race where concurrent `/session` reads rotated CSRF tokens and caused profile saves to fail; tokens are now stable and session-bound. Made the live E2E fixture unique per run.
+- **Files/components:** Identity/campus/media/project handlers, worker/config, rewritten pre-production migration, signup/onboarding/admin screens, API/OpenAPI, test runner, `plans/setup-github-oauth.md`, operations/run/test guides, Phase 2/3 roadmap and integration/E2E tests.
+- **Validation:** `node scripts/test.mjs` passed: fresh/repeat migrations, `go test ./... -count=1` with PostgreSQL integration enabled, `go vet ./...`, staticcheck, web typecheck/build, fake GitHub PKCE browser sign-in, OTP lockout/resend invalidation integration, real worker-to-Mailpit link delivery/confirmation, responsive Playwright, Compose validation and `git diff --check`. Focused campus tests also passed. `graphify . --code-only` and `graphify cluster-only D:\projects\peergit` refreshed the project graph and report; Graphify warned its optional SQL parser is not installed.
+- **Follow-up:** Phase 2 remains open pending explicit expiry/provider-error/email-conflict/cross-account/concurrent-consumption and SMTP crash/retry/fencing tests; the two-student project/recruitment browser flow also remains. Production GitHub App/email-provider credentials and production qualification are separate gates. No production database reset or live OAuth/SMTP test was performed.
+- **References:** User-approved Phase 2 implementation plan; [new-sign-up.md](plans/new-sign-up.md), [setup-github-oauth.md](plans/setup-github-oauth.md).
+
+### 2026-10-04T04:53Z — Rename signup implementation guide
+
+- **Phase/area:** Identity planning documentation.
+- **Summary:** Renamed the signup refactor guide to `plans/new-sign-up.md` and updated all markdown references throughout the repository.
+- **Files/components:** `plans/new-sign-up.md`, planning references, `WORKLOG.md`.
+- **Validation:** Repository-wide ignored-file-inclusive search found no old filename references; `git diff --check` passed. Documentation-only change; no runtime tests run.
+- **Follow-up:** The new guide remains ignored by `plans/*` in `.gitignore`, consistent with the existing source-plan policy.
+- **References:** User request.
+
+
+### 2026-10-04T04:47Z — Plan GitHub signup and independent campus verification
+
+- **Phase/area:** Identity planning / reopened Phase 2 acceptance.
+- **Summary:** Replaced launch signup assumptions with GitHub App OAuth and limited accounts followed by independent ten-minute link/OTP or audited campus approval. Retained historical Google results, added unchecked refactor gates, moved minimal verification SMTP/worker delivery into Phase 2, and documented current-versus-planned setup.
+- **Files/components:** `plans/plan-new.md`, `plans/plan.md`, `plans/plan-future-scale.md`, `plans/implementation-phases.md`, `plans/new-sign-up.md`, local service/run/test guides and `plans/phase0-requirements.md`.
+- **Validation:** Parsed Graphify layout; reviewed relevant current implementation/config and official GitHub/Mailpit documentation. All relative links and balanced Markdown fences across nine planning documents passed; contract/limits/phase-reopening assertions and `git diff --check` passed. No runtime tests were run because this change contains documentation only; no new application behavior is claimed.
+- **Follow-up:** Implement `plans/new-sign-up.md` and revalidate Phase 2 plus affected Phase 3 flows. No source code, migrations, config, Compose or test runner changed in this task; preserve the pre-existing `apps/web/next-env.d.ts` change. Source plans, new refactor guide and proof setup guide remain ignored under existing Git rules; use deliberate force-add if they should be committed.
+- **References:** User-approved 2026-10-04 signup/campus-verification contract; GitHub App user authorization/email API and Mailpit documentation.
+
+
+### 2026-10-04T03:34Z — Verify and clarify local startup guide
+
+- **Phase/area:** Local development operations documentation.
+- **Summary:** Checked the run guide against the current Compose stack, `.env` loading, Go entry points, Next.js rewrite, and Caddy routing. Clarified which containers are needed for core workflows and removed `npm ci` from the recurring frontend startup commands.
+- **Files/components:** `plans/peergit-run.md`.
+- **Validation:** `docker compose -f deploy/compose/local.yml config --quiet`, `git diff --check`, and relative-link checks passed. Runtime startup was not run; this was a documentation update.
+- **Follow-up:** Start the stack using the updated guide and confirm Google OAuth with the configured local test client.
+- **References:** Current local Compose and application configuration.
+
 ### 2026-10-03T14:16Z — Add shared cross-platform CI test runner
 
 - **Phase/area:** CI and pre-commit verification.

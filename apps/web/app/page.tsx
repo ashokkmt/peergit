@@ -27,7 +27,7 @@ export default function Home() {
       <a className="skip-link" href="#main-content">Skip to content</a>
       <header className="topbar">
         <a className="brand" href="/" aria-label="PeerGit home"><span className="brand-mark" aria-hidden="true">P</span>PeerGit</a>
-        <nav aria-label="Main navigation"><a aria-current="page" href="#projects">Projects</a><a href="#how-it-works">How it works</a></nav>
+        <nav aria-label="Main navigation"><a aria-current="page" href="#projects">Projects</a><a href="#how-it-works">How it works</a><a href="/login">Log in</a><a href="/signup">Sign up</a></nav>
         <span className="environment">Local preview</span>
       </header>
 

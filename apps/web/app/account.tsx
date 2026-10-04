@@ -80,8 +80,8 @@ export function AccountPanel() {
   async function uploadImage(file?: File) {
     if (!file) return;
     setProblem(""); setMessage("");
-    const form = new FormData(); form.set("file", file); form.set("visibility", consents.includes("profile_discovery") ? "campus" : "private");
-    try { const item = await post<{ id: string }>("/api/v1/media", "POST", form); setAvatarID(item.id); setMessage("Image uploaded and safely re-encoded. Save your profile to use it."); }
+    const form = new FormData(); form.set("file", file);
+    try { const intent = await post<{ id: string }>("/api/v1/media/intents", "POST", JSON.stringify({ visibility: me?.college_id && consents.includes("profile_discovery") ? "campus" : "private" })); const item = await post<{ id: string }>(`/api/v1/media/intents/${intent.id}/content`, "POST", form); setAvatarID(item.id); setMessage("Image uploaded and safely re-encoded. Save your profile to use it."); }
     catch (error) { setProblem(error instanceof Error ? error.message : "Image upload failed."); }
   }
 
@@ -141,10 +141,10 @@ export function AccountPanel() {
   }
 
   if (loading) return <section className="account-panel" aria-live="polite"><p>Checking your PeerGit account…</p></section>;
-  if (!me) return <section className="account-panel" aria-labelledby="account-title"><div><p className="eyebrow">Campus access</p><h2 id="account-title">Sign in to continue</h2><p>Use your verified Google account. Campus access is enabled by your institution or a PeerGit invitation.</p><a className="primary-link" href="/api/v1/auth/google">Continue with Google <span aria-hidden="true">→</span></a></div>{problem && <p className="form-error" role="alert">{problem}</p>}</section>;
+  if (!me) return <section className="account-panel" aria-labelledby="account-title"><div><p className="eyebrow">Campus access</p><h2 id="account-title">Sign in to continue</h2><p>Start with GitHub, then verify a campus email to use campus features.</p><a className="primary-link" href="/api/v1/auth/github">Continue with GitHub <span aria-hidden="true">→</span></a></div>{problem && <p className="form-error" role="alert">{problem}</p>}</section>;
 
   return <section className="account-panel" aria-labelledby="account-title">
-    <div className="account-heading"><div><p className="eyebrow">Your campus account</p><h2 id="account-title">Welcome, {me.display_name}</h2><p>{me.email}{me.college_id ? " · verified campus account" : " · invited external account"}</p></div><button className="secondary-button" type="button" onClick={logout}>Sign out</button></div>
+    <div className="account-heading"><div><p className="eyebrow">Your PeerGit account</p><h2 id="account-title">Welcome, {me.display_name}</h2><p>{me.email}{me.college_id ? " · verified campus account" : me.account_type === "unverified" ? " · campus not verified" : " · invited external account"}</p>{me.account_type === "unverified" && <a href="/onboarding">Continue campus onboarding</a>}</div><button className="secondary-button" type="button" onClick={logout}>Sign out</button></div>
     {problem && <p className="form-error" role="alert">{problem}</p>}{message && <p className="form-success" role="status">{message}</p>}
     <form className="account-form" onSubmit={saveProfile}>
       <h3>Profile and privacy</h3>
@@ -167,7 +167,7 @@ export function AccountPanel() {
       {mfaSecret && <form onSubmit={submitMFA}><p>Setup secret: <code>{mfaSecret}</code></p><label>6-digit authenticator code<input required inputMode="numeric" autoComplete="one-time-code" value={mfaCode} onChange={(e) => setMFACode(e.target.value)} /></label><button className="primary-button" type="submit">Confirm MFA</button></form>}
       {recoveryCodes.length > 0 && <div className="recovery-codes"><p>Save these one-time codes now; they will not be shown again.</p><ul>{recoveryCodes.map((code) => <li key={code}><code>{code}</code></li>)}</ul></div>}
     </section>
-    {me.campus_admin && <section className="account-form" aria-labelledby="admin-title"><h3 id="admin-title">Campus administration</h3><p>Administrative actions require a recent MFA verification.</p>
+    {me.campus_admin && <section className="account-form" aria-labelledby="admin-title"><h3 id="admin-title">Campus administration</h3><p>Administrative actions require a recent MFA verification. <a href="/admin/campus-reviews">Review campus verification requests</a>.</p>
       <form onSubmit={invite}><label>Email<input type="email" required value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} /></label><label>Account type<select value={inviteAccount} onChange={(e) => { setInviteAccount(e.target.value); setInviteRole(e.target.value === "campus" ? "student" : "mentor"); }}><option value="campus">Campus member</option><option value="external">Invited external</option></select></label><label>{inviteAccount === "campus" ? "Campus role" : "Scoped external access"}<select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>{inviteAccount === "campus" ? <><option value="student">Student</option><option value="faculty">Faculty</option><option value="alumni_mentor">Alumni mentor</option><option value="moderator">Moderator</option></> : <><option value="mentor">Mentor</option><option value="recruiter">Recruiter</option><option value="organization_guest">Organization guest</option></>}</select></label><button className="secondary-button" type="submit">Create invitation link</button></form>
       {inviteURL && <p className="invite-link">Share this one-time link with the invited person: <a href={inviteURL}>{inviteURL}</a></p>}
       <form onSubmit={createOrganization}><label>Organization name<input required value={orgName} onChange={(e) => setOrgName(e.target.value)} /></label><label>Slug<input required pattern="[a-z0-9]+(-[a-z0-9]+)*" value={orgSlug} onChange={(e) => setOrgSlug(e.target.value)} /></label><label>Organization type<select value={orgKind} onChange={(e) => setOrgKind(e.target.value)}><option value="club">Club</option><option value="department">Department</option><option value="innovation_cell">Innovation cell</option><option value="placement_cell">Placement cell</option><option value="event_body">Event body</option></select></label><button className="secondary-button" type="submit">Create organization</button></form>

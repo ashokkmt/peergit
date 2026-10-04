@@ -61,17 +61,31 @@ func TestOpaqueTokensAreUniqueAndURLSafe(t *testing.T) {
 	}
 }
 
-func TestOIDCCallbackRequiresBrowserBoundState(t *testing.T) {
+func TestSessionCSRFTokenIsStableAndSessionBound(t *testing.T) {
+	key := []byte("test session hash key with enough entropy")
+	first := sessionCSRFToken(key, "session-one")
+	if first != sessionCSRFToken(key, "session-one") {
+		t.Fatal("CSRF token changed across reads for the same session")
+	}
+	if first == sessionCSRFToken(key, "session-two") {
+		t.Fatal("different sessions received the same CSRF token")
+	}
+	if hmacEqual(keyedHash(key, []byte(first)), keyedHash(key, []byte("session-one"))) {
+		t.Fatal("CSRF and session token derivation are not domain separated")
+	}
+}
+
+func TestGitHubCallbackRequiresBrowserBoundState(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	handler := NewHandler(nil, Config{AppOrigin: "http://peergit.test"}, logger, errormanager.NewManager(logger))
 	for name, cookie := range map[string]string{"missing": "", "mismatched": "attacker-state"} {
 		t.Run(name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/callback?state=real-state&code=code", nil)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/github/callback?state=real-state&code=code", nil)
 			if cookie != "" {
-				req.AddCookie(&http.Cookie{Name: "peergit_oidc_state", Value: cookie})
+				req.AddCookie(&http.Cookie{Name: "peergit_github_state", Value: cookie})
 			}
 			res := httptest.NewRecorder()
-			handler.callback(res, req)
+			handler.githubCallback(res, req)
 			if res.Code != http.StatusUnauthorized {
 				t.Fatalf("callback status=%d body=%s; want rejected state", res.Code, res.Body.String())
 			}

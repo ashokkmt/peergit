@@ -53,7 +53,7 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 			t.Fatal(err)
 		}
 		users[name] = id
-		if _, err := pool.Exec(ctx, `INSERT INTO campus_verifications(college_id,user_id,source) VALUES($1,$2,'verified_domain')`, college, id); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO campus_verifications(college_id,user_id,source) VALUES($1,$2,'administrator_review')`, college, id); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := pool.Exec(ctx, `INSERT INTO consent_records(user_id,purpose,policy_version) VALUES($1,'terms','draft-1'),($1,'privacy','draft-1')`, id); err != nil {
@@ -61,7 +61,7 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 		}
 		token := "phase3-session-" + name
 		tokens[name] = token
-		if _, err := pool.Exec(ctx, `INSERT INTO sessions(user_id,college_id,token_hash,csrf_hash,expires_at) VALUES($1,$2,$3,$4,now()+interval '1 hour')`, id, college, sessionHash(key, token), sessionHash(key, "phase3-csrf-"+name)); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO sessions(user_id,college_id,token_hash,csrf_hash,expires_at) VALUES($1,$2,$3,$4,now()+interval '1 hour')`, id, college, sessionHash(key, token), sessionCSRFHash(key, token)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -71,7 +71,7 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 	projectHandler := project.NewHandler(pool, auth, logger, errs)
 	recruitmentHandler := recruitment.NewHandler(pool, auth, logger, errs)
 	mediaHandler := media.NewHandler(pool, storage.New("http://127.0.0.1:1", "test", "us-east-1", "key", "secret"), auth, errs)
-	campusHandler := campus.NewHandler(pool, auth, "http://peergit.test", errs)
+	campusHandler := campus.NewHandler(pool, auth, "http://peergit.test", errs, string(key), "phase3 delivery encryption secret")
 	router := httpserver.NewRouter(health.NewHandler(logger, errs, pool), logger, errs, auth.Register, campusHandler.Register, mediaHandler.Register, projectHandler.Register, recruitmentHandler.Register)
 	loadCSRF := func(actor string) {
 		t.Helper()
@@ -159,6 +159,50 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 		t.Fatal(err)
 	}
 	projectID := decodeID(call("lead", http.MethodPost, "/api/v1/projects", `{"slug":"phase3-robots","title":"Robotics team","summary":"Build helpful robots","project_type":"side_project","visibility":"campus","lifecycle":"active","skills":["Go","CAD"]}`, http.StatusCreated), "id")
+	publicProjectID := decodeID(call("lead", http.MethodPost, "/api/v1/projects", `{"slug":"phase3-public","title":"Public project","summary":"A public preview","project_type":"open_source","visibility":"public","lifecycle":"active"}`, http.StatusCreated), "id")
+	guestList := httptest.NewRecorder()
+	router.ServeHTTP(guestList, httptest.NewRequest(http.MethodGet, "http://peergit.test/api/v1/projects", nil))
+	if guestList.Code != http.StatusOK {
+		t.Fatalf("guest public project list status=%d body=%s", guestList.Code, guestList.Body.String())
+	}
+	var guestProjects struct {
+		Data struct {
+			Items []struct {
+				ID string `json:"id"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(guestList.Body.Bytes(), &guestProjects); err != nil {
+		t.Fatal(err)
+	}
+	publicFound, privateFound := false, false
+	for _, item := range guestProjects.Data.Items {
+		publicFound = publicFound || item.ID == publicProjectID
+		privateFound = privateFound || item.ID == hiddenProjectID || item.ID == projectID
+	}
+	if !publicFound || privateFound {
+		t.Fatalf("guest project scope public=%v private_or_campus=%v items=%+v", publicFound, privateFound, guestProjects.Data.Items)
+	}
+	guestDetail := httptest.NewRecorder()
+	router.ServeHTTP(guestDetail, httptest.NewRequest(http.MethodGet, "http://peergit.test/api/v1/projects/"+publicProjectID, nil))
+	var publicPreview struct {
+		Data struct {
+			Description string           `json:"description"`
+			Members     []map[string]any `json:"members"`
+			ViewerRole  string           `json:"viewer_role"`
+		} `json:"data"`
+	}
+	if guestDetail.Code != http.StatusOK || json.Unmarshal(guestDetail.Body.Bytes(), &publicPreview) != nil {
+		t.Fatalf("guest public project detail status=%d body=%s", guestDetail.Code, guestDetail.Body.String())
+	}
+	if publicPreview.Data.Description != "" || publicPreview.Data.Members == nil || len(publicPreview.Data.Members) != 0 || publicPreview.Data.ViewerRole != "" {
+		t.Fatalf("guest public project response disclosed member-only fields: %+v", publicPreview.Data)
+	}
+	guestPrivate := httptest.NewRecorder()
+	router.ServeHTTP(guestPrivate, httptest.NewRequest(http.MethodGet, "http://peergit.test/api/v1/projects/"+projectID, nil))
+	if guestPrivate.Code != http.StatusNotFound {
+		t.Fatalf("guest read campus project status=%d body=%s", guestPrivate.Code, guestPrivate.Body.String())
+	}
 	var projectSkillID string
 	if err := pool.QueryRow(ctx, `SELECT ps.skill_id::text FROM project_skills ps JOIN skills s ON s.id=ps.skill_id WHERE ps.project_id=$1 AND s.slug='go'`, projectID).Scan(&projectSkillID); err != nil || projectSkillID != existingSkillID {
 		t.Fatalf("project skill=%q err=%v, want existing user skill %q", projectSkillID, err, existingSkillID)
@@ -245,7 +289,7 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 	if err := pool.QueryRow(ctx, `INSERT INTO users(college_id,email,email_normalized,display_name,handle,account_type,email_verified_at) VALUES($1,$2,$2,'Other Student','phase3_other','campus',now()) RETURNING id::text`, otherCollege, otherEmail).Scan(&otherUser); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO campus_verifications(college_id,user_id,source) VALUES($1,$2,'administrator_invitation')`, otherCollege, otherUser); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO campus_verifications(college_id,user_id,source) VALUES($1,$2,'administrator_review')`, otherCollege, otherUser); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO consent_records(user_id,purpose,policy_version) VALUES($1,'terms','draft-1'),($1,'privacy','draft-1')`, otherUser); err != nil {
@@ -253,7 +297,7 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 	}
 	otherToken := "phase3-session-other"
 	tokens["other"] = otherToken
-	if _, err := pool.Exec(ctx, `INSERT INTO sessions(user_id,college_id,token_hash,csrf_hash,expires_at) VALUES($1,$2,$3,$4,now()+interval '1 hour')`, otherUser, otherCollege, sessionHash(key, otherToken), sessionHash(key, "phase3-csrf-other")); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO sessions(user_id,college_id,token_hash,csrf_hash,expires_at) VALUES($1,$2,$3,$4,now()+interval '1 hour')`, otherUser, otherCollege, sessionHash(key, otherToken), sessionCSRFHash(key, otherToken)); err != nil {
 		t.Fatal(err)
 	}
 	loadCSRF("other")

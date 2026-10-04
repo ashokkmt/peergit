@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"peergit/internal/campus"
 	"peergit/internal/platform/config"
 	"peergit/internal/platform/database"
 	"peergit/internal/platform/idempotency"
@@ -51,18 +52,22 @@ func run() error {
 	workerName += "-" + strconv.Itoa(os.Getpid())
 	workerCtx, cancelWorker := context.WithCancel(ctx)
 	defer cancelWorker()
-	results := make(chan error, 3)
+	results := make(chan error, 4)
 	go func() {
-		results <- (jobs.Queue{Pool: pool}).Run(workerCtx, workerName, map[string]jobs.Handler{}, logger)
+		handlers := map[string]jobs.Handler{
+			"campus_verification_email": campus.DeliveryHandler(pool, cfg.VerificationEmailKey, campus.MailConfig{Host: cfg.SMTPHost, From: cfg.SMTPFrom, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword, TLSMode: cfg.SMTPTLSMode}),
+		}
+		results <- (jobs.Queue{Pool: pool}).Run(workerCtx, workerName, handlers, logger)
 	}()
 	go func() {
 		results <- (outbox.Queue{Pool: pool}).Run(workerCtx, workerName, map[string]outbox.Handler{}, logger)
 	}()
+	go func() { campus.RunDeliveryCleanup(workerCtx, pool, logger); results <- nil }()
 	go func() {
 		idempotency.RunCleanup(workerCtx, pool, logger)
 		results <- nil
 	}()
-	for range 3 {
+	for range 4 {
 		if err := <-results; err != nil {
 			cancelWorker()
 			return err

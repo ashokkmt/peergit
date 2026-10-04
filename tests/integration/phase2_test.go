@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -53,27 +54,27 @@ func TestPhase2SessionConsentAdminAndTenantIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, userID := range []string{adminID, targetID} {
-		if _, err := pool.Exec(ctx, `INSERT INTO campus_verifications(college_id,user_id,source) VALUES($1,$2,'verified_domain')`, collegeID, userID); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO campus_verifications(college_id,user_id,source) VALUES($1,$2,'administrator_review')`, collegeID, userID); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO campus_roles(college_id,user_id,role) VALUES($1,$2,'campus_admin')`, collegeID, adminID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO sessions(user_id,college_id,token_hash,csrf_hash,expires_at) VALUES($1,$2,$3,$4,now()+interval '1 hour')`, targetID, collegeID, sessionHash(key, "target-session"), sessionHash(key, "target-csrf")); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO sessions(user_id,college_id,token_hash,csrf_hash,expires_at) VALUES($1,$2,$3,$4,now()+interval '1 hour')`, targetID, collegeID, sessionHash(key, "target-session"), sessionCSRFHash(key, "target-session")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO mfa_credentials(user_id,encrypted_secret,enabled_at) VALUES($1,decode('0001','hex'),now())`, adminID); err != nil {
 		t.Fatal(err)
 	}
-	token, csrf := "opaque-session-token-for-phase2", "opaque-csrf-token-for-phase2"
-	if _, err := pool.Exec(ctx, `INSERT INTO sessions(user_id,college_id,token_hash,csrf_hash,mfa_verified_at,expires_at) VALUES($1,$2,$3,$4,now(),now()+interval '1 hour')`, adminID, collegeID, sessionHash(key, token), sessionHash(key, csrf)); err != nil {
+	token := "opaque-session-token-for-phase2"
+	if _, err := pool.Exec(ctx, `INSERT INTO sessions(user_id,college_id,token_hash,csrf_hash,mfa_verified_at,expires_at) VALUES($1,$2,$3,$4,now(),now()+interval '1 hour')`, adminID, collegeID, sessionHash(key, token), sessionCSRFHash(key, token)); err != nil {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	errors := errormanager.NewManager(logger)
 	auth := identity.NewHandler(pool, identity.Config{AppOrigin: "http://peergit.test", SessionHashKey: string(key), MFAEncryptionKey: "phase2 mfa encryption secret long enough", CookieSecure: false}, logger, errors)
-	campusHandler := campus.NewHandler(pool, auth, "http://peergit.test", errors)
+	campusHandler := campus.NewHandler(pool, auth, "http://peergit.test", errors, string(key), "phase2 delivery encryption secret")
 	mediaHandler := media.NewHandler(pool, storage.New("http://127.0.0.1:1", "test", "us-east-1", "key", "secret"), auth, errors)
 	router := httpserver.NewRouter(health.NewHandler(logger, errors, pool), logger, errors, auth.Register, campusHandler.Register, mediaHandler.Register)
 	get := httptest.NewRequest(http.MethodGet, "http://peergit.test/api/v1/session", nil)
@@ -178,7 +179,7 @@ func TestPhase2SessionConsentAdminAndTenantIsolation(t *testing.T) {
 	if err := pool.QueryRow(ctx, `INSERT INTO colleges(slug,name) VALUES('phase2-other','Other Test') RETURNING id::text`).Scan(&otherCollege); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, `INSERT INTO users(college_id,email,email_normalized,display_name,handle) VALUES($1,'person@other.test','person@other.test','Other','other_user') RETURNING id::text`, otherCollege).Scan(&otherUser); err != nil {
+	if err := pool.QueryRow(ctx, `INSERT INTO users(college_id,email,email_normalized,display_name,handle,account_type) VALUES($1,'person@other.test','person@other.test','Other','other_user','campus') RETURNING id::text`, otherCollege).Scan(&otherUser); err != nil {
 		t.Fatal(err)
 	}
 	if err := pool.QueryRow(ctx, `INSERT INTO organizations(college_id,kind,slug,name) VALUES($1,'club','other-club','Other Club') RETURNING id::text`, otherCollege).Scan(&otherOrg); err != nil {
@@ -196,4 +197,9 @@ func sessionHash(key []byte, token string) []byte {
 	h := hmac.New(sha256.New, key)
 	_, _ = h.Write([]byte(token))
 	return h.Sum(nil)
+}
+
+func sessionCSRFHash(key []byte, sessionToken string) []byte {
+	csrf := base64.RawURLEncoding.EncodeToString(sessionHash(key, "peergit-csrf:"+sessionToken))
+	return sessionHash(key, csrf)
 }

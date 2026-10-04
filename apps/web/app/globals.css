@@ -28,6 +28,7 @@
 .campus-users{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
 .campus-users li{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:.8rem 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
 .account-panel a{color:var(--green);text-decoration-thickness:1px;text-underline-offset:3px}
+.account-shell{min-height:100vh;background:#eaf2e8}.account-shell .topbar{justify-content:space-between}.account-card{width:min(620px,calc(100% - 2rem));margin:clamp(3rem,12vh,8rem) auto;padding:clamp(1.5rem,5vw,3rem);background:white;border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 40px #173a3010;line-height:1.7}.account-card h1{font-size:clamp(2rem,6vw,3.2rem);letter-spacing:-.05em;line-height:1.08;margin:.2rem 0 1rem}.account-card p{color:var(--muted)}.account-card .primary-link{margin:.8rem 0;color:white}.account-card a:not(.primary-link){color:var(--green);text-underline-offset:3px}
 .account-panel a:focus-visible,.account-panel button:focus-visible,.account-panel input:focus-visible,.account-panel textarea:focus-visible,.account-panel select:focus-visible{outline:3px solid var(--orange);outline-offset:2px}
 .policy-page{max-width:900px;min-height:100vh;margin:auto;padding:2rem 6vw;background:var(--paper);line-height:1.7}
 .policy-page article{margin-top:2rem;background:#fff;border:1px solid var(--line);border-radius:12px;padding:clamp(1.2rem,5vw,3rem)}

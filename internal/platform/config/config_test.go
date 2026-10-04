@@ -50,7 +50,8 @@ func TestConfigValidation(t *testing.T) {
 		DatabaseURL: "postgres://user:pass@localhost/peergit", CursorKey: "0123456789abcdef0123456789abcdef",
 		AppOrigin: "https://example.edu", CookieSecure: true,
 		SessionHashKey: "0123456789abcdef0123456789abcdef", MFAEncryptionKey: "abcdef0123456789abcdef0123456789",
-		GoogleIssuer: "https://accounts.google.com", GoogleClientID: "client-id", GoogleClientSecret: "client-secret", GoogleRedirectURL: "https://example.edu/api/v1/auth/callback",
+		GitHubClientID: "client-id", GitHubClientSecret: "client-secret", GitHubRedirectURL: "https://example.edu/api/v1/auth/github/callback",
+		SMTPHost: "smtp.example.edu:587", SMTPFrom: "PeerGit <notify@example.edu>", SMTPTLSMode: "starttls", VerificationHashKey: "unique-verification-hash-key-for-test", VerificationEmailKey: "unique-verification-encryption-key-test",
 	}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
@@ -72,16 +73,16 @@ func TestConfigValidation(t *testing.T) {
 		t.Fatal("production must reject the example development signing key")
 	}
 	valid.CursorKey = "0123456789abcdef0123456789abcdef"
-	valid.GoogleRedirectURL = "https://attacker.example/api/v1/auth/callback"
+	valid.GitHubRedirectURL = "https://attacker.example/api/v1/auth/github/callback"
 	if err := valid.Validate(); err == nil {
-		t.Fatal("OIDC callback on another origin was accepted")
+		t.Fatal("GitHub callback on another origin was accepted")
 	}
 	dev := Config{AppEnv: "development", HTTPAddr: "127.0.0.1:8080", AppOrigin: "https://localhost", LogLevel: slog.LevelInfo}
-	dev.GoogleClientID = "partial-client"
+	dev.GitHubClientID = "partial-client"
 	if err := dev.Validate(); err == nil {
-		t.Fatal("partial Google OIDC configuration was accepted")
+		t.Fatal("partial GitHub App configuration was accepted")
 	}
-	dev.GoogleClientID = ""
+	dev.GitHubClientID = ""
 	dev.ObjectEndpoint = "http://127.0.0.1:8333"
 	if err := dev.Validate(); err == nil {
 		t.Fatal("partial object storage configuration was accepted")
