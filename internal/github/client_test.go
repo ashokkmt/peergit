@@ -78,6 +78,43 @@ func TestRateLimitIsNotRevocationAndErrorsAreSafe(t *testing.T) {
 	}
 }
 
+func TestRetryAfterDurationSupportsSecondsAndDates(t *testing.T) {
+	seconds := &HTTPError{RetryAfter: "12"}
+	if got := seconds.RetryAfterDuration(time.Now()); got != 12*time.Second {
+		t.Fatalf("seconds Retry-After = %s", got)
+	}
+	date := time.Now().UTC().Add(20 * time.Second).Truncate(time.Second)
+	formatted := &HTTPError{RetryAfter: date.Format(http.TimeFormat)}
+	if got := formatted.RetryAfterDuration(date.Add(-5 * time.Second)); got != 5*time.Second {
+		t.Fatalf("date Retry-After = %s, want 5s", got)
+	}
+	if got := (&HTTPError{RetryAfter: "bad"}).RetryAfterDuration(time.Now()); got != 0 {
+		t.Fatalf("invalid Retry-After = %s, want zero", got)
+	}
+}
+
+func TestInstallationRepositoryPaginationUsesInstallationToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer installation-token" {
+			t.Fatal("repository listing did not use installation token")
+		}
+		switch r.URL.Query().Get("page") {
+		case "1":
+			_, _ = io.WriteString(w, `{"repositories":[{"id":41,"full_name":"campus/one","private":true}]}`)
+		case "2":
+			_, _ = io.WriteString(w, `{"repositories":[]}`)
+		default:
+			t.Fatalf("unexpected repository page %s", r.URL.RawQuery)
+		}
+	}))
+	defer server.Close()
+	c := &Client{HTTP: server.Client(), API: server.URL}
+	repos, err := c.InstallationRepositories(context.Background(), "installation-token")
+	if err != nil || len(repos) != 1 || repos[0].ID != 41 || repos[0].FullName != "campus/one" {
+		t.Fatalf("repositories = %#v, %v", repos, err)
+	}
+}
+
 func TestInstallationReadsScopeWithAppJWT(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/app/installations/42" || r.Header.Get("Authorization") != "Bearer app-jwt" {
@@ -155,5 +192,21 @@ func TestResolveRejectsMalformedAndOversizedProviderResponses(t *testing.T) {
 		if err == nil {
 			t.Fatal("invalid provider response accepted")
 		}
+	}
+}
+
+func TestResolveRefReturnsImmutableCommitSHA(t *testing.T) {
+	sha := strings.Repeat("b", 40)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/owner/repo/commits/main" || r.Header.Get("Authorization") != "Bearer installation-token" {
+			t.Fatalf("unexpected ref request path=%q authorization=%q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		_, _ = io.WriteString(w, `{"sha":"`+sha+`"}`)
+	}))
+	defer server.Close()
+	c := &Client{HTTP: server.Client(), API: server.URL}
+	got, err := c.Resolve(context.Background(), "owner/repo", "main", "installation-token")
+	if err != nil || got != sha {
+		t.Fatalf("resolved SHA = %q, %v; want %q", got, err, sha)
 	}
 }

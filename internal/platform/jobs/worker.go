@@ -3,9 +3,11 @@ package jobs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -20,6 +22,13 @@ const (
 type Handler func(context.Context, Claim) (objectKey string, err error)
 
 func (q Queue) Run(ctx context.Context, worker string, handlers map[string]Handler, logger *slog.Logger) error {
+	return q.RunConcurrent(ctx, worker, handlers, logger, 1)
+}
+
+func (q Queue) RunConcurrent(ctx context.Context, worker string, handlers map[string]Handler, logger *slog.Logger, concurrency int) error {
+	if concurrency < 1 || concurrency > 32 {
+		return errors.New("worker concurrency must be between 1 and 32")
+	}
 	if len(handlers) == 0 {
 		logger.Info("worker is idle; no job handlers are registered")
 		for ctx.Err() == nil {
@@ -37,6 +46,19 @@ func (q Queue) Run(ctx context.Context, worker string, handlers map[string]Handl
 		types = append(types, jobType)
 	}
 	sort.Strings(types)
+	var workers sync.WaitGroup
+	workers.Add(concurrency)
+	for index := 0; index < concurrency; index++ {
+		go func(index int) {
+			defer workers.Done()
+			q.runLoop(ctx, fmt.Sprintf("%s-%d", worker, index+1), types, handlers, logger)
+		}(index)
+	}
+	workers.Wait()
+	return nil
+}
+
+func (q Queue) runLoop(ctx context.Context, worker string, types []string, handlers map[string]Handler, logger *slog.Logger) {
 	for ctx.Err() == nil {
 		if err := q.RecoverExhausted(ctx); err != nil {
 			logger.ErrorContext(ctx, "job lease recovery failed", "error", err)
@@ -44,20 +66,19 @@ func (q Queue) Run(ctx context.Context, worker string, handlers map[string]Handl
 		claim, err := q.ClaimTypes(ctx, worker, leaseDuration, types)
 		if errors.Is(err, pgx.ErrNoRows) {
 			if err = wait(ctx, 500*time.Millisecond); err != nil {
-				return nil
+				return
 			}
 			continue
 		}
 		if err != nil {
 			logger.ErrorContext(ctx, "job claim failed", "error", err)
 			if err = wait(ctx, time.Second); err != nil {
-				return nil
+				return
 			}
 			continue
 		}
 		q.runClaim(ctx, claim, handlers[claim.Type], logger)
 	}
-	return nil
 }
 
 func (q Queue) runClaim(ctx context.Context, claim Claim, handler Handler, logger *slog.Logger) {
@@ -100,7 +121,14 @@ func (q Queue) runClaim(ctx context.Context, claim Claim, handler Handler, logge
 		err = errors.New("snapshot handler completed without an object key")
 	}
 	if err != nil {
-		if retryErr := q.RetryWithCode(context.Background(), claim, retryDelay(claim.Attempt), "handler_failed"); retryErr != nil {
+		delay := retryDelay(claim.Attempt)
+		var retryAfter interface{ RetryAfterDuration(time.Time) time.Duration }
+		if errors.As(err, &retryAfter) {
+			if providerDelay := retryAfter.RetryAfterDuration(time.Now()); providerDelay > delay {
+				delay = min(providerDelay, time.Hour)
+			}
+		}
+		if retryErr := q.RetryWithCode(context.Background(), claim, delay, "handler_failed"); retryErr != nil {
 			logger.ErrorContext(ctx, "job retry failed", "job_id", claim.ID, "job_type", claim.Type, "error", retryErr)
 		}
 		logger.WarnContext(ctx, "job handler failed", "job_id", claim.ID, "job_type", claim.Type)

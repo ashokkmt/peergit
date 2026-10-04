@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -30,6 +31,10 @@ type Config struct {
 	GitHubAuthorizeURL   string
 	GitHubTokenURL       string
 	GitHubAPIURL         string
+	GitHubAppID          string
+	GitHubAppSlug        string
+	GitHubAppPrivateKey  string
+	GitHubWebhookSecret  string
 	SMTPHost             string
 	SMTPFrom             string
 	SMTPUsername         string
@@ -83,6 +88,10 @@ func Load() (*Config, error) {
 		GitHubAuthorizeURL:   getEnv("GITHUB_AUTHORIZE_URL", ""),
 		GitHubTokenURL:       getEnv("GITHUB_TOKEN_URL", ""),
 		GitHubAPIURL:         getEnv("GITHUB_API_URL", ""),
+		GitHubAppID:          getEnv("GITHUB_APP_ID", ""),
+		GitHubAppSlug:        getEnv("GITHUB_APP_SLUG", ""),
+		GitHubAppPrivateKey:  getEnv("GITHUB_APP_PRIVATE_KEY_PATH", ""),
+		GitHubWebhookSecret:  getEnv("GITHUB_APP_WEBHOOK_SECRET", ""),
 		SMTPHost:             getEnv("SMTP_HOST", "127.0.0.1:1025"),
 		SMTPFrom:             getEnv("SMTP_FROM", "PeerGit <noreply@localhost>"),
 		SMTPUsername:         getEnv("SMTP_USERNAME", ""),
@@ -135,6 +144,9 @@ func (c Config) Validate() error {
 		if c.GitHubClientID == "" || c.GitHubClientSecret == "" || c.GitHubRedirectURL == "" {
 			return errors.New("GitHub client ID, client secret, and redirect URL are required in staging and production")
 		}
+		if c.GitHubAppID == "" || c.GitHubAppSlug == "" || c.GitHubAppPrivateKey == "" || len(c.GitHubWebhookSecret) < 32 {
+			return errors.New("GitHub App ID, slug, private-key path, and webhook secret are required in staging and production")
+		}
 	}
 	origin, err := url.Parse(c.AppOrigin)
 	if err != nil || origin.Scheme == "" || origin.Host == "" || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" || (origin.Scheme != "https" && c.AppEnv != "development" && c.AppEnv != "test") {
@@ -142,6 +154,20 @@ func (c Config) Validate() error {
 	}
 	if (c.GitHubClientID == "") != (c.GitHubClientSecret == "") || (c.GitHubClientID == "") != (c.GitHubRedirectURL == "") {
 		return errors.New("GitHub client ID, secret, and redirect URL must be configured together")
+	}
+	appParts := 0
+	for _, value := range []string{c.GitHubAppID, c.GitHubAppSlug, c.GitHubAppPrivateKey, c.GitHubWebhookSecret} {
+		if value != "" {
+			appParts++
+		}
+	}
+	if appParts != 0 && appParts != 4 {
+		return errors.New("GitHub App ID, slug, private-key path, and webhook secret must be configured together")
+	}
+	if c.GitHubAppID != "" {
+		if !regexp.MustCompile(`^[1-9][0-9]*$`).MatchString(c.GitHubAppID) || !regexp.MustCompile(`^[a-z0-9-]+$`).MatchString(c.GitHubAppSlug) || len(c.GitHubWebhookSecret) < 32 {
+			return errors.New("GitHub App ID, slug, or webhook secret is invalid")
+		}
 	}
 	if c.GitHubClientID != "" {
 		redirect, err := url.Parse(c.GitHubRedirectURL)

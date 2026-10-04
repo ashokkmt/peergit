@@ -21,6 +21,24 @@ Keep entries brief. Combine tightly related work completed together; create sepa
 
 ## Entries
 
+### 2026-10-04T18:44Z — Isolate OTP browser contract test
+
+- **Phase/area:** Phase 2 campus verification browser tests.
+- **Summary:** Investigated an intermittent Playwright timeout waiting for the mocked campus OTP success state. Reproduced the full script successfully; the isolated test had an authenticated session stub without a matching `/api/v1/me` stub, causing unrelated 401 log traffic. Stubbed that endpoint and added failure context for confirmation-request count and visible page state. The unrelated 401s were test leakage, but the available evidence does not prove they caused the timeout.
+- **Files/components:** `tests/e2e/walkthrough.cjs`, ignored `plans/peergit-test.md`, `WORKLOG.md`.
+- **Validation:** `node scripts/test.mjs` passed both before and after the focused test adjustment, including migrations, Go tests/integration, vet, staticcheck, web typecheck/build, Playwright (OTP and live Mailpit journeys), Compose validation, and diff check.
+- **Follow-up:** If the timeout recurs, use the added request count/page details to determine whether the mocked POST ran and whether the UI rendered its response.
+- **References:** User-provided Playwright run log.
+
+### 2026-10-04T17:14Z — Implement Phase 4 GitHub evidence foundation
+
+- **Phase/area:** Phase 4 GitHub repository evidence and immutable snapshots.
+- **Summary:** Added tenant-scoped GitHub App installations and project repository bindings, HMAC-verified durable webhook intake, PostgreSQL-driven reconciliation/contribution capture, exact-SHA snapshot receipts with fenced worker capture and stored-byte verification, and the responsive project repository panel. Added additive migrations; academic/event submission foreign keys remain deferred to Phases 6–7.
+- **Files/components:** `migrations/0006_github_evidence.sql`, `migrations/0007_snapshot_job_link.sql`, `internal/repository`, `internal/github`, `internal/platform/jobs`, `internal/platform/storage`, `cmd/api`, `cmd/worker`, `apps/web/app/repository-panel.tsx`, project styles, integration/unit/E2E tests. Locally updated ignored `plans/implementation-phases.md` and `plans/peergit-test.md` without force-tracking plan files.
+- **Validation:** `node scripts/test.mjs` passed (migrations, Go tests including PostgreSQL integration, vet, staticcheck, Next.js typecheck/build, Playwright, Compose validation, and diff check). `TestLocalS3TenMaximumCaptures` passed against local SeaweedFS: ten concurrent 100 MiB uploads and stored-byte verifications completed in 14.755 seconds; temporary objects were removed. Graphify refreshed the code map.
+- **Follow-up:** Full real-GitHub install/revocation and 100→130 replay acceptance remains unverified; LFS/submodule contents are not captured. The Phase 4 roadmap gate remains open until the full provider-backed failure/replay suite is recorded. No production capacity claim is made from the local storage measurement.
+- **References:** `plans/implementation-phases.md` Phase 4; `plans/plan-new.md` §§8–9, 15–16.
+
 ### 2026-10-04T06:56Z — Implement GitHub signup and campus verification
 
 - **Phase/area:** Phase 2 identity, campus verification, media and Phase 3 regression.

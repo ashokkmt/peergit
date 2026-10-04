@@ -26,6 +26,16 @@ func TestRunInstallsConfiguredLoggerBeforeListenFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
+	keyFile, err := os.CreateTemp(t.TempDir(), "github-app-*.pem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = keyFile.WriteString("test key material"); err != nil {
+		t.Fatal(err)
+	}
+	if err = keyFile.Close(); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("LOG_LEVEL", "error")
 	t.Setenv("HTTP_ADDR", listener.Addr().String())
@@ -39,6 +49,10 @@ func TestRunInstallsConfiguredLoggerBeforeListenFailure(t *testing.T) {
 	t.Setenv("GITHUB_CLIENT_ID", "test-client-id")
 	t.Setenv("GITHUB_CLIENT_SECRET", "test-client-secret")
 	t.Setenv("GITHUB_REDIRECT_URL", "https://example.edu/api/v1/auth/github/callback")
+	t.Setenv("GITHUB_APP_ID", "12345")
+	t.Setenv("GITHUB_APP_SLUG", "peergit-campus")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY_PATH", keyFile.Name())
+	t.Setenv("GITHUB_APP_WEBHOOK_SECRET", "test-only-github-webhook-secret-0123456789")
 	t.Setenv("SMTP_HOST", "smtp.example.edu:587")
 	t.Setenv("SMTP_FROM", "PeerGit <notify@example.edu>")
 	t.Setenv("SMTP_TLS_MODE", "starttls")

@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -27,12 +28,58 @@ type Client struct {
 	API  string
 }
 type Repository struct {
-	ID      int64 `json:"id"`
-	Private bool  `json:"private"`
+	ID            int64     `json:"id"`
+	FullName      string    `json:"full_name"`
+	Private       bool      `json:"private"`
+	Visibility    string    `json:"visibility"`
+	DefaultBranch string    `json:"default_branch"`
+	PushedAt      time.Time `json:"pushed_at"`
 }
 type Installation struct {
+	ID                  int64             `json:"id"`
+	Account             InstallationOwner `json:"account"`
+	TargetType          string            `json:"target_type"`
 	RepositorySelection string            `json:"repository_selection"`
 	Permissions         map[string]string `json:"permissions"`
+	SuspendedAt         *time.Time        `json:"suspended_at"`
+}
+type InstallationOwner struct {
+	ID    int64  `json:"id"`
+	Login string `json:"login"`
+}
+type Commit struct {
+	SHA    string       `json:"sha"`
+	Commit CommitDetail `json:"commit"`
+	Author *User        `json:"author"`
+	Stats  CommitStats  `json:"stats"`
+}
+type CommitDetail struct {
+	Message string       `json:"message"`
+	Author  CommitPerson `json:"author"`
+}
+type CommitPerson struct {
+	Name string    `json:"name"`
+	Date time.Time `json:"date"`
+}
+type CommitStats struct {
+	Additions int `json:"additions"`
+	Deletions int `json:"deletions"`
+	Total     int `json:"total"`
+}
+type User struct {
+	ID    int64  `json:"id"`
+	Login string `json:"login"`
+}
+type Activity struct {
+	Number      int64     `json:"number"`
+	Title       string    `json:"title"`
+	Body        string    `json:"body"`
+	State       string    `json:"state"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Comments    int       `json:"comments"`
+	User        *User     `json:"user"`
+	PullRequest *struct{} `json:"pull_request"`
 }
 type HTTPError struct {
 	Status      int
@@ -42,6 +89,18 @@ type HTTPError struct {
 }
 
 func (e *HTTPError) Error() string { return fmt.Sprintf("GitHub request failed (HTTP %d)", e.Status) }
+func (e *HTTPError) RetryAfterDuration(now time.Time) time.Duration {
+	if e == nil || e.RetryAfter == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(e.RetryAfter); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if at, err := http.ParseTime(e.RetryAfter); err == nil && at.After(now) {
+		return at.Sub(now)
+	}
+	return 0
+}
 func IsDenied(err error) bool {
 	var e *HTTPError
 	return errors.As(err, &e) && e.Denied && !e.RateLimited
@@ -154,6 +213,91 @@ func (c *Client) Installation(ctx context.Context, installation, jwt string) (In
 	var out Installation
 	err = decode(resp, &out)
 	return out, err
+}
+
+func (c *Client) InstallationRepositories(ctx context.Context, token string) ([]Repository, error) {
+	var repositories []Repository
+	for page := 1; page <= 100; page++ {
+		resp, err := c.request(ctx, http.MethodGet, fmt.Sprintf("/installation/repositories?per_page=100&page=%d", page), token)
+		if err != nil {
+			return nil, err
+		}
+		var out struct {
+			Repositories []Repository `json:"repositories"`
+		}
+		if err = decode(resp, &out); err != nil {
+			return nil, err
+		}
+		repositories = append(repositories, out.Repositories...)
+		if len(out.Repositories) < 100 {
+			return repositories, nil
+		}
+	}
+	return nil, errors.New("installation repository list exceeded the 10000 repository safety limit")
+}
+
+func (c *Client) Commits(ctx context.Context, repo, token string, since time.Time, page int) ([]Commit, error) {
+	path, err := repoPath(repo)
+	if err != nil {
+		return nil, err
+	}
+	if page < 1 || page > 100 {
+		return nil, errors.New("commit page is outside the supported range")
+	}
+	query := url.Values{"per_page": {"100"}, "page": {fmt.Sprint(page)}}
+	if !since.IsZero() {
+		query.Set("since", since.UTC().Format(time.RFC3339))
+	}
+	resp, err := c.request(ctx, http.MethodGet, path+"/commits?"+query.Encode(), token)
+	if err != nil {
+		return nil, err
+	}
+	var commits []Commit
+	if err = decode(resp, &commits); err != nil {
+		return nil, err
+	}
+	for _, commit := range commits {
+		if !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(commit.SHA) || commit.Stats.Additions < 0 || commit.Stats.Deletions < 0 {
+			return nil, errors.New("GitHub returned an invalid commit record")
+		}
+	}
+	return commits, nil
+}
+
+func (c *Client) PullRequests(ctx context.Context, repo, token string, page int) ([]Activity, error) {
+	return c.activity(ctx, repo, token, "pulls", time.Time{}, page)
+}
+
+func (c *Client) Issues(ctx context.Context, repo, token string, since time.Time, page int) ([]Activity, error) {
+	return c.activity(ctx, repo, token, "issues", since, page)
+}
+
+func (c *Client) activity(ctx context.Context, repo, token, kind string, since time.Time, page int) ([]Activity, error) {
+	path, err := repoPath(repo)
+	if err != nil {
+		return nil, err
+	}
+	if kind != "pulls" && kind != "issues" || page < 1 || page > 100 {
+		return nil, errors.New("invalid GitHub activity request")
+	}
+	query := url.Values{"per_page": {"100"}, "page": {fmt.Sprint(page)}, "state": {"all"}, "sort": {"updated"}, "direction": {"desc"}}
+	if !since.IsZero() {
+		query.Set("since", since.UTC().Format(time.RFC3339))
+	}
+	resp, err := c.request(ctx, http.MethodGet, path+"/"+kind+"?"+query.Encode(), token)
+	if err != nil {
+		return nil, err
+	}
+	var items []Activity
+	if err = decode(resp, &items); err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		if item.Number <= 0 || item.Comments < 0 || len(item.Title) > 500 || len(item.Body) > 65536 {
+			return nil, errors.New("GitHub returned an invalid activity record")
+		}
+	}
+	return items, nil
 }
 func repoPath(repo string) (string, error) {
 	if !regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`).MatchString(repo) {

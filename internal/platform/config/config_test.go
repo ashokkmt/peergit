@@ -51,6 +51,7 @@ func TestConfigValidation(t *testing.T) {
 		AppOrigin: "https://example.edu", CookieSecure: true,
 		SessionHashKey: "0123456789abcdef0123456789abcdef", MFAEncryptionKey: "abcdef0123456789abcdef0123456789",
 		GitHubClientID: "client-id", GitHubClientSecret: "client-secret", GitHubRedirectURL: "https://example.edu/api/v1/auth/github/callback",
+		GitHubAppID: "12345", GitHubAppSlug: "peergit-campus", GitHubAppPrivateKey: `.secrets/github-app.pem`, GitHubWebhookSecret: "0123456789abcdef0123456789abcdef",
 		SMTPHost: "smtp.example.edu:587", SMTPFrom: "PeerGit <notify@example.edu>", SMTPTLSMode: "starttls", VerificationHashKey: "unique-verification-hash-key-for-test", VerificationEmailKey: "unique-verification-encryption-key-test",
 	}
 	if err := valid.Validate(); err != nil {

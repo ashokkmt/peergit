@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"peergit/internal/campus"
+	"peergit/internal/github"
 	"peergit/internal/health"
 	"peergit/internal/identity"
 	"peergit/internal/media"
@@ -26,6 +27,7 @@ import (
 	"peergit/internal/platform/storage"
 	"peergit/internal/project"
 	"peergit/internal/recruitment"
+	"peergit/internal/repository"
 )
 
 func main() {
@@ -68,7 +70,19 @@ func run() error {
 	mediaHandler := media.NewHandler(pool, objectStore, identityHandler, errorManager)
 	projectHandler := project.NewHandler(pool, identityHandler, logger, errorManager)
 	recruitmentHandler := recruitment.NewHandler(pool, identityHandler, logger, errorManager)
-	router := httpserver.NewRouter(healthHandler, logger, errorManager, identityHandler.Register, campusHandler.Register, mediaHandler.Register, projectHandler.Register, recruitmentHandler.Register)
+	githubClient := github.New()
+	if cfg.GitHubAPIURL != "" {
+		githubClient.API = cfg.GitHubAPIURL
+	}
+	var githubKey []byte
+	if cfg.GitHubAppPrivateKey != "" {
+		githubKey, err = os.ReadFile(cfg.GitHubAppPrivateKey)
+		if err != nil {
+			return fmt.Errorf("read GitHub App private key: %w", err)
+		}
+	}
+	repositoryHandler := repository.NewHandler(pool, identityHandler, githubClient, objectStore, repository.AppConfig{ID: cfg.GitHubAppID, Slug: cfg.GitHubAppSlug, PrivateKey: githubKey, WebhookSecret: cfg.GitHubWebhookSecret, Origin: cfg.AppOrigin}, logger, errorManager)
+	router := httpserver.NewRouter(healthHandler, logger, errorManager, identityHandler.Register, campusHandler.Register, mediaHandler.Register, projectHandler.Register, recruitmentHandler.Register, repositoryHandler.Register)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {

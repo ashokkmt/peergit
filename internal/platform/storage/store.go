@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -88,6 +89,17 @@ func (s *Store) Verify(ctx context.Context, receipt Receipt) error {
 		return ErrHashMismatch
 	}
 	return nil
+}
+
+func (s *Store) Open(ctx context.Context, key string) (io.ReadCloser, error) {
+	if key == "" || strings.ContainsAny(key, "\r\n\\") || strings.HasPrefix(key, "/") {
+		return nil, errors.New("invalid object key")
+	}
+	out, err := s.Client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.Bucket), Key: aws.String(key)})
+	if err != nil {
+		return nil, err
+	}
+	return out.Body, nil
 }
 
 func (s *Store) Delete(ctx context.Context, key string) error {
