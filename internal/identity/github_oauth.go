@@ -174,12 +174,37 @@ func (h *Handler) githubCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	csrf := sessionCSRFToken([]byte(h.cfg.SessionHashKey), session)
 	expires := time.Now().UTC().Add(12 * time.Hour)
-	_, err = h.pool.Exec(r.Context(), `INSERT INTO sessions(user_id,college_id,token_hash,csrf_hash,expires_at) VALUES($1,NULL,$2,$3,$4)`, userID, keyedHash([]byte(h.cfg.SessionHashKey), []byte(session)), keyedHash([]byte(h.cfg.SessionHashKey), []byte(csrf)), expires)
+	var collegeID string
+	err = h.pool.QueryRow(r.Context(), `SELECT COALESCE((
+		SELECT c.id::text FROM users u JOIN colleges c ON c.id=u.college_id AND c.status='active'
+		WHERE u.id=$1 AND u.account_type='campus' AND EXISTS(
+			SELECT 1 FROM campus_verifications v WHERE v.college_id=c.id AND v.user_id=u.id AND v.revoked_at IS NULL AND
+			(v.source='administrator_review' OR EXISTS(
+				SELECT 1 FROM campus_emails ce JOIN college_domains d ON d.college_id=ce.college_id AND d.domain=split_part(ce.email_normalized,'@',2) AND d.verified_at IS NOT NULL
+				WHERE ce.id=v.campus_email_id AND ce.verified_at IS NOT NULL
+			))
+		)),'' )`, userID).Scan(&collegeID)
+	if err != nil {
+		h.err.Handle(w, r, err)
+		return
+	}
+	_, err = h.pool.Exec(r.Context(), `INSERT INTO sessions(user_id,college_id,token_hash,csrf_hash,expires_at) VALUES($1,NULLIF($2,'')::uuid,$3,$4,$5)`, userID, collegeID, keyedHash([]byte(h.cfg.SessionHashKey), []byte(session)), keyedHash([]byte(h.cfg.SessionHashKey), []byte(csrf)), expires)
 	if err != nil {
 		h.err.Handle(w, r, err)
 		return
 	}
 	h.setCookie(w, session, expires)
+	if collegeID != "" {
+		var complete bool
+		if err = h.pool.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM consent_records WHERE user_id=$1 AND purpose='terms' AND policy_version=$2 AND revoked_at IS NULL) AND EXISTS(SELECT 1 FROM consent_records WHERE user_id=$1 AND purpose='privacy' AND policy_version=$3 AND revoked_at IS NULL)`, userID, termsPolicyVersion, privacyPolicyVersion).Scan(&complete); err != nil {
+			h.err.Handle(w, r, err)
+			return
+		}
+		if complete {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+	}
 	http.Redirect(w, r, "/onboarding", http.StatusSeeOther)
 }
 

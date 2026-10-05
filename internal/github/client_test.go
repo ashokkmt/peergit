@@ -133,6 +133,40 @@ func TestInstallationReadsScopeWithAppJWT(t *testing.T) {
 	}
 }
 
+func TestUserRepositoryAuthorizationIncludesAdminPermissionAndBoundsReadme(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer user-token" {
+			t.Fatalf("authorization request used unexpected token: %q", r.Header.Get("Authorization"))
+		}
+		switch r.URL.Path {
+		case "/user/installations/42/repositories":
+			_, _ = io.WriteString(w, `{"repositories":[{"id":41003,"full_name":"test-owner/fixture","permissions":{"admin":true,"push":true}}]}`)
+		case "/repos/test-owner/fixture/readme":
+			_, _ = io.WriteString(w, `{"encoding":"base64","size":5,"content":"SGVsbG8="}`)
+		case "/repos/test-owner/large/readme":
+			_, _ = io.WriteString(w, `{"encoding":"base64","size":1048577,"content":"eA=="}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	c := &Client{HTTP: server.Client(), API: server.URL}
+	repositories, err := c.UserInstallationRepositories(context.Background(), 42, "user-token")
+	if err != nil || len(repositories) != 1 || repositories[0].ID != 41003 || !repositories[0].Permissions["admin"] {
+		t.Fatalf("authorized repositories = %#v, %v", repositories, err)
+	}
+	readme, err := c.Readme(context.Background(), "test-owner/fixture", "user-token")
+	if err != nil || readme != "Hello" {
+		t.Fatalf("README = %q, %v", readme, err)
+	}
+	if _, err = c.Readme(context.Background(), "test-owner/large", "user-token"); err == nil {
+		t.Fatal("oversized README accepted")
+	}
+	if _, err = c.UserInstallationRepositories(context.Background(), 0, "user-token"); err == nil {
+		t.Fatal("invalid installation ID accepted")
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

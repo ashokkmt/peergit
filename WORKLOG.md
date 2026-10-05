@@ -21,6 +21,69 @@ Keep entries brief. Combine tightly related work completed together; create sepa
 
 ## Entries
 
+### 2026-10-05T12:13Z — Fix GitHub imports without descriptions
+
+- **Phase/area:** Phase 4 repository imports
+- **Summary:** GitHub repositories with blank descriptions produced an empty project summary, violating the database's 1–500 character constraint. Imports now use a repository-name fallback, with regression coverage.
+- **Files/components:** `internal/repository/imports.go`, `internal/repository/imports_test.go`, `plans/peergit-test.md`, `WORKLOG.md`.
+- **Validation:** `gofmt`, focused repository tests, `go test ./... -count=1`, all integration tests with `TEST_DATABASE_URL` against local PostgreSQL, `go vet ./...`, and `staticcheck ./...` passed. `node scripts/test.mjs` was not run because the user's API and frontend were already listening on its required ports (8080 and 3000); stopping them would interrupt the active local session.
+- **Follow-up:** Restart the API and retry the import through a fresh authorization flow. The failed transaction rolled back; its one-use OAuth state cannot be reused.
+- **References:** API request `c1b711e0689142c86cb41603a03cdbfa`.
+
+### 2026-10-05T11:41Z — Reorganize local testing guides
+
+- **Phase/area:** Local operations documentation
+- **Summary:** Moved Repository App redirect/credential instructions into the setup and `.env` sections, placed organization import steps with repository import, and integrated pgAdmin into the Docker startup instructions. Removed appended duplicate sections and patch markers.
+- **Files/components:** `plans/live-github-testing.md`, `plans/peergit-run.md`, `WORKLOG.md`.
+- **Validation:** `git diff --check` passed. Reviewed section order and verified the plan files remain ignored. No application tests were needed for this documentation-only change.
+- **Follow-up:** Run the Compose command locally when convenient.
+- **References:** `plans/live-github-testing.md`, `plans/peergit-run.md`.
+
+### 2026-10-05T11:32:22Z — Document pgAdmin in local startup commands
+- Added the Compose `tools` profile command to start pgAdmin alongside the local services in the local run and live GitHub testing guides.
+- Documented the local PostgreSQL connection values and persistence behavior of the `pgadmin-data` volume.
+- Validation: documentation-only; Compose command behavior follows the existing optional `tools` profile. Shell-based checks remain unavailable because the workspace command runner fails to start.
+- Follow-up: run the documented command locally if Compose configuration changes.
+
+### 2026-10-05T11:27:52Z — Clarify Repository App setup guide
+- Clarified the distinct GitHub App Setup URL, user-authorization Redirect URI, and Webhook URL fields in the local live-testing guide.
+- Distinguished the PEM private key, App ID, Client ID, and OAuth client secret, with exact environment-variable mappings and dashboard steps.
+- Validation: documentation review against GitHub's official setup and callback documentation; shell-based checks remain unavailable because the workspace command runner fails to start.
+- Follow-up: verify the local OAuth flow after configuring Repository App credentials.
+
+### 2026-10-05T11:18:18Z — Update live GitHub testing guide
+- Added Repository App user-authorization environment variables and the exact callback URL to the live-testing instructions.
+- Documented the optional organization-owned repository installation, authorization, admin-permission, and import flow; the personal two-repository smoke test remains sufficient.
+- Validation: documentation-only update; shell-based verification was unavailable in this turn because the workspace command runner failed to start.
+- Follow-up: run the local live-testing steps when the Repository App credentials are configured.
+
+### 2026-10-05T11:04Z — Organize web components and add local PostgreSQL GUI
+
+- **Phase/area:** Frontend structure and local development services.
+- **Summary:** Moved UI components out of the Next.js route tree into `components/layout`, `components/account`, `components/github`, and `components/projects`; removed the unused project-first repository panel. Added optional, loopback-only pgAdmin 4 to the Compose `tools` profile with a separate data volume and documented login/connection steps and local-only usage.
+- **Files/components:** `apps/web/app`, `apps/web/components`, `.env.example`, `deploy/compose/local.yml`, ignored `plans/peergit-run.md`, ignored `plans/local-services.md`, `WORKLOG.md`.
+- **Validation:** `node scripts/test.mjs` passed all Go, database, vet, staticcheck, frontend, E2E, Compose, and diff checks. Default and tools-profile Compose configs validated. Started pgAdmin, confirmed its local login endpoint returned HTTP 200, and checked container logs after correcting its sample login address.
+- **Follow-up:** pgAdmin is intentionally excluded from production and uses the local database owner; do not connect it to production. Graphify should be refreshed after this component move.
+- **References:** Official [pgAdmin container deployment docs](https://www.pgadmin.org/docs/pgadmin4/latest/container_deployment.html); pinned image `dpage/pgadmin4:9.18.0`.
+
+### 2026-10-05T10:43Z — Import-first GitHub project workflow
+
+- **Phase/area:** Signup sessions, GitHub repository imports, project discovery, and project collaboration.
+- **Summary:** Replaced project-first repository setup with account-scoped GitHub installation/authorization and private imports, preserved verified campus membership across login, and moved account navigation/profile/settings to dedicated routes. Discovery now excludes repository-free drafts; imported project pages support metadata edits, explicit publication, team openings, and applications. Removed obsolete project-first handlers and corrected the campus-restoration SQL.
+- **Files/components:** `.env.example`, `cmd/api`, `internal/github`, `internal/identity`, `internal/platform/config`, `internal/project`, `internal/recruitment`, `internal/repository`, `migrations/0008_github_project_imports.sql`, `apps/web/app`, `tests/integration`, `tests/e2e/walkthrough.cjs`, `scripts/test.mjs`, ignored `plans/*` guides.
+- **Validation:** `node scripts/test.mjs` passed end to end: Go formatting/tests with PostgreSQL integration (including migration blank-to-head/repeat), `go vet`, `staticcheck`, frontend typecheck/build, desktop/mobile browser journeys, API/worker/Mailpit onboarding, project edit/publish/opening flow, Compose validation, and `git diff --check`.
+- **Follow-up:** Real GitHub personal/organization import and revocation smoke checks still require operator-owned App credentials/accounts. Production storage/recovery gates remain separate. Do not claim all Phase 4 provider-backed acceptance complete.
+- **References:** Local import-first product decision and updated ignored `plans/implementation-phases.md`.
+
+### 2026-10-05T07:08Z — Document local live GitHub walkthrough
+
+- **Phase/area:** Phase 2–4 manual live-provider testing.
+- **Summary:** Added an ignored end-to-end setup guide for creator-owned signup/repository GitHub Apps, a separate student GitHub account with selected/excluded private fixtures, every application environment value, local Docker services, HTTPS signup/Mailpit campus verification, signed webhook relay, evidence sync, snapshots, and revoked downloads. Corrected adjacent OAuth/run instructions and documented the existing `/projects` installation redirect workaround.
+- **Files/components:** Ignored `plans/live-github-testing.md`, `plans/setup-github-oauth.md`, `plans/peergit-run.md`, `plans/peergit-test.md`; tracked `WORKLOG.md`. No application or service configuration changed.
+- **Validation:** Checked guide variables against every `.env.example` key and local documentation links; `docker compose -f deploy/compose/local.yml config --quiet`, `npm exec --yes --package=smee-client -- smee --help`, `git diff --check`, and ignore checks passed. Documentation-only checks followed the authoritative test guide; no code suite was required. No live account/App secrets were read or live provider tests performed.
+- **Follow-up:** User creates the two development Apps and completes the manual live smoke checks. Known installation redirect targets a missing frontend `/projects` route; guide returns to `/` after confirmed linking. Full Phase 4 gates remain separate from manual smoke testing.
+- **References:** `plans/live-github-testing.md`; official GitHub registration, visibility, setup URL, and webhook documentation linked there.
+
 ### 2026-10-04T19:10Z — Avoid GitHub Actions environment collision
 
 - **Phase/area:** Test configuration and CI migrations.

@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const APIVersion = "2026-03-10"
@@ -28,12 +29,17 @@ type Client struct {
 	API  string
 }
 type Repository struct {
-	ID            int64     `json:"id"`
-	FullName      string    `json:"full_name"`
-	Private       bool      `json:"private"`
-	Visibility    string    `json:"visibility"`
-	DefaultBranch string    `json:"default_branch"`
-	PushedAt      time.Time `json:"pushed_at"`
+	ID            int64           `json:"id"`
+	FullName      string          `json:"full_name"`
+	HTMLURL       string          `json:"html_url"`
+	Description   string          `json:"description"`
+	Private       bool            `json:"private"`
+	Visibility    string          `json:"visibility"`
+	DefaultBranch string          `json:"default_branch"`
+	Topics        []string        `json:"topics"`
+	Language      string          `json:"language"`
+	Permissions   map[string]bool `json:"permissions"`
+	PushedAt      time.Time       `json:"pushed_at"`
 }
 type Installation struct {
 	ID                  int64             `json:"id"`
@@ -70,6 +76,66 @@ type User struct {
 	ID    int64  `json:"id"`
 	Login string `json:"login"`
 }
+
+func (c *Client) User(ctx context.Context, token string) (User, error) {
+	resp, err := c.request(ctx, http.MethodGet, "/user", token)
+	if err != nil {
+		return User{}, err
+	}
+	var user User
+	err = decode(resp, &user)
+	if err == nil && user.ID <= 0 {
+		err = errors.New("GitHub user ID missing")
+	}
+	return user, err
+}
+
+func (c *Client) UserInstallations(ctx context.Context, token string) ([]Installation, error) {
+	var installations []Installation
+	for page := 1; page <= 100; page++ {
+		resp, err := c.request(ctx, http.MethodGet, fmt.Sprintf("/user/installations?per_page=100&page=%d", page), token)
+		if err != nil {
+			return nil, err
+		}
+		var out struct {
+			Installations []Installation `json:"installations"`
+		}
+		if err = decode(resp, &out); err != nil {
+			return nil, err
+		}
+		installations = append(installations, out.Installations...)
+		if len(out.Installations) < 100 {
+			return installations, nil
+		}
+	}
+	return nil, errors.New("GitHub installation list exceeded the supported limit")
+}
+
+func (c *Client) UserInstallationRepositories(ctx context.Context, installationID int64, token string) ([]Repository, error) {
+	if installationID <= 0 {
+		return nil, errors.New("installation ID is invalid")
+	}
+	var repositories []Repository
+	for page := 1; page <= 100; page++ {
+		path := fmt.Sprintf("/user/installations/%d/repositories?per_page=100&page=%d", installationID, page)
+		resp, err := c.request(ctx, http.MethodGet, path, token)
+		if err != nil {
+			return nil, err
+		}
+		var out struct {
+			Repositories []Repository `json:"repositories"`
+		}
+		if err = decode(resp, &out); err != nil {
+			return nil, err
+		}
+		repositories = append(repositories, out.Repositories...)
+		if len(out.Repositories) < 100 {
+			return repositories, nil
+		}
+	}
+	return nil, errors.New("GitHub user installation repository list exceeded the supported limit")
+}
+
 type Activity struct {
 	Number      int64     `json:"number"`
 	Title       string    `json:"title"`
@@ -320,6 +386,50 @@ func (c *Client) Repository(ctx context.Context, repo, token string) (Repository
 		err = errors.New("repository ID missing")
 	}
 	return out, err
+}
+
+func (c *Client) Languages(ctx context.Context, repo, token string) (map[string]int64, error) {
+	path, err := repoPath(repo)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.request(ctx, http.MethodGet, path+"/languages", token)
+	if err != nil {
+		return nil, err
+	}
+	var languages map[string]int64
+	err = decode(resp, &languages)
+	if err == nil && languages == nil {
+		languages = map[string]int64{}
+	}
+	return languages, err
+}
+
+func (c *Client) Readme(ctx context.Context, repo, token string) (string, error) {
+	path, err := repoPath(repo)
+	if err != nil {
+		return "", err
+	}
+	resp, err := c.request(ctx, http.MethodGet, path+"/readme", token)
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+		Size     int64  `json:"size"`
+	}
+	if err = decode(resp, &out); err != nil {
+		return "", err
+	}
+	if out.Size > 1<<20 || out.Encoding != "base64" {
+		return "", errors.New("README exceeds the supported size or encoding")
+	}
+	data, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(out.Content, "\n", ""))
+	if err != nil || len(data) > 1<<20 || !utf8.Valid(data) {
+		return "", errors.New("GitHub returned an invalid or oversized README")
+	}
+	return string(data), nil
 }
 func (c *Client) Resolve(ctx context.Context, repo, ref, token string) (string, error) {
 	path, err := repoPath(repo)

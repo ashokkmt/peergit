@@ -81,7 +81,11 @@ func run() error {
 			return fmt.Errorf("read GitHub App private key: %w", err)
 		}
 	}
-	repositoryHandler := repository.NewHandler(pool, identityHandler, githubClient, objectStore, repository.AppConfig{ID: cfg.GitHubAppID, Slug: cfg.GitHubAppSlug, PrivateKey: githubKey, WebhookSecret: cfg.GitHubWebhookSecret, Origin: cfg.AppOrigin}, logger, errorManager)
+	repositoryHandler := repository.NewHandler(pool, identityHandler, githubClient, objectStore, repository.AppConfig{
+		ID: cfg.GitHubAppID, Slug: cfg.GitHubAppSlug, PrivateKey: githubKey, WebhookSecret: cfg.GitHubWebhookSecret, Origin: cfg.AppOrigin,
+		OAuthClientID: cfg.GitHubRepositoryClientID, OAuthClientSecret: cfg.GitHubRepositoryClientSecret, OAuthRedirectURL: cfg.GitHubRepositoryRedirectURL,
+		OAuthAuthorizeURL: cfg.GitHubAuthorizeURL, OAuthTokenURL: cfg.GitHubTokenURL, APIURL: cfg.GitHubAPIURL,
+	}, logger, errorManager)
 	router := httpserver.NewRouter(healthHandler, logger, errorManager, identityHandler.Register, campusHandler.Register, mediaHandler.Register, projectHandler.Register, recruitmentHandler.Register, repositoryHandler.Register)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)

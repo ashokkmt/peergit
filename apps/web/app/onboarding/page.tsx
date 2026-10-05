@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { AccountPanel } from "../account";
+import { AccountPanel } from "@/components/account/account-panel";
 
 type Envelope<T> = { data?: T; error?: { message: string } };
 type Status = { campus_verified: boolean; campus_id: string; account_type: string; pending_challenge?: { challenge_id: string; email: string; expires_at: string } };

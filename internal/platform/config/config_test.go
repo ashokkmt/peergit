@@ -69,6 +69,7 @@ func TestConfigValidation(t *testing.T) {
 		AppOrigin: "https://example.edu", CookieSecure: true,
 		SessionHashKey: "0123456789abcdef0123456789abcdef", MFAEncryptionKey: "abcdef0123456789abcdef0123456789",
 		GitHubClientID: "client-id", GitHubClientSecret: "client-secret", GitHubRedirectURL: "https://example.edu/api/v1/auth/github/callback",
+		GitHubRepositoryClientID: "repo-client-id", GitHubRepositoryClientSecret: "repo-client-secret", GitHubRepositoryRedirectURL: "https://example.edu/api/v1/github/authorization/callback",
 		GitHubAppID: "12345", GitHubAppSlug: "peergit-campus", GitHubAppPrivateKey: `.secrets/github-app.pem`, GitHubWebhookSecret: "0123456789abcdef0123456789abcdef",
 		SMTPHost: "smtp.example.edu:587", SMTPFrom: "PeerGit <notify@example.edu>", SMTPTLSMode: "starttls", VerificationHashKey: "unique-verification-hash-key-for-test", VerificationEmailKey: "unique-verification-encryption-key-test",
 	}
@@ -96,12 +97,22 @@ func TestConfigValidation(t *testing.T) {
 	if err := valid.Validate(); err == nil {
 		t.Fatal("GitHub callback on another origin was accepted")
 	}
+	valid.GitHubRedirectURL = "https://example.edu/api/v1/auth/github/callback"
+	valid.GitHubRepositoryRedirectURL = "https://example.edu/api/v1/auth/github/callback"
+	if err := valid.Validate(); err == nil {
+		t.Fatal("repository App callback using the sign-in route was accepted")
+	}
 	dev := Config{AppEnv: "development", HTTPAddr: "127.0.0.1:8080", AppOrigin: "https://localhost", LogLevel: slog.LevelInfo}
 	dev.GitHubClientID = "partial-client"
 	if err := dev.Validate(); err == nil {
 		t.Fatal("partial GitHub App configuration was accepted")
 	}
 	dev.GitHubClientID = ""
+	dev.GitHubRepositoryClientID = "partial-repository-client"
+	if err := dev.Validate(); err == nil {
+		t.Fatal("partial repository GitHub App configuration was accepted")
+	}
+	dev.GitHubRepositoryClientID = ""
 	dev.ObjectEndpoint = "http://127.0.0.1:8333"
 	if err := dev.Validate(); err == nil {
 		t.Fatal("partial object storage configuration was accepted")

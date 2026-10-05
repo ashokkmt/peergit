@@ -22,6 +22,7 @@ func JobHandlers(pool *pgxpool.Pool, api *github.Client, appID string, privateKe
 	return map[string]jobs.Handler{
 		"github_webhook":   w.webhook,
 		"github_reconcile": w.reconcile,
+		"github_overview":  w.overview,
 		"snapshot":         w.capture,
 	}
 }
@@ -159,6 +160,79 @@ func (w *worker) reconcile(ctx context.Context, claim jobs.Claim) (string, error
 		}
 	}
 	_, err = w.pool.Exec(ctx, `UPDATE repository_bindings SET access_state='active',sync_health='healthy',last_synced_at=clock_timestamp(),last_error_code=NULL WHERE id=$1 AND is_current`, id)
+	return "", err
+}
+
+func (w *worker) overview(ctx context.Context, claim jobs.Claim) (string, error) {
+	var payload bindingJob
+	if err := json.Unmarshal(claim.Payload, &payload); err != nil || !uuidOK(payload.BindingID) {
+		return "", errors.New("invalid GitHub overview job")
+	}
+	var bindingID, owner, name, installation, status string
+	var externalID int64
+	err := w.pool.QueryRow(ctx, `SELECT b.id::text,b.owner_login,b.repository_name,b.external_repository_id,i.external_installation_id::text,i.status
+		FROM repository_bindings b JOIN github_installations i ON i.id=b.installation_id AND i.college_id=b.college_id WHERE b.id=$1 AND b.is_current`, payload.BindingID).Scan(&bindingID, &owner, &name, &externalID, &installation, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if status != "active" {
+		return "", errors.New("GitHub installation is not active")
+	}
+	jwt, err := github.JWT(w.appID, w.privateKey, time.Now())
+	if err != nil {
+		return "", err
+	}
+	token, err := w.api.Token(ctx, installation, jwt)
+	if err != nil {
+		return "", err
+	}
+	repo, err := w.api.Repository(ctx, owner+"/"+name, token)
+	if err != nil {
+		return "", err
+	}
+	if repo.ID != externalID {
+		return "", errors.New("GitHub repository identity changed")
+	}
+	fullName := repo.FullName
+	if fullName == "" {
+		fullName = owner + "/" + name
+	}
+	parts := strings.SplitN(fullName, "/", 2)
+	if len(parts) != 2 || !repoSegment.MatchString(parts[0]) || !repoSegment.MatchString(parts[1]) {
+		return "", errors.New("GitHub returned invalid repository name")
+	}
+	languages, err := w.api.Languages(ctx, fullName, token)
+	if err != nil {
+		if github.IsDenied(err) {
+			languages = map[string]int64{}
+		} else {
+			return "", err
+		}
+	}
+	readme, err := w.api.Readme(ctx, fullName, token)
+	if err != nil {
+		if github.IsDenied(err) {
+			readme = ""
+		} else {
+			return "", err
+		}
+	}
+	if len(repo.Topics) > 30 {
+		repo.Topics = repo.Topics[:30]
+	}
+	languageJSON, err := json.Marshal(languages)
+	if err != nil {
+		return "", err
+	}
+	htmlURL := repo.HTMLURL
+	if !strings.HasPrefix(htmlURL, "https://github.com/") {
+		htmlURL = "https://github.com/" + fullName
+	}
+	_, err = w.pool.Exec(ctx, `UPDATE repository_bindings SET owner_login=$2,repository_name=$3,default_branch=$4,visibility=$5,html_url=$6,description=$7,topics=$8,languages=$9::jsonb,readme_markdown=$10,overview_checked_at=clock_timestamp()
+		WHERE id=$1 AND is_current AND access_state IN ('active','stale')`, bindingID, parts[0], parts[1], repo.DefaultBranch, visibility(repo), htmlURL, truncate(repo.Description, 1000), repo.Topics, string(languageJSON), readme)
 	return "", err
 }
 

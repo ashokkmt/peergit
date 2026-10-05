@@ -64,6 +64,9 @@ func TestPhase2SessionConsentAdminAndTenantIsolation(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO sessions(user_id,college_id,token_hash,csrf_hash,expires_at) VALUES($1,$2,$3,$4,now()+interval '1 hour')`, targetID, collegeID, sessionHash(key, "target-session"), sessionCSRFHash(key, "target-session")); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pool.Exec(ctx, `UPDATE sessions SET college_id=NULL WHERE user_id=$1`, targetID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `INSERT INTO mfa_credentials(user_id,encrypted_secret,enabled_at) VALUES($1,decode('0001','hex'),now())`, adminID); err != nil {
 		t.Fatal(err)
 	}
@@ -77,6 +80,24 @@ func TestPhase2SessionConsentAdminAndTenantIsolation(t *testing.T) {
 	campusHandler := campus.NewHandler(pool, auth, "http://peergit.test", errors, string(key), "phase2 delivery encryption secret")
 	mediaHandler := media.NewHandler(pool, storage.New("http://127.0.0.1:1", "test", "us-east-1", "key", "secret"), auth, errors)
 	router := httpserver.NewRouter(health.NewHandler(logger, errors, pool), logger, errors, auth.Register, campusHandler.Register, mediaHandler.Register)
+	if _, err := pool.Exec(ctx, `UPDATE sessions SET college_id=NULL WHERE user_id=$1`, targetID); err != nil {
+		t.Fatal(err)
+	}
+	restored := httptest.NewRequest(http.MethodGet, "http://peergit.test/api/v1/session", nil)
+	restored.AddCookie(&http.Cookie{Name: "peergit_session", Value: "target-session"})
+	restoredResponse := httptest.NewRecorder()
+	router.ServeHTTP(restoredResponse, restored)
+	var restoredEnvelope struct {
+		Data struct {
+			User struct {
+				CollegeID    string `json:"college_id"`
+				CampusStatus string `json:"campus_status"`
+			} `json:"user"`
+		} `json:"data"`
+	}
+	if restoredResponse.Code != http.StatusOK || json.Unmarshal(restoredResponse.Body.Bytes(), &restoredEnvelope) != nil || restoredEnvelope.Data.User.CollegeID != collegeID || restoredEnvelope.Data.User.CampusStatus != "verified" {
+		t.Fatalf("durable campus verification was not restored after a null-campus session: status=%d body=%s", restoredResponse.Code, restoredResponse.Body.String())
+	}
 	get := httptest.NewRequest(http.MethodGet, "http://peergit.test/api/v1/session", nil)
 	get.AddCookie(&http.Cookie{Name: "peergit_session", Value: token})
 	getResponse := httptest.NewRecorder()

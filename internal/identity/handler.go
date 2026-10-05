@@ -94,17 +94,17 @@ func (h *Handler) loadSession(next http.Handler) http.Handler {
 			var fresh bool
 			var termsAccepted, privacyAccepted bool
 			err = h.pool.QueryRow(r.Context(), `SELECT s.id::text,u.id::text,COALESCE(CASE WHEN c.status='active' AND EXISTS(
-				SELECT 1 FROM campus_verifications v WHERE v.college_id=s.college_id AND v.user_id=u.id AND v.revoked_at IS NULL AND
+				SELECT 1 FROM campus_verifications v WHERE v.college_id=c.id AND v.user_id=u.id AND v.revoked_at IS NULL AND
 				(v.source='administrator_review' OR EXISTS(SELECT 1 FROM campus_emails ce JOIN college_domains d ON d.college_id=ce.college_id AND d.domain=split_part(ce.email_normalized,'@',2) AND d.verified_at IS NOT NULL WHERE ce.id=v.campus_email_id AND ce.verified_at IS NOT NULL))
-			) THEN s.college_id::text END,''),u.email_normalized,u.display_name,u.account_type,
+			) THEN c.id::text END,''),u.email_normalized,u.display_name,u.account_type,
 				s.csrf_hash,
-				(SELECT count(*) FROM campus_roles cr WHERE cr.college_id=s.college_id AND cr.user_id=u.id AND cr.role='campus_admin' AND c.status='active' AND EXISTS(SELECT 1 FROM campus_verifications v WHERE v.college_id=s.college_id AND v.user_id=u.id AND v.revoked_at IS NULL)),
+				(SELECT count(*) FROM campus_roles cr WHERE cr.college_id=c.id AND cr.user_id=u.id AND cr.role='campus_admin' AND c.status='active' AND EXISTS(SELECT 1 FROM campus_verifications v WHERE v.college_id=c.id AND v.user_id=u.id AND v.revoked_at IS NULL)),
 				(SELECT count(*) FROM mfa_credentials mc WHERE mc.user_id=u.id AND mc.enabled_at IS NOT NULL),
 			COALESCE(s.mfa_verified_at > now()-interval '10 minutes',false),
 				EXISTS(SELECT 1 FROM consent_records co WHERE co.user_id=u.id AND co.purpose='terms' AND co.policy_version=$2 AND co.revoked_at IS NULL),
 				EXISTS(SELECT 1 FROM consent_records co WHERE co.user_id=u.id AND co.purpose='privacy' AND co.policy_version=$3 AND co.revoked_at IS NULL)
-				FROM sessions s JOIN users u ON u.id=s.user_id
-				LEFT JOIN colleges c ON c.id=s.college_id
+			FROM sessions s JOIN users u ON u.id=s.user_id
+			LEFT JOIN colleges c ON c.id=CASE WHEN s.college_id IS NOT NULL THEN s.college_id ELSE u.college_id END
 				WHERE s.token_hash=$1 AND s.expires_at>now() AND u.status='active'`, tokenHash, termsPolicyVersion, privacyPolicyVersion).Scan(&s.ID, &s.UserID, &s.CollegeID, &s.Email, &s.DisplayName, &s.AccountType, &s.CSRFHash, &adminCount, &mfaCount, &fresh, &termsAccepted, &privacyAccepted)
 			if err == nil {
 				s.CampusAdmin, s.MFAEnabled, s.MFAFresh = adminCount > 0, mfaCount > 0, fresh
@@ -226,7 +226,15 @@ func (h *Handler) session(w http.ResponseWriter, r *http.Request) {
 	// Derive a stable per-session token so concurrent session reads cannot invalidate
 	// another component's in-flight mutation. Only its keyed hash is stored.
 	csrf := sessionCSRFToken([]byte(h.cfg.SessionHashKey), cookie.Value)
-	_ = response.OK(w, map[string]any{"authenticated": true, "csrf_token": csrf, "user": map[string]any{"id": s.UserID, "email": s.Email, "display_name": s.DisplayName, "account_type": s.AccountType, "college_id": s.CollegeID, "campus_admin": s.CampusAdmin, "mfa_enabled": s.MFAEnabled, "mfa_verified": s.MFAFresh, "terms_accepted": s.TermsAccepted, "privacy_accepted": s.PrivacyAccepted}})
+	campusStatus := "unverified"
+	if s.CollegeID != "" {
+		campusStatus = "verified"
+	} else if s.AccountType == "campus" {
+		campusStatus = "inactive"
+	} else if s.AccountType == "external" {
+		campusStatus = "external"
+	}
+	_ = response.OK(w, map[string]any{"authenticated": true, "csrf_token": csrf, "user": map[string]any{"id": s.UserID, "email": s.Email, "display_name": s.DisplayName, "account_type": s.AccountType, "campus_status": campusStatus, "college_id": s.CollegeID, "campus_admin": s.CampusAdmin, "mfa_enabled": s.MFAEnabled, "mfa_verified": s.MFAFresh, "terms_accepted": s.TermsAccepted, "privacy_accepted": s.PrivacyAccepted}})
 }
 
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
@@ -284,7 +292,15 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows.Close()
-	_ = response.OK(w, map[string]any{"id": s.UserID, "college_id": s.CollegeID, "email": s.Email, "display_name": s.DisplayName, "account_type": s.AccountType, "profile": profile, "skills": skills, "consents": consents, "campus_admin": s.CampusAdmin, "mfa_enabled": s.MFAEnabled})
+	campusStatus := "unverified"
+	if s.CollegeID != "" {
+		campusStatus = "verified"
+	} else if s.AccountType == "campus" {
+		campusStatus = "inactive"
+	} else if s.AccountType == "external" {
+		campusStatus = "external"
+	}
+	_ = response.OK(w, map[string]any{"id": s.UserID, "college_id": s.CollegeID, "campus_status": campusStatus, "email": s.Email, "display_name": s.DisplayName, "account_type": s.AccountType, "profile": profile, "skills": skills, "consents": consents, "campus_admin": s.CampusAdmin, "mfa_enabled": s.MFAEnabled})
 }
 
 func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {

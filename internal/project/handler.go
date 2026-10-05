@@ -2,7 +2,6 @@
 package project
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -44,7 +43,7 @@ func (h *Handler) Register(r chi.Router) {
 		api.Get("/projects/{id}", h.get)
 		api.Get("/projects/{id}/people", h.people)
 		api.Get("/my/project-invitations", h.myInvitations)
-		api.With(h.auth.RequireCSRF).Post("/projects", h.create)
+		api.With(h.auth.RequireCSRF).Post("/projects", h.repositoryRequired)
 		api.With(h.auth.RequireCSRF).Patch("/projects/{id}", h.update)
 		api.With(h.auth.RequireCSRF).Post("/projects/{id}/invitations", h.invite)
 		api.With(h.auth.RequireCSRF).Post("/project-invitations/{id}/accept", h.acceptInvite)
@@ -140,17 +139,19 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	if campusAccess {
 		rows, err = h.pool.Query(r.Context(), `SELECT p.id::text,p.slug,p.title,p.summary,p.project_type,p.visibility,p.lifecycle,p.version,p.updated_at,
 		EXISTS(SELECT 1 FROM project_roles rr WHERE rr.project_id=p.id AND rr.status='open') AS recruiting,
-		COALESCE(array_agg(DISTINCT sk.name) FILTER(WHERE sk.name IS NOT NULL),'{}'::text[])
+		COALESCE(array_agg(DISTINCT sk.name) FILTER(WHERE sk.name IS NOT NULL),'{}'::text[]),
+		EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id) AS has_repository
 		FROM projects p LEFT JOIN project_skills ps ON ps.project_id=p.id LEFT JOIN skills sk ON sk.id=ps.skill_id
-		WHERE ((p.visibility='public' AND p.lifecycle='active') OR (p.college_id=$1 AND ((p.lifecycle='active' AND p.visibility='campus') OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$4))))
+		WHERE ((p.visibility='public' AND p.lifecycle='active' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)) OR (p.college_id=$1 AND ((p.lifecycle='active' AND p.visibility='campus' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)) OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$4))))
 		AND ($2::uuid IS NULL OR p.id<$2) AND ($3='' OR p.title ILIKE '%'||$3||'%' OR p.summary ILIKE '%'||$3||'%')
 		GROUP BY p.id ORDER BY p.id DESC LIMIT 51`, s.CollegeID, nullUUID(cursorID), q, s.UserID)
 	} else {
 		rows, err = h.pool.Query(r.Context(), `SELECT p.id::text,p.slug,p.title,p.summary,p.project_type,p.visibility,p.lifecycle,p.version,p.updated_at,
 		EXISTS(SELECT 1 FROM project_roles rr WHERE rr.project_id=p.id AND rr.status='open') AS recruiting,
-		COALESCE(array_agg(DISTINCT sk.name) FILTER(WHERE sk.name IS NOT NULL),'{}'::text[])
+		COALESCE(array_agg(DISTINCT sk.name) FILTER(WHERE sk.name IS NOT NULL),'{}'::text[]),
+		EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id) AS has_repository
 		FROM projects p LEFT JOIN project_skills ps ON ps.project_id=p.id LEFT JOIN skills sk ON sk.id=ps.skill_id
-		WHERE p.visibility='public' AND p.lifecycle='active' AND ($1='' OR p.title ILIKE '%'||$1||'%' OR p.summary ILIKE '%'||$1||'%')
+		WHERE p.visibility='public' AND p.lifecycle='active' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id) AND ($1='' OR p.title ILIKE '%'||$1||'%' OR p.summary ILIKE '%'||$1||'%')
 		AND ($2::uuid IS NULL OR p.id<$2) GROUP BY p.id ORDER BY p.id DESC LIMIT 51`, q, nullUUID(cursorID))
 	}
 	if err != nil {
@@ -161,9 +162,16 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	items := []projectView{}
 	for rows.Next() {
 		var v projectView
-		if err = rows.Scan(&v.ID, &v.Slug, &v.Title, &v.Summary, &v.Type, &v.Visibility, &v.Lifecycle, &v.Version, &v.UpdatedAt, &v.Recruiting, &v.Skills); err != nil {
+		if err = rows.Scan(&v.ID, &v.Slug, &v.Title, &v.Summary, &v.Type, &v.Visibility, &v.Lifecycle, &v.Version, &v.UpdatedAt, &v.Recruiting, &v.Skills, &v.HasRepository); err != nil {
 			h.err.Handle(w, r, err)
 			return
+		}
+		if !v.HasRepository {
+			v.Visibility = "private"
+			if v.Lifecycle == "active" {
+				v.Lifecycle = "draft"
+			}
+			v.Recruiting = false
 		}
 		items = append(items, v)
 	}
@@ -188,17 +196,18 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 type projectView struct {
-	ID         string    `json:"id"`
-	Slug       string    `json:"slug"`
-	Title      string    `json:"title"`
-	Summary    string    `json:"summary"`
-	Type       string    `json:"project_type"`
-	Visibility string    `json:"visibility"`
-	Lifecycle  string    `json:"lifecycle"`
-	Version    int       `json:"version"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	Recruiting bool      `json:"recruiting"`
-	Skills     []string  `json:"skills"`
+	ID            string    `json:"id"`
+	Slug          string    `json:"slug"`
+	Title         string    `json:"title"`
+	Summary       string    `json:"summary"`
+	Type          string    `json:"project_type"`
+	Visibility    string    `json:"visibility"`
+	Lifecycle     string    `json:"lifecycle"`
+	Version       int       `json:"version"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	Recruiting    bool      `json:"recruiting"`
+	Skills        []string  `json:"skills"`
+	HasRepository bool      `json:"-"`
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
@@ -210,14 +219,14 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if campusAccess {
 		err = h.pool.QueryRow(r.Context(), `SELECT p.id::text,p.slug,p.title,p.summary,p.description,p.project_type,p.visibility,p.lifecycle,p.version,p.updated_at,p.created_by::text,p.college_id::text,
-		EXISTS(SELECT 1 FROM project_roles rr WHERE rr.project_id=p.id AND rr.status='open'),COALESCE(array_agg(DISTINCT sk.name) FILTER(WHERE sk.name IS NOT NULL),'{}'::text[])
+		EXISTS(SELECT 1 FROM project_roles rr WHERE rr.project_id=p.id AND rr.status='open'),COALESCE(array_agg(DISTINCT sk.name) FILTER(WHERE sk.name IS NOT NULL),'{}'::text[]),EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)
 		FROM projects p LEFT JOIN project_skills ps ON ps.project_id=p.id LEFT JOIN skills sk ON sk.id=ps.skill_id
-		WHERE p.id=$1 AND ((p.visibility='public' AND p.lifecycle='active') OR (p.college_id=$2 AND ((p.lifecycle='active' AND p.visibility='campus') OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$3)))) GROUP BY p.id`, id, s.CollegeID, s.UserID).Scan(&v.ID, &v.Slug, &v.Title, &v.Summary, &description, &v.Type, &v.Visibility, &v.Lifecycle, &v.Version, &v.UpdatedAt, &creator, &projectCollegeID, &v.Recruiting, &v.Skills)
+		WHERE p.id=$1 AND ((p.visibility='public' AND p.lifecycle='active' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)) OR (p.college_id=$2 AND ((p.lifecycle='active' AND p.visibility='campus' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)) OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$3)))) GROUP BY p.id`, id, s.CollegeID, s.UserID).Scan(&v.ID, &v.Slug, &v.Title, &v.Summary, &description, &v.Type, &v.Visibility, &v.Lifecycle, &v.Version, &v.UpdatedAt, &creator, &projectCollegeID, &v.Recruiting, &v.Skills, &v.HasRepository)
 	} else {
 		err = h.pool.QueryRow(r.Context(), `SELECT p.id::text,p.slug,p.title,p.summary,p.project_type,p.visibility,p.lifecycle,p.version,p.updated_at,
-		EXISTS(SELECT 1 FROM project_roles rr WHERE rr.project_id=p.id AND rr.status='open'),COALESCE(array_agg(DISTINCT sk.name) FILTER(WHERE sk.name IS NOT NULL),'{}'::text[])
+		EXISTS(SELECT 1 FROM project_roles rr WHERE rr.project_id=p.id AND rr.status='open'),COALESCE(array_agg(DISTINCT sk.name) FILTER(WHERE sk.name IS NOT NULL),'{}'::text[]),EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)
 		FROM projects p LEFT JOIN project_skills ps ON ps.project_id=p.id LEFT JOIN skills sk ON sk.id=ps.skill_id
-		WHERE p.id=$1 AND p.visibility='public' AND p.lifecycle='active' GROUP BY p.id`, id).Scan(&v.ID, &v.Slug, &v.Title, &v.Summary, &v.Type, &v.Visibility, &v.Lifecycle, &v.Version, &v.UpdatedAt, &v.Recruiting, &v.Skills)
+		WHERE p.id=$1 AND p.visibility='public' AND p.lifecycle='active' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id) GROUP BY p.id`, id).Scan(&v.ID, &v.Slug, &v.Title, &v.Summary, &v.Type, &v.Visibility, &v.Lifecycle, &v.Version, &v.UpdatedAt, &v.Recruiting, &v.Skills, &v.HasRepository)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		h.fail(w, r, 404, "project_not_found", "project not found", nil)
@@ -226,6 +235,13 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.err.Handle(w, r, err)
 		return
+	}
+	if !v.HasRepository {
+		v.Visibility = "private"
+		if v.Lifecycle == "active" {
+			v.Lifecycle = "draft"
+		}
+		v.Recruiting = false
 	}
 	if !campusAccess || projectCollegeID != s.CollegeID {
 		_ = response.OK(w, map[string]any{"project": v, "description": "", "created_by": "", "viewer_role": "", "members": []any{}})
@@ -328,68 +344,11 @@ func (h *Handler) myInvitations(w http.ResponseWriter, r *http.Request) {
 	_ = response.OK(w, map[string]any{"items": items})
 }
 
-func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
-	s, ok := h.session(w, r)
-	if !ok {
+func (h *Handler) repositoryRequired(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.session(w, r); !ok {
 		return
 	}
-	in, err := request.Decode[createProjectRequest](r)
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	tx, err := h.pool.Begin(r.Context())
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	defer tx.Rollback(r.Context())
-	var id string
-	err = tx.QueryRow(r.Context(), `INSERT INTO projects(college_id,slug,title,summary,description,project_type,visibility,lifecycle,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id::text`, s.CollegeID, in.Slug, in.Title, in.Summary, in.Description, in.Type, in.Visibility, in.Lifecycle, s.UserID).Scan(&id)
-	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "duplicate key") {
-			h.fail(w, r, 409, "project_slug_taken", "a project with this slug already exists", err)
-		} else {
-			h.err.Handle(w, r, err)
-		}
-		return
-	}
-	if _, err = tx.Exec(r.Context(), `INSERT INTO project_members(college_id,project_id,user_id,role) VALUES($1,$2,$3,'owner')`, s.CollegeID, id, s.UserID); err == nil {
-		err = h.setSkills(r.Context(), tx, s.CollegeID, id, in.Skills)
-	}
-	if err == nil {
-		for _, mediaID := range in.MediaIDs {
-			if !uuidOK(mediaID) {
-				err = errors.New("project media ID is invalid")
-				break
-			}
-			tag, insertErr := tx.Exec(r.Context(), `INSERT INTO project_media(college_id,project_id,media_id) SELECT $1,$2,m.id FROM media m WHERE m.id=$3 AND m.college_id=$1 AND m.owner_user_id=$4 AND m.scan_status='clean'`, s.CollegeID, id, mediaID, s.UserID)
-			if insertErr != nil {
-				err = insertErr
-				break
-			}
-			if tag.RowsAffected() != 1 {
-				err = errors.New("project media is unavailable")
-				break
-			}
-		}
-	}
-	if err == nil {
-		payload, _ := json.Marshal(map[string]string{"lifecycle": in.Lifecycle})
-		err = outbox.Append(r.Context(), tx, outbox.Event{TenantID: s.CollegeID, AggregateType: "project", AggregateID: id, EventType: "project.created", Version: 1, Payload: payload}, []string{"project.activity"})
-	}
-	if err == nil {
-		err = audit.Append(r.Context(), tx, audit.Entry{TenantID: s.CollegeID, ActorID: s.UserID, Action: "project.created", ResourceType: "project", ResourceID: id})
-	}
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	if err = tx.Commit(r.Context()); err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	_ = response.Created(w, map[string]any{"id": id, "slug": in.Slug, "lifecycle": in.Lifecycle, "version": 1})
+	h.fail(w, r, http.StatusConflict, "github_repository_required", "import an authorized GitHub repository to start a project", nil)
 }
 
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
@@ -422,7 +381,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	var next int
-	err = tx.QueryRow(r.Context(), `UPDATE projects p SET summary=$4,description=$5,visibility=$6,lifecycle=$7,version=version+1,updated_at=now() WHERE p.id=$1 AND p.college_id=$2 AND p.version=$3 AND EXISTS(SELECT 1 FROM project_members m WHERE m.project_id=p.id AND m.user_id=$8 AND m.role IN ('owner','maintainer')) RETURNING version`, id, s.CollegeID, in.Version, in.Summary, in.Description, in.Visibility, in.Lifecycle, s.UserID).Scan(&next)
+	err = tx.QueryRow(r.Context(), `UPDATE projects p SET summary=$4,description=$5,visibility=$6,lifecycle=$7,version=version+1,updated_at=now() WHERE p.id=$1 AND p.college_id=$2 AND p.version=$3 AND EXISTS(SELECT 1 FROM project_members m WHERE m.project_id=p.id AND m.user_id=$8 AND m.role IN ('owner','maintainer')) AND (EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id) OR ($6='private' AND $7 IN ('draft','archived'))) RETURNING version`, id, s.CollegeID, in.Version, in.Summary, in.Description, in.Visibility, in.Lifecycle, s.UserID).Scan(&next)
 	if errors.Is(err, pgx.ErrNoRows) {
 		h.fail(w, r, 409, "project_changed_or_forbidden", "project changed or you cannot edit it", nil)
 		return
@@ -704,27 +663,6 @@ func (h *Handler) session(w http.ResponseWriter, r *http.Request) (identity.Sess
 }
 func (h *Handler) fail(w http.ResponseWriter, r *http.Request, status int, code, message string, cause error) {
 	h.err.Handle(w, r, errormanager.New(status, code, message, cause))
-}
-
-func (h *Handler) setSkills(ctx context.Context, tx pgx.Tx, collegeID, projectID string, skills []string) error {
-	for _, name := range skills {
-		slug := skillSlug(name)
-		if !slugOK(slug) {
-			return errors.New("skill name cannot be normalized")
-		}
-		var id string
-		err := tx.QueryRow(ctx, `INSERT INTO skills(slug,name) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING id::text`, slug, name).Scan(&id)
-		if errors.Is(err, pgx.ErrNoRows) {
-			err = tx.QueryRow(ctx, `SELECT id::text FROM skills WHERE slug=$1`, slug).Scan(&id)
-		}
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO project_skills(college_id,project_id,skill_id) VALUES($1,$2,$3)`, collegeID, projectID, id); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func slugOK(s string) bool {

@@ -90,62 +90,69 @@ const { chromium } = require('playwright');
     await signup.close();
     console.log('GitHub signup and login routes passed');
 
-    const repositoryUI = await browser.newPage({ viewport: { width: 390, height: 844 } });
-    const projectID = '00000000-0000-7000-8000-000000000123';
-    const repositoryID = '00000000-0000-7000-8000-000000000124';
-    const bindingID = '00000000-0000-7000-8000-000000000125';
-    const snapshotID = '00000000-0000-7000-8000-000000000126';
-    let repositoryBound = false;
-    let captureRecorded = false;
-    let repositoryReadsAfterCapture = 0;
-    await repositoryUI.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: true, csrf_token: 'repository-test-csrf', user: { college_id: '00000000-0000-7000-8000-000000000001' } } }) }));
-    await repositoryUI.route('**/api/v1/projects', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [{ id: projectID, slug: 'fixture', title: 'Repository fixture', summary: 'Test repository flow', project_type: 'side_project', visibility: 'campus', lifecycle: 'active', version: 1, recruiting: false, skills: [] }] } }) }));
-    await repositoryUI.route('**/api/v1/my/project-invitations', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [] } }) }));
-    await repositoryUI.route('**/api/v1/my/applications', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [] } }) }));
-    await repositoryUI.route(`**/api/v1/projects/${projectID}`, route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { project: { id: projectID, slug: 'fixture', title: 'Repository fixture', summary: 'Test repository flow', project_type: 'side_project', visibility: 'campus', lifecycle: 'active', version: 1, recruiting: false, skills: [] }, description: '', viewer_role: 'owner', members: [] } }) }));
-    await repositoryUI.route(`**/api/v1/projects/${projectID}/roles`, route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [] } }) }));
-    await repositoryUI.route(`**/api/v1/projects/${projectID}/applications`, route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [] } }) }));
-    await repositoryUI.route(`**/api/v1/projects/${projectID}/github/repositories`, async route => {
-      if (route.request().method() === 'GET') {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [{ installation_id: '41001', id: 41003, full_name: 'campus/fixture', private: true, visibility: 'private', default_branch: 'main' }] } }) });
+    const accountMenu = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await accountMenu.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: true, csrf_token: 'menu-csrf', user: { display_name: 'Test Student', account_type: 'campus', campus_status: 'verified', college_id: 'campus-1' } } }) }));
+    await accountMenu.route('**/api/v1/projects**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [] } }) }));
+    await accountMenu.goto(baseURL);
+    assert.equal(await accountMenu.getByRole('button', { name: /Create project/i }).count(), 0, 'homepage must not expose repository-free project creation');
+    assert.equal(await accountMenu.locator('input').count(), 1, 'homepage should only expose the project search field');
+    const menuSummary = accountMenu.locator('.account-menu summary');
+    await menuSummary.click();
+    await accountMenu.getByRole('link', { name: 'GitHub connections' }).waitFor();
+    await accountMenu.keyboard.press('Escape');
+    assert.equal(await accountMenu.locator('.account-menu').evaluate(element => element.open), false, 'Escape closes the account menu');
+    assert.equal(await accountMenu.evaluate(() => document.activeElement.matches('.account-menu summary')), true, 'Escape returns focus to the menu button');
+    await accountMenu.route('**/api/v1/me/github/repositories', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [{ id: 41003, full_name: 'test-owner/fixture', description: 'Synthetic repository', visibility: 'private', default_branch: 'main', topics: [], installation_id: '41001' }] } }) }));
+    await accountMenu.route('**/api/v1/me/github/installations', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [{ id: 'local-install-1', installation_id: '41001', account: 'test-owner', target_type: 'User', status: 'active', confirmed_at: new Date().toISOString() }] } }) }));
+    await accountMenu.route('**/api/v1/projects/import/github', async route => {
+      assert.equal(route.request().postDataJSON().repository_id, 41003);
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authorization_url: 'http://127.0.0.1:8090/repository-authorize' } }) });
+    });
+    await accountMenu.goto(`${baseURL}/account/github`);
+    await accountMenu.getByRole('heading', { name: 'Import a project from GitHub' }).waitFor();
+    await accountMenu.getByText('test-owner/fixture').waitFor();
+    await accountMenu.getByRole('button', { name: 'Import privately' }).click();
+    await accountMenu.waitForURL('http://127.0.0.1:8090/repository-authorize');
+    await accountMenu.close();
+    console.log('Discovery-only homepage, accessible account menu, and private GitHub import initiation passed');
+
+    const projectPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    projectPage.on('pageerror', error => console.error(`Project detail browser error: ${error.message}`));
+    projectPage.on('console', message => { if (message.type() === 'error') console.error(`Project detail console error: ${message.text()}`); });
+    await projectPage.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: true, csrf_token: 'project-csrf', user: { display_name: 'Test Owner', college_id: 'campus-1', terms_accepted: true, privacy_accepted: true } } }) }));
+    await projectPage.route('**/api/v1/projects/imported-project/repository', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { repository: { id: 'binding-1', full_name: 'test-owner/imported-project', html_url: 'https://github.com/test-owner/imported-project', description: 'Synthetic repo', default_branch: 'main', topics: [], languages: {}, readme_markdown: '', access_state: 'active', sync_health: 'current', limitations: 'LFS and submodule content is not captured.' }, contributions: [], snapshots: [] } }) }));
+    await projectPage.route('**/api/v1/projects/imported-project/applications', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [] } }) }));
+    await projectPage.route('**/api/v1/projects/imported-project', async route => {
+      if (route.request().method() === 'PATCH') {
+        const body = route.request().postDataJSON();
+        assert.equal(body.summary, 'Updated summary');
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { id: 'imported-project', version: body.lifecycle === 'active' ? 3 : 2 } }) });
       } else {
-        assert.equal(route.request().postDataJSON().repository_id, 41003);
-        repositoryBound = true;
-        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ data: { repository_id: repositoryID, binding_id: bindingID, state: 'sync_pending' } }) });
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { project: { id: 'imported-project', title: 'Imported project', summary: 'Original summary', visibility: 'private', lifecycle: 'draft', project_type: 'open_source', recruiting: false, skills: [], version: 1 }, description: 'Original description', viewer_role: 'owner', members: [{ user_id: 'owner-1', display_name: 'Test Owner', role: 'owner' }] } }) });
       }
     });
-    await repositoryUI.route(`**/api/v1/projects/${projectID}/repository`, route => {
-      if (!repositoryBound) {
-        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { repository: null, contributions: [], snapshots: [] } }) });
+    await projectPage.route('**/api/v1/projects/imported-project/roles', async route => {
+      if (route.request().method() === 'POST') {
+        assert.equal(route.request().postDataJSON().title, 'Rust contributor');
+        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ data: { id: 'role-1', status: 'open' } }) });
+      } else {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [] } }) });
       }
-      let snapshots = [];
-      if (captureRecorded) {
-        repositoryReadsAfterCapture++;
-        snapshots = [{ id: snapshotID, ref: 'main', commit_sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', state: repositoryReadsAfterCapture > 1 ? 'verified' : 'pending', receipt_at: new Date().toISOString(), archive_bytes: repositoryReadsAfterCapture > 1 ? 1024 : null, retry_available: false }];
-      }
-      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { repository: { id: bindingID, full_name: 'campus/fixture', access_state: 'active', sync_health: 'healthy', capabilities: { contents: 'read', pull_requests: 'read', issues: 'read' }, limitations: 'Git LFS objects and submodule contents are not independently captured.' }, contributions: [], snapshots } }) });
     });
-    await repositoryUI.route(`**/api/v1/projects/${projectID}/repository/snapshots`, async route => {
-      assert.equal(route.request().postDataJSON().binding_id, bindingID);
-      assert.equal(route.request().postDataJSON().ref, 'main');
-      assert(route.request().headers()['idempotency-key']);
-      captureRecorded = true;
-      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ data: { id: snapshotID, commit_sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', state: 'pending' } }) });
-    });
-    await repositoryUI.goto(baseURL);
-    await repositoryUI.getByRole('button', { name: 'View team and roles' }).click();
-    await repositoryUI.getByRole('heading', { name: 'Repository' }).waitFor();
-    assert(await repositoryUI.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'repository panel has horizontal overflow on mobile');
-    await repositoryUI.getByRole('button', { name: 'Choose from a connected installation' }).click();
-    await repositoryUI.getByLabel('Select a repository accessible to your campus installation').selectOption('41001:41003');
-    await repositoryUI.getByRole('button', { name: 'Connect repository' }).click();
-    await repositoryUI.getByText('campus/fixture', { exact: true }).waitFor();
-    await repositoryUI.getByRole('button', { name: 'Record snapshot' }).click();
-    await repositoryUI.getByText('pending', { exact: true }).waitFor();
-    await repositoryUI.getByRole('link', { name: 'Download verified archive' }).waitFor({ timeout: 12000 });
-    assert.equal(await repositoryUI.getByRole('link', { name: 'Download verified archive' }).getAttribute('href'), `/api/v1/projects/${projectID}/repository/snapshots/${snapshotID}/download`);
-    await repositoryUI.close();
-    console.log('Repository selection, exact-SHA receipt progress, mobile layout, and verified-download state passed');
+    const projectResponse = await projectPage.goto(`${baseURL}/projects/imported-project`);
+    try { await projectPage.getByRole('heading', { name: 'Imported project' }).waitFor({ timeout: 5000 }); }
+    catch { throw new Error(`Imported project page did not render (HTTP ${projectResponse?.status()}): ${await projectPage.locator('body').innerText()}`); }
+    await projectPage.getByRole('textbox', { name: 'Summary' }).fill('Updated summary');
+    await projectPage.getByRole('button', { name: 'Save details' }).click();
+    await projectPage.getByText('Project details saved.').waitFor();
+    await projectPage.getByRole('button', { name: 'Publish to campus' }).click();
+    await projectPage.getByText(/Project published to your campus/).waitFor();
+    await projectPage.getByRole('textbox', { name: 'Role title' }).fill('Rust contributor');
+    await projectPage.getByRole('textbox', { name: 'What will the member work on?' }).fill('Improve the project documentation.');
+    await projectPage.getByRole('button', { name: 'Create opening' }).click();
+    await projectPage.getByText('Team opening created.').waitFor();
+    await projectPage.close();
+    console.log('Imported project editing, recruiting, and explicit publication controls passed');
 
     const onboarding = await browser.newPage({ viewport: { width: 390, height: 844 } });
     let confirmationPosts = 0;

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AccountPanel } from "./account";
-import { ProjectsPanel } from "./projects";
+import { ProjectsPanel } from "@/components/projects/projects-panel";
+import { SiteHeader } from "@/components/layout/site-header";
 
 type ServiceState = "checking" | "ready" | "unavailable";
 
@@ -25,11 +25,7 @@ export default function Home() {
   return (
     <main>
       <a className="skip-link" href="#main-content">Skip to content</a>
-      <header className="topbar">
-        <a className="brand" href="/" aria-label="PeerGit home"><span className="brand-mark" aria-hidden="true">P</span>PeerGit</a>
-        <nav aria-label="Main navigation"><a aria-current="page" href="#projects">Projects</a><a href="#how-it-works">How it works</a><a href="/login">Log in</a><a href="/signup">Sign up</a></nav>
-        <span className="environment">Local preview</span>
-      </header>
+      <SiteHeader />
 
       <section className="hero" id="main-content" aria-labelledby="welcome-title">
         <p className="eyebrow">Build something together</p>
@@ -44,8 +40,6 @@ export default function Home() {
           {requestID && <span className="request-id">Request ID: {requestID}</span>}
         </div>
       </section>
-
-      <AccountPanel />
 
       <ProjectsPanel />
 

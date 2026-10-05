@@ -123,7 +123,7 @@ func (h *Handler) createRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var rid string
-	err = tx.QueryRow(r.Context(), `INSERT INTO project_roles(college_id,project_id,title,description,openings,difficulty,good_first_task,prerequisite_skills) SELECT $2,p.id,$3,$4,$5,$7,$8,$9 FROM projects p WHERE p.id=$1 AND p.college_id=$2 AND p.lifecycle IN ('draft','active') AND EXISTS(SELECT 1 FROM project_members m WHERE m.project_id=p.id AND m.user_id=$6 AND m.role IN ('owner','maintainer')) RETURNING id::text`, id, s.CollegeID, in.Title, in.Description, in.Openings, s.UserID, in.Difficulty, in.GoodFirstTask, in.PrerequisiteSkills).Scan(&rid)
+	err = tx.QueryRow(r.Context(), `INSERT INTO project_roles(college_id,project_id,title,description,openings,difficulty,good_first_task,prerequisite_skills) SELECT $2,p.id,$3,$4,$5,$7,$8,$9 FROM projects p WHERE p.id=$1 AND p.college_id=$2 AND p.lifecycle IN ('draft','active') AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id) AND EXISTS(SELECT 1 FROM project_members m WHERE m.project_id=p.id AND m.user_id=$6 AND m.role IN ('owner','maintainer')) RETURNING id::text`, id, s.CollegeID, in.Title, in.Description, in.Openings, s.UserID, in.Difficulty, in.GoodFirstTask, in.PrerequisiteSkills).Scan(&rid)
 	if errors.Is(err, pgx.ErrNoRows) {
 		h.fail(w, r, 404, "project_not_found_or_forbidden", "project not found or you cannot manage it", nil)
 		return
@@ -192,7 +192,7 @@ func (h *Handler) updateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var version int
-	err = tx.QueryRow(r.Context(), `UPDATE project_roles rr SET openings=$4,status=$5,version=version+1 WHERE rr.id=$1 AND rr.project_id=$2 AND rr.college_id=$3 AND rr.version=$6 AND ($5<>'open' OR EXISTS(SELECT 1 FROM projects p WHERE p.id=rr.project_id AND p.lifecycle='active')) AND EXISTS(SELECT 1 FROM project_members m WHERE m.project_id=rr.project_id AND m.user_id=$7 AND m.role IN('owner','maintainer')) RETURNING version`, rid, pid, s.CollegeID, in.Openings, in.Status, in.Version, s.UserID).Scan(&version)
+	err = tx.QueryRow(r.Context(), `UPDATE project_roles rr SET openings=$4,status=$5,version=version+1 WHERE rr.id=$1 AND rr.project_id=$2 AND rr.college_id=$3 AND rr.version=$6 AND ($5<>'open' OR (EXISTS(SELECT 1 FROM projects p WHERE p.id=rr.project_id AND p.lifecycle='active') AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=rr.project_id AND rp.college_id=rr.college_id))) AND EXISTS(SELECT 1 FROM project_members m WHERE m.project_id=rr.project_id AND m.user_id=$7 AND m.role IN('owner','maintainer')) RETURNING version`, rid, pid, s.CollegeID, in.Openings, in.Status, in.Version, s.UserID).Scan(&version)
 	if errors.Is(err, pgx.ErrNoRows) {
 		h.fail(w, r, 409, "role_changed_or_forbidden", "role changed or you cannot manage it", nil)
 		return
@@ -242,6 +242,7 @@ func (h *Handler) apply(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRow(r.Context(), `INSERT INTO applications(college_id,project_role_id,applicant_user_id,message)
 		SELECT $2,rr.id,$3,$4 FROM project_roles rr JOIN projects p ON p.id=rr.project_id AND p.college_id=rr.college_id
 		WHERE rr.id=$1 AND rr.project_id=$5 AND rr.college_id=$2 AND rr.status='open' AND p.lifecycle='active' AND p.visibility IN ('campus','public')
+		AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)
 		AND NOT EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$3) RETURNING id::text`, in.RoleID, s.CollegeID, s.UserID, in.Message, projectID).Scan(&appID)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "applications_one_pending") {
@@ -464,7 +465,7 @@ func (h *Handler) roles(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	rows, err := h.pool.Query(r.Context(), `SELECT rr.id::text,rr.title,rr.description,rr.openings,rr.status,rr.version,rr.difficulty,rr.good_first_task,rr.prerequisite_skills
 		FROM project_roles rr JOIN projects p ON p.id=rr.project_id AND p.college_id=rr.college_id
-		WHERE rr.project_id=$1 AND rr.college_id=$2 AND ((p.lifecycle='active' AND p.visibility IN ('campus','public') AND rr.status='open') OR EXISTS(SELECT 1 FROM project_members WHERE project_id=rr.project_id AND user_id=$3))
+		WHERE rr.project_id=$1 AND rr.college_id=$2 AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id) AND ((p.lifecycle='active' AND p.visibility IN ('campus','public') AND rr.status='open') OR EXISTS(SELECT 1 FROM project_members WHERE project_id=rr.project_id AND user_id=$3))
 		ORDER BY rr.created_at,rr.id`, id, s.CollegeID, s.UserID)
 	if err != nil {
 		h.err.Handle(w, r, err)

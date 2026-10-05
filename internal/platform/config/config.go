@@ -16,38 +16,41 @@ import (
 )
 
 type Config struct {
-	AppEnv               string
-	HTTPAddr             string
-	DatabaseURL          string
-	DatabaseMax          int32
-	CursorKey            string
-	AppOrigin            string
-	CookieSecure         bool
-	SessionHashKey       string
-	MFAEncryptionKey     string
-	GitHubClientID       string
-	GitHubClientSecret   string
-	GitHubRedirectURL    string
-	GitHubAuthorizeURL   string
-	GitHubTokenURL       string
-	GitHubAPIURL         string
-	GitHubAppID          string
-	GitHubAppSlug        string
-	GitHubAppPrivateKey  string
-	GitHubWebhookSecret  string
-	SMTPHost             string
-	SMTPFrom             string
-	SMTPUsername         string
-	SMTPPassword         string
-	SMTPTLSMode          string
-	VerificationHashKey  string
-	VerificationEmailKey string
-	ObjectEndpoint       string
-	ObjectRegion         string
-	ObjectBucket         string
-	ObjectAccessKey      string
-	ObjectSecretKey      string
-	LogLevel             slog.Level
+	AppEnv                       string
+	HTTPAddr                     string
+	DatabaseURL                  string
+	DatabaseMax                  int32
+	CursorKey                    string
+	AppOrigin                    string
+	CookieSecure                 bool
+	SessionHashKey               string
+	MFAEncryptionKey             string
+	GitHubClientID               string
+	GitHubClientSecret           string
+	GitHubRedirectURL            string
+	GitHubAuthorizeURL           string
+	GitHubTokenURL               string
+	GitHubAPIURL                 string
+	GitHubAppID                  string
+	GitHubAppSlug                string
+	GitHubAppPrivateKey          string
+	GitHubWebhookSecret          string
+	GitHubRepositoryClientID     string
+	GitHubRepositoryClientSecret string
+	GitHubRepositoryRedirectURL  string
+	SMTPHost                     string
+	SMTPFrom                     string
+	SMTPUsername                 string
+	SMTPPassword                 string
+	SMTPTLSMode                  string
+	VerificationHashKey          string
+	VerificationEmailKey         string
+	ObjectEndpoint               string
+	ObjectRegion                 string
+	ObjectBucket                 string
+	ObjectAccessKey              string
+	ObjectSecretKey              string
+	LogLevel                     slog.Level
 }
 
 func Load() (*Config, error) {
@@ -73,38 +76,41 @@ func Load() (*Config, error) {
 		return nil, errors.New("COOKIE_SECURE must be true or false")
 	}
 	cfg := &Config{
-		AppEnv:               appEnv,
-		HTTPAddr:             getEnv("HTTP_ADDR", ":8080"),
-		DatabaseURL:          getEnv("DATABASE_URL", ""),
-		DatabaseMax:          int32(databaseMax),
-		CursorKey:            getEnv("CURSOR_SIGNING_KEY", ""),
-		AppOrigin:            getEnv("APP_ORIGIN", "https://localhost"),
-		CookieSecure:         cookieSecure,
-		SessionHashKey:       getEnv("SESSION_HASH_KEY", "local-development-only-session-hash-key"),
-		MFAEncryptionKey:     getEnv("MFA_ENCRYPTION_KEY", "local-development-only-mfa-encryption-key"),
-		GitHubClientID:       getEnv("GITHUB_CLIENT_ID", ""),
-		GitHubClientSecret:   getEnv("GITHUB_CLIENT_SECRET", ""),
-		GitHubRedirectURL:    getEnv("GITHUB_REDIRECT_URL", ""),
-		GitHubAuthorizeURL:   getEnv("PEERGIT_GITHUB_AUTHORIZE_URL", ""),
-		GitHubTokenURL:       getEnv("PEERGIT_GITHUB_TOKEN_URL", ""),
-		GitHubAPIURL:         getEnv("PEERGIT_GITHUB_API_URL", ""),
-		GitHubAppID:          getEnv("GITHUB_APP_ID", ""),
-		GitHubAppSlug:        getEnv("GITHUB_APP_SLUG", ""),
-		GitHubAppPrivateKey:  getEnv("GITHUB_APP_PRIVATE_KEY_PATH", ""),
-		GitHubWebhookSecret:  getEnv("GITHUB_APP_WEBHOOK_SECRET", ""),
-		SMTPHost:             getEnv("SMTP_HOST", "127.0.0.1:1025"),
-		SMTPFrom:             getEnv("SMTP_FROM", "PeerGit <noreply@localhost>"),
-		SMTPUsername:         getEnv("SMTP_USERNAME", ""),
-		SMTPPassword:         getEnv("SMTP_PASSWORD", ""),
-		SMTPTLSMode:          getEnv("SMTP_TLS_MODE", "none"),
-		VerificationHashKey:  getEnv("CAMPUS_VERIFICATION_HASH_KEY", "local-development-only-verification-hash-key"),
-		VerificationEmailKey: getEnv("VERIFICATION_EMAIL_ENCRYPTION_KEY", "local-development-only-verification-encryption-key"),
-		ObjectEndpoint:       getEnv("OBJECT_ENDPOINT", ""),
-		ObjectRegion:         getEnv("OBJECT_REGION", "auto"),
-		ObjectBucket:         getEnv("OBJECT_BUCKET", ""),
-		ObjectAccessKey:      getEnv("OBJECT_ACCESS_KEY", ""),
-		ObjectSecretKey:      getEnv("OBJECT_SECRET_KEY", ""),
-		LogLevel:             logLevel,
+		AppEnv:                       appEnv,
+		HTTPAddr:                     getEnv("HTTP_ADDR", ":8080"),
+		DatabaseURL:                  getEnv("DATABASE_URL", ""),
+		DatabaseMax:                  int32(databaseMax),
+		CursorKey:                    getEnv("CURSOR_SIGNING_KEY", ""),
+		AppOrigin:                    getEnv("APP_ORIGIN", "https://localhost"),
+		CookieSecure:                 cookieSecure,
+		SessionHashKey:               getEnv("SESSION_HASH_KEY", "local-development-only-session-hash-key"),
+		MFAEncryptionKey:             getEnv("MFA_ENCRYPTION_KEY", "local-development-only-mfa-encryption-key"),
+		GitHubClientID:               getEnv("GITHUB_CLIENT_ID", ""),
+		GitHubClientSecret:           getEnv("GITHUB_CLIENT_SECRET", ""),
+		GitHubRedirectURL:            getEnv("GITHUB_REDIRECT_URL", ""),
+		GitHubAuthorizeURL:           getEnv("PEERGIT_GITHUB_AUTHORIZE_URL", ""),
+		GitHubTokenURL:               getEnv("PEERGIT_GITHUB_TOKEN_URL", ""),
+		GitHubAPIURL:                 getEnv("PEERGIT_GITHUB_API_URL", ""),
+		GitHubAppID:                  getEnv("GITHUB_APP_ID", ""),
+		GitHubAppSlug:                getEnv("GITHUB_APP_SLUG", ""),
+		GitHubAppPrivateKey:          getEnv("GITHUB_APP_PRIVATE_KEY_PATH", ""),
+		GitHubWebhookSecret:          getEnv("GITHUB_APP_WEBHOOK_SECRET", ""),
+		GitHubRepositoryClientID:     getEnv("GITHUB_REPOSITORY_CLIENT_ID", ""),
+		GitHubRepositoryClientSecret: getEnv("GITHUB_REPOSITORY_CLIENT_SECRET", ""),
+		GitHubRepositoryRedirectURL:  getEnv("GITHUB_REPOSITORY_REDIRECT_URL", ""),
+		SMTPHost:                     getEnv("SMTP_HOST", "127.0.0.1:1025"),
+		SMTPFrom:                     getEnv("SMTP_FROM", "PeerGit <noreply@localhost>"),
+		SMTPUsername:                 getEnv("SMTP_USERNAME", ""),
+		SMTPPassword:                 getEnv("SMTP_PASSWORD", ""),
+		SMTPTLSMode:                  getEnv("SMTP_TLS_MODE", "none"),
+		VerificationHashKey:          getEnv("CAMPUS_VERIFICATION_HASH_KEY", "local-development-only-verification-hash-key"),
+		VerificationEmailKey:         getEnv("VERIFICATION_EMAIL_ENCRYPTION_KEY", "local-development-only-verification-encryption-key"),
+		ObjectEndpoint:               getEnv("OBJECT_ENDPOINT", ""),
+		ObjectRegion:                 getEnv("OBJECT_REGION", "auto"),
+		ObjectBucket:                 getEnv("OBJECT_BUCKET", ""),
+		ObjectAccessKey:              getEnv("OBJECT_ACCESS_KEY", ""),
+		ObjectSecretKey:              getEnv("OBJECT_SECRET_KEY", ""),
+		LogLevel:                     logLevel,
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -147,6 +153,9 @@ func (c Config) Validate() error {
 		if c.GitHubAppID == "" || c.GitHubAppSlug == "" || c.GitHubAppPrivateKey == "" || len(c.GitHubWebhookSecret) < 32 {
 			return errors.New("GitHub App ID, slug, private-key path, and webhook secret are required in staging and production")
 		}
+		if c.GitHubRepositoryClientID == "" || c.GitHubRepositoryClientSecret == "" || c.GitHubRepositoryRedirectURL == "" {
+			return errors.New("repository GitHub App client ID, secret, and redirect URL are required in staging and production")
+		}
 	}
 	origin, err := url.Parse(c.AppOrigin)
 	if err != nil || origin.Scheme == "" || origin.Host == "" || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" || (origin.Scheme != "https" && c.AppEnv != "development" && c.AppEnv != "test") {
@@ -154,6 +163,9 @@ func (c Config) Validate() error {
 	}
 	if (c.GitHubClientID == "") != (c.GitHubClientSecret == "") || (c.GitHubClientID == "") != (c.GitHubRedirectURL == "") {
 		return errors.New("GitHub client ID, secret, and redirect URL must be configured together")
+	}
+	if (c.GitHubRepositoryClientID == "") != (c.GitHubRepositoryClientSecret == "") || (c.GitHubRepositoryClientID == "") != (c.GitHubRepositoryRedirectURL == "") {
+		return errors.New("repository GitHub App client ID, secret, and redirect URL must be configured together")
 	}
 	appParts := 0
 	for _, value := range []string{c.GitHubAppID, c.GitHubAppSlug, c.GitHubAppPrivateKey, c.GitHubWebhookSecret} {
@@ -173,6 +185,12 @@ func (c Config) Validate() error {
 		redirect, err := url.Parse(c.GitHubRedirectURL)
 		if err != nil || redirect.Scheme != origin.Scheme || redirect.Host != origin.Host || redirect.Path != "/api/v1/auth/github/callback" || redirect.RawQuery != "" || redirect.Fragment != "" {
 			return errors.New("GITHUB_REDIRECT_URL must use APP_ORIGIN and /api/v1/auth/github/callback")
+		}
+	}
+	if c.GitHubRepositoryClientID != "" {
+		redirect, err := url.Parse(c.GitHubRepositoryRedirectURL)
+		if err != nil || redirect.Scheme != origin.Scheme || redirect.Host != origin.Host || redirect.Path != "/api/v1/github/authorization/callback" || redirect.RawQuery != "" || redirect.Fragment != "" {
+			return errors.New("GITHUB_REPOSITORY_REDIRECT_URL must use APP_ORIGIN and /api/v1/github/authorization/callback")
 		}
 	}
 	if c.SMTPTLSMode != "none" && c.SMTPTLSMode != "starttls" && c.SMTPTLSMode != "tls" {
