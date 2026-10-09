@@ -133,7 +133,28 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 		}
 		return id
 	}
-	hiddenProjectID := decodeID(call("lead", http.MethodPost, "/api/v1/projects", `{"slug":"phase3-private","title":"Private notes","summary":"A private workspace","project_type":"side_project","visibility":"private","lifecycle":"active"}`, http.StatusCreated), "id")
+	seedImportedProject := func(slug, title, summary, visibility, lifecycle string, repositoryID int64) string {
+		t.Helper()
+		var id, installation, repository string
+		if err := pool.QueryRow(ctx, `INSERT INTO projects(college_id,slug,title,summary,project_type,visibility,lifecycle,created_by) VALUES($1,$2,$3,$4,'open_source',$5,$6,$7) RETURNING id::text`, college, slug, title, summary, visibility, lifecycle, users["lead"]).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO project_members(college_id,project_id,user_id,role) VALUES($1,$2,$3,'owner')`, college, id, users["lead"]); err != nil {
+			t.Fatal(err)
+		}
+		if err := pool.QueryRow(ctx, `INSERT INTO github_installations(college_id,external_installation_id,account_external_id,account_login,target_type,repository_selection,permissions,status,added_by) VALUES($1,$2,$3,'phase3-fixture','User','selected','{"contents":"read"}','active',$4) RETURNING id::text`, college, repositoryID+100000, repositoryID+200000, users["lead"]).Scan(&installation); err != nil {
+			t.Fatal(err)
+		}
+		if err := pool.QueryRow(ctx, `INSERT INTO repositories(college_id,project_id,created_by) VALUES($1,$2,$3) RETURNING id::text`, college, id, users["lead"]).Scan(&repository); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO repository_bindings(college_id,repository_id,installation_id,external_repository_id,owner_login,repository_name,default_branch,visibility,linked_by) VALUES($1,$2,$3,$4,'phase3-fixture',$5,'main','private',$6)`, college, repository, installation, repositoryID, slug, users["lead"]); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	call("lead", http.MethodPost, "/api/v1/projects", `{"slug":"must-not-exist","title":"Form project","summary":"Repository-free project creation is disabled","project_type":"side_project","visibility":"private","lifecycle":"draft"}`, http.StatusConflict)
+	hiddenProjectID := seedImportedProject("phase3-private", "Private notes", "A private workspace", "private", "draft", 930001)
 	hiddenRoleID := decodeID(call("lead", http.MethodPost, "/api/v1/projects/"+hiddenProjectID+"/roles", `{"title":"Private role","description":"Do not disclose this role","openings":1}`, http.StatusCreated), "id")
 	var prerequisiteCount int
 	if err := pool.QueryRow(ctx, `SELECT cardinality(prerequisite_skills) FROM project_roles WHERE id=$1`, hiddenRoleID).Scan(&prerequisiteCount); err != nil || prerequisiteCount != 0 {
@@ -158,8 +179,11 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO user_skills(user_id,skill_id) VALUES($1,$2)`, users["lead"], existingSkillID); err != nil {
 		t.Fatal(err)
 	}
-	projectID := decodeID(call("lead", http.MethodPost, "/api/v1/projects", `{"slug":"phase3-robots","title":"Robotics team","summary":"Build helpful robots","project_type":"side_project","visibility":"campus","lifecycle":"active","skills":["Go","CAD"]}`, http.StatusCreated), "id")
-	publicProjectID := decodeID(call("lead", http.MethodPost, "/api/v1/projects", `{"slug":"phase3-public","title":"Public project","summary":"A public preview","project_type":"open_source","visibility":"public","lifecycle":"active"}`, http.StatusCreated), "id")
+	projectID := seedImportedProject("phase3-robots", "Robotics team", "Build helpful robots", "campus", "active", 930002)
+	if _, err := pool.Exec(ctx, `INSERT INTO project_skills(college_id,project_id,skill_id) VALUES($1,$2,$3)`, college, projectID, existingSkillID); err != nil {
+		t.Fatal(err)
+	}
+	publicProjectID := seedImportedProject("phase3-public", "Public project", "A public preview", "public", "active", 930003)
 	guestList := httptest.NewRecorder()
 	router.ServeHTTP(guestList, httptest.NewRequest(http.MethodGet, "http://peergit.test/api/v1/projects", nil))
 	if guestList.Code != http.StatusOK {
@@ -271,14 +295,14 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 	call("invitee", http.MethodGet, "/api/v1/projects/"+projectID+"/applications", "", http.StatusForbidden)
 	call("invitee", http.MethodPost, "/api/v1/projects/"+projectID+"/roles", `{"title":"No longer authorized","description":"Must be denied","openings":1}`, http.StatusNotFound)
 	var auditCount, outboxCount int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE tenant_id=$1 AND resource_id=$2`, college, projectID).Scan(&auditCount); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE tenant_id=$1 AND action='project.role_created' AND resource_id IN (SELECT id FROM project_roles WHERE project_id=$2)`, college, projectID).Scan(&auditCount); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM outbox_events WHERE tenant_id=$1 AND aggregate_id=$2`, college, projectID).Scan(&outboxCount); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM outbox_events WHERE tenant_id=$1 AND aggregate_type='application' AND aggregate_id IN (SELECT id FROM applications WHERE project_role_id IN (SELECT id FROM project_roles WHERE project_id=$2))`, college, projectID).Scan(&outboxCount); err != nil {
 		t.Fatal(err)
 	}
 	if auditCount < 1 || outboxCount < 1 {
-		t.Fatalf("creation not recorded: audit=%d outbox=%d", auditCount, outboxCount)
+		t.Fatalf("recruitment work not recorded: audit=%d outbox=%d", auditCount, outboxCount)
 	}
 	var otherCollege string
 	if err := pool.QueryRow(ctx, `INSERT INTO colleges(slug,name) VALUES('phase3-other','Phase 3 Other') RETURNING id::text`).Scan(&otherCollege); err != nil {

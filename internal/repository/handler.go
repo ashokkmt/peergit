@@ -3,19 +3,14 @@ package repository
 import (
 	"context"
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -24,7 +19,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"peergit/internal/github"
 	"peergit/internal/identity"
-	"peergit/internal/platform/audit"
 	"peergit/internal/platform/errormanager"
 	"peergit/internal/platform/http/request"
 	"peergit/internal/platform/http/response"
@@ -35,8 +29,10 @@ import (
 const maxArchiveBytes int64 = 100 << 20
 
 type AppConfig struct {
-	ID, Slug, WebhookSecret, Origin string
-	PrivateKey                      []byte
+	ID, Slug, WebhookSecret, Origin                    string
+	OAuthClientID, OAuthClientSecret, OAuthRedirectURL string
+	OAuthAuthorizeURL, OAuthTokenURL, APIURL           string
+	PrivateKey                                         []byte
 }
 
 type Handler struct {
@@ -57,312 +53,20 @@ func (h *Handler) Register(r chi.Router) {
 	r.Post("/github/webhooks", h.webhook)
 	r.Group(func(private chi.Router) {
 		private.Use(h.auth.Middleware)
-		private.With(h.auth.RequireCSRF).Post("/projects/{id}/github/installations/start", h.startInstallation)
-		private.Get("/github/installations/callback", h.finishInstallation)
-		private.Get("/projects/{id}/github/repositories", h.availableRepositories)
-		private.With(h.auth.RequireCSRF).Post("/projects/{id}/github/repositories", h.bindRepository)
+		private.With(h.auth.RequireCSRF).Post("/github/installations/start", h.startAccountInstallation)
+		private.Get("/github/installations/callback", h.finishAccountInstallation)
+		private.Get("/github/authorization/callback", h.finishRepositoryAuthorization)
+		private.Get("/me/github/repositories", h.myGitHubRepositories)
+		private.Get("/me/github/installations", h.myGitHubInstallations)
+		private.With(h.auth.RequireCSRF).Post("/projects/import/github", h.startGitHubImport)
+		private.With(h.auth.RequireCSRF).Post("/projects/{id}/github/link", h.startLegacyGitHubLink)
+		private.Get("/my/projects", h.myProjects)
 		private.Get("/projects/{id}/repository", h.projectRepository)
 		private.With(h.auth.RequireCSRF).Post("/projects/{id}/repository/snapshots", h.requestSnapshot)
 		private.Get("/projects/{id}/repository/snapshots/{snapshotID}", h.snapshotStatus)
 		private.With(h.auth.RequireCSRF).Post("/projects/{id}/repository/snapshots/{snapshotID}/retry", h.retrySnapshot)
 		private.Get("/projects/{id}/repository/snapshots/{snapshotID}/download", h.downloadSnapshot)
 	})
-}
-
-func (h *Handler) startInstallation(w http.ResponseWriter, r *http.Request) {
-	s, ok := h.campusSession(w, r)
-	if !ok {
-		return
-	}
-	projectID := chi.URLParam(r, "id")
-	if !uuidOK(projectID) {
-		h.fail(w, r, 404, "project_not_found", "project was not found", nil)
-		return
-	}
-	if h.app.Slug == "" || h.app.ID == "" || len(h.app.PrivateKey) == 0 {
-		h.fail(w, r, 503, "github_app_unavailable", "GitHub repository access is not configured", nil)
-		return
-	}
-	if !h.isProjectMember(r.Context(), projectID, s) {
-		h.fail(w, r, 404, "project_not_found", "project was not found", nil)
-		return
-	}
-	stateBytes := make([]byte, 32)
-	if _, err := rand.Read(stateBytes); err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	state := base64.RawURLEncoding.EncodeToString(stateBytes)
-	hash := sha256.Sum256([]byte(state))
-	_, err := h.pool.Exec(r.Context(), `INSERT INTO github_install_link_states(state_hash,college_id,project_id,user_id,expires_at)
-		VALUES($1,$2,$3,$4,clock_timestamp()+interval '10 minutes')`, hash[:], s.CollegeID, projectID, s.UserID)
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	installURL := "https://github.com/apps/" + url.PathEscape(h.app.Slug) + "/installations/new?state=" + url.QueryEscape(state)
-	_ = response.OK(w, map[string]string{"installation_url": installURL})
-}
-
-func (h *Handler) finishInstallation(w http.ResponseWriter, r *http.Request) {
-	s, ok := identity.CurrentSession(r.Context())
-	if !ok || s.CollegeID == "" || !s.TermsAccepted || !s.PrivacyAccepted {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-	if h.app.ID == "" || len(h.app.PrivateKey) == 0 {
-		h.fail(w, r, 503, "github_app_unavailable", "GitHub repository access is not configured", nil)
-		return
-	}
-	state := r.URL.Query().Get("state")
-	id := r.URL.Query().Get("installation_id")
-	if len(state) < 40 || len(state) > 100 || !numericID(id) {
-		h.fail(w, r, 400, "installation_callback_invalid", "GitHub installation response is invalid or expired", nil)
-		return
-	}
-	hash := sha256.Sum256([]byte(state))
-	var projectID string
-	if err := h.pool.QueryRow(r.Context(), `SELECT project_id::text FROM github_install_link_states
-		WHERE state_hash=$1 AND user_id=$2 AND college_id=$3 AND expires_at>clock_timestamp()`, hash[:], s.UserID, s.CollegeID).Scan(&projectID); err != nil {
-		h.fail(w, r, 400, "installation_state_invalid", "GitHub installation request expired or was already used", err)
-		return
-	}
-	appJWT, err := github.JWT(h.app.ID, h.app.PrivateKey, time.Now())
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	installation, err := h.api.Installation(r.Context(), id, appJWT)
-	if err != nil {
-		h.providerFailure(w, r, err)
-		return
-	}
-	if installation.ID == 0 {
-		installation.ID, _ = strconv.ParseInt(id, 10, 64)
-	}
-	if installation.ID <= 0 || installation.Account.ID <= 0 || installation.Account.Login == "" || (installation.TargetType != "User" && installation.TargetType != "Organization") {
-		h.fail(w, r, 400, "installation_invalid", "GitHub returned an unsupported installation", nil)
-		return
-	}
-	if installation.Permissions["contents"] != "read" {
-		h.fail(w, r, 403, "installation_permission_insufficient", "the GitHub App installation must grant read-only repository contents access", nil)
-		return
-	}
-	status := "active"
-	if installation.SuspendedAt != nil {
-		status = "suspended"
-	}
-	tx, err := h.pool.Begin(r.Context())
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	var consumed string
-	err = tx.QueryRow(r.Context(), `DELETE FROM github_install_link_states WHERE state_hash=$1 AND user_id=$2 AND college_id=$3 AND project_id=$4 AND expires_at>clock_timestamp() RETURNING project_id::text`, hash[:], s.UserID, s.CollegeID, projectID).Scan(&consumed)
-	if err != nil {
-		h.fail(w, r, 400, "installation_state_invalid", "GitHub installation request expired or was already used", err)
-		return
-	}
-	tag, err := tx.Exec(r.Context(), `INSERT INTO github_installations(college_id,external_installation_id,account_external_id,account_login,target_type,repository_selection,permissions,status,added_by,installed_at,removed_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,clock_timestamp(),NULL)
-		ON CONFLICT(external_installation_id) DO UPDATE SET
-		 account_external_id=EXCLUDED.account_external_id,account_login=EXCLUDED.account_login,target_type=EXCLUDED.target_type,
-		 repository_selection=EXCLUDED.repository_selection,permissions=EXCLUDED.permissions,status=EXCLUDED.status,
-		 checked_at=clock_timestamp(),removed_at=NULL
-		WHERE github_installations.college_id=EXCLUDED.college_id`, s.CollegeID, installation.ID, installation.Account.ID, installation.Account.Login,
-		installation.TargetType, installation.RepositorySelection, jsonValue(installation.Permissions), status, s.UserID)
-	if err != nil {
-		h.fail(w, r, 409, "installation_tenant_conflict", "GitHub installation is already linked to another campus", err)
-		return
-	}
-	if tag.RowsAffected() != 1 {
-		h.fail(w, r, 409, "installation_tenant_conflict", "GitHub installation is already linked to another campus", nil)
-		return
-	}
-	var localID string
-	if err = tx.QueryRow(r.Context(), `SELECT id::text FROM github_installations WHERE external_installation_id=$1 AND college_id=$2`, installation.ID, s.CollegeID).Scan(&localID); err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	if err = audit.Append(r.Context(), tx, audit.Entry{TenantID: s.CollegeID, ActorID: s.UserID, Action: "github.installation.linked", ResourceType: "github_installation", Details: json.RawMessage(fmt.Sprintf(`{"installation_id":%d,"account":%q}`, installation.ID, installation.Account.Login))}); err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	if err = tx.Commit(r.Context()); err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	h.log.InfoContext(r.Context(), "GitHub App installation linked", "installation_id", installation.ID, "campus_id", s.CollegeID, "actor_id", s.UserID)
-	http.Redirect(w, r, h.app.Origin+"/projects?github_installation=connected&project="+url.QueryEscape(projectID), http.StatusSeeOther)
-}
-
-func (h *Handler) availableRepositories(w http.ResponseWriter, r *http.Request) {
-	s, ok := h.campusSession(w, r)
-	if !ok {
-		return
-	}
-	projectID := chi.URLParam(r, "id")
-	if !h.isProjectMember(r.Context(), projectID, s) {
-		h.fail(w, r, 404, "project_not_found", "project was not found", nil)
-		return
-	}
-	rows, err := h.pool.Query(r.Context(), `SELECT external_installation_id::text FROM github_installations WHERE college_id=$1 AND status='active' ORDER BY account_login`, s.CollegeID)
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	defer rows.Close()
-	items := make([]map[string]any, 0)
-	for rows.Next() {
-		var installID string
-		if err := rows.Scan(&installID); err != nil {
-			h.err.Handle(w, r, err)
-			return
-		}
-		jwt, err := github.JWT(h.app.ID, h.app.PrivateKey, time.Now())
-		if err != nil {
-			h.err.Handle(w, r, err)
-			return
-		}
-		token, err := h.api.Token(r.Context(), installID, jwt)
-		if err != nil {
-			if github.IsDenied(err) {
-				continue
-			}
-			h.providerFailure(w, r, err)
-			return
-		}
-		repositories, err := h.api.InstallationRepositories(r.Context(), token)
-		if err != nil {
-			h.providerFailure(w, r, err)
-			return
-		}
-		for _, repo := range repositories {
-			if len(items) >= 10000 {
-				h.fail(w, r, 503, "repository_list_too_large", "installation repository list exceeds the supported limit", nil)
-				return
-			}
-			items = append(items, map[string]any{"installation_id": installID, "id": repo.ID, "full_name": repo.FullName, "private": repo.Private, "visibility": repo.Visibility, "default_branch": repo.DefaultBranch})
-		}
-	}
-	if err = rows.Err(); err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	_ = response.OK(w, map[string]any{"items": items})
-}
-
-type bindRepositoryRequest struct {
-	InstallationID string `json:"installation_id"`
-	RepositoryID   int64  `json:"repository_id"`
-	Owner          string `json:"owner"`
-	Name           string `json:"name"`
-}
-
-func (h *Handler) bindRepository(w http.ResponseWriter, r *http.Request) {
-	s, ok := h.campusSession(w, r)
-	if !ok {
-		return
-	}
-	projectID := chi.URLParam(r, "id")
-	if !h.isProjectMember(r.Context(), projectID, s) {
-		h.fail(w, r, 404, "project_not_found", "project was not found", nil)
-		return
-	}
-	in, err := request.Decode[bindRepositoryRequest](r)
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	if !numericID(in.InstallationID) || in.RepositoryID <= 0 || !repoSegment.MatchString(in.Owner) || !repoSegment.MatchString(in.Name) {
-		h.fail(w, r, 400, "repository_invalid", "repository selection is invalid", nil)
-		return
-	}
-	var localInstallation string
-	if err = h.pool.QueryRow(r.Context(), `SELECT id::text FROM github_installations WHERE external_installation_id=$1 AND college_id=$2 AND status='active'`, in.InstallationID, s.CollegeID).Scan(&localInstallation); err != nil {
-		h.fail(w, r, 404, "installation_not_found", "active GitHub installation was not found", err)
-		return
-	}
-	jwt, err := github.JWT(h.app.ID, h.app.PrivateKey, time.Now())
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	token, err := h.api.Token(r.Context(), in.InstallationID, jwt)
-	if err != nil {
-		h.providerFailure(w, r, err)
-		return
-	}
-	providerRepos, err := h.api.InstallationRepositories(r.Context(), token)
-	if err != nil {
-		h.providerFailure(w, r, err)
-		return
-	}
-	var selected *github.Repository
-	for i := range providerRepos {
-		if providerRepos[i].ID == in.RepositoryID && strings.EqualFold(providerRepos[i].FullName, in.Owner+"/"+in.Name) {
-			selected = &providerRepos[i]
-			break
-		}
-	}
-	if selected == nil {
-		h.fail(w, r, 403, "repository_not_granted", "repository is not accessible to this installation", nil)
-		return
-	}
-	tx, err := h.pool.Begin(r.Context())
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	var repositoryID string
-	err = tx.QueryRow(r.Context(), `INSERT INTO repositories(college_id,project_id,created_by) VALUES($1,$2,$3)
-		ON CONFLICT(project_id) DO UPDATE SET updated_at=clock_timestamp()
-		WHERE repositories.college_id=EXCLUDED.college_id RETURNING id::text`, s.CollegeID, projectID, s.UserID).Scan(&repositoryID)
-	if err != nil {
-		h.fail(w, r, 404, "project_not_found", "project was not found", err)
-		return
-	}
-	_, err = tx.Exec(r.Context(), `UPDATE repository_bindings SET is_current=false,access_state='inactive' WHERE repository_id=$1 AND college_id=$2 AND is_current`, repositoryID, s.CollegeID)
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	parts := strings.SplitN(selected.FullName, "/", 2)
-	if len(parts) != 2 {
-		h.fail(w, r, 502, "github_repository_invalid", "GitHub returned an invalid repository identity", nil)
-		return
-	}
-	visibility := selected.Visibility
-	if visibility == "" {
-		if selected.Private {
-			visibility = "private"
-		} else {
-			visibility = "public"
-		}
-	}
-	var bindingID string
-	err = tx.QueryRow(r.Context(), `INSERT INTO repository_bindings(college_id,repository_id,installation_id,external_repository_id,owner_login,repository_name,default_branch,visibility,linked_by)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id::text`, s.CollegeID, repositoryID, localInstallation, in.RepositoryID, parts[0], parts[1], selected.DefaultBranch, visibility, s.UserID).Scan(&bindingID)
-	if err != nil {
-		h.fail(w, r, 409, "repository_already_linked", "this GitHub repository is already connected to another current PeerGit project", err)
-		return
-	}
-	payload, _ := json.Marshal(map[string]string{"binding_id": bindingID})
-	if _, err = jobs.EnqueueTx(r.Context(), tx, s.CollegeID, s.UserID, "github_reconcile", "initial:"+bindingID, payload, nil); err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	if err = audit.Append(r.Context(), tx, audit.Entry{TenantID: s.CollegeID, ActorID: s.UserID, Action: "github.repository.bound", ResourceType: "repository_binding", Details: json.RawMessage(fmt.Sprintf(`{"binding_id":%q,"external_repository_id":%d}`, bindingID, in.RepositoryID))}); err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	if err = tx.Commit(r.Context()); err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	_ = response.Created(w, map[string]any{"repository_id": repositoryID, "binding_id": bindingID, "state": "sync_pending"})
 }
 
 func (h *Handler) projectRepository(w http.ResponseWriter, r *http.Request) {
@@ -390,7 +94,11 @@ func (h *Handler) projectRepository(w http.ResponseWriter, r *http.Request) {
 	var externalID int64
 	var synced *time.Time
 	var permissions []byte
-	err = h.pool.QueryRow(r.Context(), `SELECT b.id::text,b.external_repository_id,b.owner_login,b.repository_name,b.access_state,b.sync_health,b.last_synced_at,i.permissions FROM repository_bindings b JOIN github_installations i ON i.id=b.installation_id AND i.college_id=b.college_id WHERE b.repository_id=$1 AND b.college_id=$2 AND b.is_current`, repositoryID, s.CollegeID).Scan(&bindingID, &externalID, &owner, &name, &access, &syncHealth, &synced, &permissions)
+	var htmlURL, description, readme string
+	var topics []string
+	var languages []byte
+	var defaultBranch string
+	err = h.pool.QueryRow(r.Context(), `SELECT b.id::text,b.external_repository_id,b.owner_login,b.repository_name,b.default_branch,b.access_state,b.sync_health,b.last_synced_at,i.permissions,b.html_url,b.description,b.topics,b.languages,b.readme_markdown FROM repository_bindings b JOIN github_installations i ON i.id=b.installation_id AND i.college_id=b.college_id WHERE b.repository_id=$1 AND b.college_id=$2 AND b.is_current`, repositoryID, s.CollegeID).Scan(&bindingID, &externalID, &owner, &name, &defaultBranch, &access, &syncHealth, &synced, &permissions, &htmlURL, &description, &topics, &languages, &readme)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		h.err.Handle(w, r, err)
 		return
@@ -398,7 +106,12 @@ func (h *Handler) projectRepository(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		var grants map[string]string
 		_ = json.Unmarshal(permissions, &grants)
-		binding = map[string]any{"id": bindingID, "external_repository_id": externalID, "owner": owner, "name": name, "full_name": owner + "/" + name, "access_state": access, "sync_health": syncHealth, "last_synced_at": synced, "capabilities": grants, "limitations": "Git LFS objects and submodule contents are not independently captured."}
+		var languageMap map[string]int64
+		_ = json.Unmarshal(languages, &languageMap)
+		if languageMap == nil {
+			languageMap = map[string]int64{}
+		}
+		binding = map[string]any{"id": bindingID, "external_repository_id": externalID, "owner": owner, "name": name, "full_name": owner + "/" + name, "html_url": htmlURL, "description": description, "default_branch": defaultBranch, "topics": topics, "languages": languageMap, "readme_markdown": readme, "access_state": access, "sync_health": syncHealth, "last_synced_at": synced, "capabilities": grants, "limitations": "Git LFS objects and submodule contents are not independently captured."}
 	}
 	contributions := make([]map[string]any, 0)
 	rows, err := h.pool.Query(r.Context(), `SELECT c.id::text,c.kind,c.canonical_id,c.github_author_id,c.author_login,c.author_name,c.title,c.summary,c.occurred_at,c.additions,c.deletions,c.changed_files,u.id::text

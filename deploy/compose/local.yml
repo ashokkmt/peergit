@@ -15,6 +15,18 @@ services:
       retries: 30
     mem_limit: 1g
 
+  pgadmin:
+    image: dpage/pgadmin4:9.18.0@sha256:c332c5f6dfba995d9ebc4af261d93506d6876085d712eaaa3defc8dd1a3f26de
+    profiles: [tools]
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-pgadmin@peergit.dev}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-local-only-pgadmin}
+    ports: ["127.0.0.1:5050:80"]
+    volumes: ["pgadmin-data:/var/lib/pgadmin"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   objects:
     image: chrislusf/seaweedfs@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882
     command: ["mini", "-dir=/data"]
@@ -53,6 +65,7 @@ services:
 
 volumes:
   postgres-data:
+  pgadmin-data:
   object-data:
   caddy-data:
   caddy-config:
