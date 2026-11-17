@@ -12,6 +12,8 @@ These instructions apply to the entire repository. Follow the current repository
 - Follow established repository conventions. If none exist yet, use idiomatic code, clear ownership, and explicit error handling.
 - Do not declare work complete while known failures, skipped required checks, or unresolved scope questions remain hidden.
 - Never commit secrets, credentials, tokens, or real personal data. Use documented environment variables and safe local fixtures.
+- Do not edit, rename, or otherwise modify files under `plans/` unless the user explicitly instructs you to do so; treat these files as user-owned source of truth.
+- When starting Docker/Compose or other project containers for repository work, stop every container started by the agent before handoff. Leave containers that were already running before the task untouched.
 
 ## Test rules
 

@@ -1,6 +1,7 @@
 assets/
 graphify-out/
 plans/
+WORKLOG.md
 
 
 .env
