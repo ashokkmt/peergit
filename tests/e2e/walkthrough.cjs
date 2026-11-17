@@ -102,8 +102,12 @@ const { chromium } = require('playwright');
     await accountMenu.keyboard.press('Escape');
     assert.equal(await accountMenu.locator('.account-menu').evaluate(element => element.open), false, 'Escape closes the account menu');
     assert.equal(await accountMenu.evaluate(() => document.activeElement.matches('.account-menu summary')), true, 'Escape returns focus to the menu button');
-    await accountMenu.route('**/api/v1/me/github/repositories', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [{ id: 41003, full_name: 'test-owner/fixture', description: 'Synthetic repository', visibility: 'private', default_branch: 'main', topics: [], installation_id: '41001' }] } }) }));
+    await accountMenu.route('**/api/v1/me/github/repositories', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [{ id: 41003, installation_id: 'local-install-1', full_name: 'test-owner/fixture', description: 'Synthetic repository', visibility: 'private', default_branch: 'main', topics: [], expires_at: new Date(Date.now()+60000).toISOString() }], expired_count: 0 } }) }));
     await accountMenu.route('**/api/v1/me/github/installations', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [{ id: 'local-install-1', installation_id: '41001', account: 'test-owner', target_type: 'User', status: 'active', confirmed_at: new Date().toISOString() }] } }) }));
+    await accountMenu.route('**/api/v1/me/github/retained-projects', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [] } }) }));
+    await accountMenu.route('**/api/v1/me/github/installations/local-install-1/refresh', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authorization_url: 'http://127.0.0.1:8090/repository-authorize' } }) }));
+    await accountMenu.route('**/api/v1/me/github/installations/local-install-1/imports', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [{title:'Imported fixture'}] } }) }));
+    await accountMenu.route('**/api/v1/me/github/installations/local-install-1/revoke', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { retained_projects:['imported-fixture'], delete_after:new Date(Date.now()+30*86400000).toISOString() } }) }));
     await accountMenu.route('**/api/v1/projects/import/github', async route => {
       assert.equal(route.request().postDataJSON().repository_id, 41003);
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authorization_url: 'http://127.0.0.1:8090/repository-authorize' } }) });
@@ -111,8 +115,21 @@ const { chromium } = require('playwright');
     await accountMenu.goto(`${baseURL}/account/github`);
     await accountMenu.getByRole('heading', { name: 'Import a project from GitHub' }).waitFor();
     await accountMenu.getByText('test-owner/fixture').waitFor();
+    assert.equal(await accountMenu.getByRole('button', { name: 'Connect GitHub repository App' }).count(), 0, 'connected installation should not show a duplicate connect action');
+    await accountMenu.getByRole('link', { name: 'Manage repository access on GitHub' }).waitFor();
+    await accountMenu.getByRole('button', { name: 'Refresh repositories' }).click();
+    await accountMenu.waitForURL('http://127.0.0.1:8090/repository-authorize');
+    await accountMenu.goto(`${baseURL}/account/github`);
+    await accountMenu.getByText('test-owner/fixture').waitFor();
     await accountMenu.getByRole('button', { name: 'Import privately' }).click();
     await accountMenu.waitForURL('http://127.0.0.1:8090/repository-authorize');
+    await accountMenu.goto(`${baseURL}/account/github`);
+    let revokePrompt='';
+    accountMenu.on('dialog', async dialog => { revokePrompt=dialog.message(); await dialog.accept(); });
+    await accountMenu.getByRole('button', { name: 'Revoke PeerGit connection' }).click();
+    await accountMenu.getByText('Connection revoked. Its imports are hidden').waitFor();
+    assert.match(revokePrompt,/recoverable for 30 days/);
+    assert.match(revokePrompt,/Imported fixture/);
     await accountMenu.close();
     console.log('Discovery-only homepage, accessible account menu, and private GitHub import initiation passed');
 
@@ -120,15 +137,21 @@ const { chromium } = require('playwright');
     projectPage.on('pageerror', error => console.error(`Project detail browser error: ${error.message}`));
     projectPage.on('console', message => { if (message.type() === 'error') console.error(`Project detail console error: ${message.text()}`); });
     await projectPage.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: true, csrf_token: 'project-csrf', user: { display_name: 'Test Owner', college_id: 'campus-1', terms_accepted: true, privacy_accepted: true } } }) }));
-    await projectPage.route('**/api/v1/projects/imported-project/repository', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { repository: { id: 'binding-1', full_name: 'test-owner/imported-project', html_url: 'https://github.com/test-owner/imported-project', description: 'Synthetic repo', default_branch: 'main', topics: [], languages: {}, readme_markdown: '', access_state: 'active', sync_health: 'current', limitations: 'LFS and submodule content is not captured.' }, contributions: [], snapshots: [] } }) }));
+    await projectPage.route('**/api/v1/projects/imported-project/repository', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { repository: { id: 'binding-1', full_name: 'test-owner/imported-project', html_url: 'https://github.com/test-owner/imported-project', description: 'Synthetic repo', default_branch: 'main', topics: [], languages: {}, readme_markdown: '', access_state: 'active', sync_health: 'current', limitations: 'LFS and submodule content is not captured.' }, contributions: [{id:'commit-1',kind:'commit',canonical_id:'git:sha1:0123456789abcdef0123456789abcdef01234567',title:'Initial commit',summary:'Initial commit',author_name:'Test Owner',author_login:'test-owner'}], snapshots: [] } }) }));
+    await projectPage.route('**/api/v1/projects/imported-project/repository/branches', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { default_branch:'main',items:[{name:'main',commit:{sha:'0123456789abcdef0123456789abcdef01234567'}}] } }) }));
+    await projectPage.route('**/api/v1/projects/imported-project/repository/tree**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { ref:'main',sha:'0123456789abcdef0123456789abcdef01234567',tree:[{path:'README.md',type:'blob',size:5,sha:'0123456789abcdef0123456789abcdef01234567'}] } }) }));
+    await projectPage.route('**/api/v1/projects/imported-project/repository/file**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { path:'README.md',ref:'0123456789abcdef0123456789abcdef01234567',content:'# Hi' } }) }));
+    await projectPage.route('**/api/v1/projects/imported-project/repository/commit**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { sha:'0123456789abcdef0123456789abcdef01234567',files:[{filename:'README.md',status:'modified',patch:'+hello'}] } }) }));
     await projectPage.route('**/api/v1/projects/imported-project/applications', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [] } }) }));
+    const mockProject = { id: 'imported-project', title: 'Imported project', summary: 'Original summary', visibility: 'private', lifecycle: 'draft', project_type: 'open_source', recruiting: false, skills: [], version: 1 };
     await projectPage.route('**/api/v1/projects/imported-project', async route => {
       if (route.request().method() === 'PATCH') {
         const body = route.request().postDataJSON();
         assert.equal(body.summary, 'Updated summary');
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { id: 'imported-project', version: body.lifecycle === 'active' ? 3 : 2 } }) });
+        Object.assign(mockProject, { summary: body.summary, visibility: body.visibility, lifecycle: body.lifecycle, version: mockProject.version + 1 });
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { id: mockProject.id, version: mockProject.version } }) });
       } else {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { project: { id: 'imported-project', title: 'Imported project', summary: 'Original summary', visibility: 'private', lifecycle: 'draft', project_type: 'open_source', recruiting: false, skills: [], version: 1 }, description: 'Original description', viewer_role: 'owner', members: [{ user_id: 'owner-1', display_name: 'Test Owner', role: 'owner' }] } }) });
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { project: { ...mockProject }, description: 'Original description', viewer_role: 'owner', members: [{ user_id: 'owner-1', display_name: 'Test Owner', role: 'owner' }] } }) });
       }
     });
     await projectPage.route('**/api/v1/projects/imported-project/roles', async route => {
@@ -142,17 +165,26 @@ const { chromium } = require('playwright');
     const projectResponse = await projectPage.goto(`${baseURL}/projects/imported-project`);
     try { await projectPage.getByRole('heading', { name: 'Imported project' }).waitFor({ timeout: 5000 }); }
     catch { throw new Error(`Imported project page did not render (HTTP ${projectResponse?.status()}): ${await projectPage.locator('body').innerText()}`); }
+    await projectPage.getByRole('button', { name: 'README.md' }).click();
+    await projectPage.getByText('# Hi').waitFor();
+    await projectPage.getByRole('link', { name: 'Activity' }).click();
+    await projectPage.getByRole('button', { name: 'Initial commit' }).click();
+    await projectPage.getByText('+hello').waitFor();
+    await projectPage.getByRole('link', { name: 'Settings' }).click();
     await projectPage.getByRole('textbox', { name: 'Summary' }).fill('Updated summary');
     await projectPage.getByRole('button', { name: 'Save details' }).click();
     await projectPage.getByText('Project details saved.').waitFor();
     await projectPage.getByRole('button', { name: 'Publish to campus' }).click();
     await projectPage.getByText(/Project published to your campus/).waitFor();
+    await projectPage.getByRole('button', { name: 'Make private' }).click();
+    await projectPage.getByText('Project made private.').waitFor();
+    await projectPage.getByRole('link', { name: 'Open roles' }).click();
     await projectPage.getByRole('textbox', { name: 'Role title' }).fill('Rust contributor');
     await projectPage.getByRole('textbox', { name: 'What will the member work on?' }).fill('Improve the project documentation.');
     await projectPage.getByRole('button', { name: 'Create opening' }).click();
     await projectPage.getByText('Team opening created.').waitFor();
     await projectPage.close();
-    console.log('Imported project editing, recruiting, and explicit publication controls passed');
+    console.log('Repository refresh, project code/activity tabs, publication reversal, and recruiting controls passed');
 
     const onboarding = await browser.newPage({ viewport: { width: 390, height: 844 } });
     let confirmationPosts = 0;

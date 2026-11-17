@@ -95,6 +95,9 @@ func run() error {
 			if err := repository.ScheduleReconciliation(workerCtx, pool, logger); err != nil {
 				logger.ErrorContext(workerCtx, "repository reconciliation schedule failed", "error", err)
 			}
+			if err := repository.CleanupExpiredGitHubImports(workerCtx, pool, objectStore); err != nil {
+				logger.ErrorContext(workerCtx, "expired GitHub import cleanup failed", "error", err)
+			}
 			select {
 			case <-workerCtx.Done():
 				results <- nil

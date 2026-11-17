@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { RepositoryOverview } from "./repository-overview";
+import { RepositoryCode } from "./repository-code";
 import { LegacyRepositoryLink } from "./legacy-repository-link";
 import { SiteHeader } from "@/components/layout/site-header";
 
@@ -27,6 +28,9 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
   const [roleDescription, setRoleDescription] = useState("");
   const [roleOpenings, setRoleOpenings] = useState("1");
   const [applicationMessage, setApplicationMessage] = useState<Record<string, string>>({});
+  const [tab,setTab]=useState("code");
+
+  useEffect(()=>{setTab(new URLSearchParams(window.location.search).get("tab")||"code")},[]);
 
   async function loadRoles() {
     const response = await fetch(`/api/v1/projects/${projectID}/roles`, { cache: "no-store" });
@@ -90,10 +94,11 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
     } catch (error) { setProblem(error instanceof Error ? error.message : "Project details could not be saved."); }
   }
 
-  async function publish(visibility: "campus" | "public") {
+  async function publish(visibility: "private" | "campus" | "public") {
     if (!details) return;
     try {
-      const result = await mutate(`/api/v1/projects/${projectID}`, { summary, description, visibility, lifecycle: "active", version: details.project.version }, `Project published to ${visibility === "campus" ? "your campus" : "the public discovery page"}. GitHub source files and private snapshots keep their existing access rules.`, "PATCH");
+      const success=visibility==="private"?"Project made private.":`Project published to ${visibility === "campus" ? "your campus" : "the public discovery page"}. GitHub source files and private snapshots keep their existing access rules.`;
+      const result = await mutate(`/api/v1/projects/${projectID}`, { summary, description, visibility, lifecycle: "active", version: details.project.version }, success, "PATCH");
       setDetails({ ...details, description, project: { ...details.project, summary, visibility, lifecycle: "active", version: result?.version ?? details.project.version } });
     } catch (error) { setProblem(error instanceof Error ? error.message : "Project could not be published."); }
   }
@@ -124,18 +129,18 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
   return <><SiteHeader /><main className="content project-detail-page">
     {problem && <p className="form-error" role="alert">{problem}</p>}{message && <p className="form-success" role="status">{message}</p>}
     {!details ? <p role="status">Loading project…</p> : <>
-      <p className="eyebrow">{details.project.project_type.replaceAll("_", " ")} · {details.project.visibility} · {details.project.lifecycle}</p>
-      <h1>{details.project.title}</h1><p className="project-summary">{details.project.summary}</p><p>{details.description}</p>
-      {details.project.skills.length > 0 && <ul className="skill-list">{details.project.skills.map(skill => <li key={skill}>{skill}</li>)}</ul>}
-      {manager && hasRepository && <form className="account-form" onSubmit={event => void saveDetails(event)}><h2>Edit project details</h2><label>Summary<textarea required maxLength={500} value={summary} onChange={event => setSummary(event.target.value)} /></label><label>Description<textarea maxLength={12000} rows={6} value={description} onChange={event => setDescription(event.target.value)} /></label><button className="primary-button" type="submit">Save details</button></form>}
-      {manager && hasRepository && details.project.lifecycle === "draft" && <section className="account-form"><h2>Publish this imported project</h2><p>Publishing shares its PeerGit project presentation. It does not change GitHub repository visibility or make private evidence public.</p><button className="secondary-button" type="button" onClick={() => void publish("campus")}>Publish to campus</button> <button className="secondary-button" type="button" onClick={() => void publish("public")}>Publish publicly</button></section>}
-      {details.viewer_role && hasRepository && <RepositoryOverview projectID={projectID} csrf={csrf} />}
-      {!hasRepository && manager && <LegacyRepositoryLink projectID={projectID} csrf={csrf} />}
-      <section className="account-form"><h2>Team</h2>{details.members.length ? <ul>{details.members.map(member => <li key={member.user_id}>{member.display_name} · {member.role}</li>)}</ul> : <p>No team members are listed.</p>}</section>
-      <section className="account-form"><h2>Team openings</h2>{roles.filter(role => role.status === "open").length ? roles.filter(role => role.status === "open").map(role => <article className="role-card" key={role.id}><h3>{role.title}</h3><p>{role.description}</p><p>{role.openings} opening(s) · {role.difficulty}{role.good_first_task ? " · beginner-friendly" : ""}</p>{campusAccess && details.project.lifecycle === "active" && !manager && <form onSubmit={event => { event.preventDefault(); void apply(role); }}><label>Why are you interested?<textarea required maxLength={2000} value={applicationMessage[role.id] ?? ""} onChange={event => setApplicationMessage(value => ({ ...value, [role.id]: event.target.value }))} /></label><button className="secondary-button" type="submit">Apply</button></form>}</article>) : <p>This project has no open roles.</p>}
+      <header className="project-workspace-header"><p className="eyebrow">{details.project.project_type.replaceAll("_", " ")} · PeerGit {details.project.visibility} · {details.project.lifecycle}</p><h1>{details.project.title}</h1><p className="project-summary">{details.project.summary}</p>{details.viewer_role&&<p>Source visibility and access are governed by GitHub. PeerGit publication does not expose private repository files.</p>}</header>
+      <nav className="project-tabs" aria-label="Project sections">{[["code","Code"],["activity","Activity"],["open-roles","Open roles"],["snapshots","Snapshots"],...(manager?[["settings","Settings"]]:[])].map(([value,label])=><a key={value} href={`/projects/${projectID}?tab=${value}`} aria-current={tab===value?"page":undefined}>{label}</a>)}</nav>
+      {tab==="code"&&details.viewer_role&&hasRepository&&<RepositoryCode projectID={projectID} branch="main"/>}
+      {tab==="code"&&details.viewer_role&&hasRepository&&<RepositoryOverview projectID={projectID} csrf={csrf} tab="code"/>}
+      {tab==="activity"&&details.viewer_role&&hasRepository&&<RepositoryOverview projectID={projectID} csrf={csrf} tab="activity"/>}
+      {tab==="snapshots"&&details.viewer_role&&hasRepository&&<RepositoryOverview projectID={projectID} csrf={csrf} tab="snapshots"/>}
+      {tab==="settings"&&manager&&hasRepository&&<section className="account-form"><h2>Project settings</h2><p>PeerGit visibility: <strong>{details.project.visibility}</strong> · lifecycle: {details.project.lifecycle}</p><form onSubmit={event => void saveDetails(event)}><label>Summary<textarea required maxLength={500} value={summary} onChange={event => setSummary(event.target.value)} /></label><label>Description<textarea maxLength={12000} rows={6} value={description} onChange={event => setDescription(event.target.value)} /></label><button className="primary-button" type="submit">Save details</button></form><h3>Publication</h3><p>Project publication shares its PeerGit presentation. GitHub visibility does not change, and private source, evidence, and snapshots remain restricted to project members.</p>{details.project.lifecycle!=="archived"&&<><button className="secondary-button" type="button" onClick={() => void publish("campus")}>Publish to campus</button> <button className="secondary-button" type="button" onClick={() => void publish("public")}>Publish publicly</button></>}{details.project.visibility!=="private"&&<button className="secondary-button" type="button" onClick={()=>void publish("private")}>Make private</button>}{details.project.lifecycle!=="archived"&&<button className="secondary-button" type="button" onClick={()=>void mutate(`/api/v1/projects/${projectID}`,{summary,description,visibility:"private",lifecycle:"archived",version:details.project.version},"Project archived.","PATCH")}>Archive project</button>}<h3>GitHub connection</h3><p>Repository access follows the connected GitHub App installation. Manage or revoke your account connection from <a href="/account/github">GitHub connections</a>.</p></section>}
+      {tab==="code"&&(!details.viewer_role||!hasRepository)&&manager&&<LegacyRepositoryLink projectID={projectID} csrf={csrf} />}
+      {tab==="open-roles"&&<section className="account-form"><h2>Open roles</h2><h3>Team</h3>{details.members.length ? <ul>{details.members.map(member => <li key={member.user_id}>{member.display_name} · {member.role}</li>)}</ul> : <p>No team members are listed.</p>}{roles.filter(role => role.status === "open").length ? roles.filter(role => role.status === "open").map(role => <article className="role-card" key={role.id}><h3>{role.title}</h3><p>{role.description}</p><p>{role.openings} opening(s) · {role.difficulty}{role.good_first_task ? " · beginner-friendly" : ""}</p>{campusAccess && details.project.lifecycle === "active" && !manager && <form onSubmit={event => { event.preventDefault(); void apply(role); }}><label>Why are you interested?<textarea required maxLength={2000} value={applicationMessage[role.id] ?? ""} onChange={event => setApplicationMessage(value => ({ ...value, [role.id]: event.target.value }))} /></label><button className="secondary-button" type="submit">Apply</button></form>}</article>) : <p>This project has no open roles.</p>}
         {manager && hasRepository && details.project.lifecycle === "active" && <form className="project-role-form" onSubmit={event => void createRole(event)}><h3>Open a team role</h3><label>Role title<input required minLength={2} maxLength={100} value={roleTitle} onChange={event => setRoleTitle(event.target.value)} /></label><label>What will the member work on?<textarea required maxLength={3000} value={roleDescription} onChange={event => setRoleDescription(event.target.value)} /></label><label>Number of openings<input required type="number" min={1} max={20} value={roleOpenings} onChange={event => setRoleOpenings(event.target.value)} /></label><button className="primary-button" type="submit">Create opening</button></form>}
-      </section>
-      {manager && applications.length > 0 && <section className="account-form"><h2>Applications</h2>{applications.map(application => <article className="role-card" key={application.id}><h3>{application.applicant_name} · {application.status}</h3><p>{application.message}</p>{application.status === "pending" && <><button className="secondary-button" type="button" onClick={() => void decide(application, "accepted")}>Accept</button> <button className="secondary-button" type="button" onClick={() => void decide(application, "rejected")}>Decline</button></>}</article>)}</section>}
+      </section>}
+      {tab==="open-roles"&&manager&&applications.length > 0 && <section className="account-form"><h2>Applications</h2>{applications.map(application => <article className="role-card" key={application.id}><h3>{application.applicant_name} · {application.status}</h3><p>{application.message}</p>{application.status === "pending" && <><button className="secondary-button" type="button" onClick={() => void decide(application, "accepted")}>Accept</button> <button className="secondary-button" type="button" onClick={() => void decide(application, "rejected")}>Decline</button></>}</article>)}</section>}
     </>}
   </main></>;
 }

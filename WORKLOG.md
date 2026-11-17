@@ -21,6 +21,42 @@ Keep entries brief. Combine tightly related work completed together; create sepa
 
 ## Entries
 
+### 2026-10-08T18:33Z — Condense progress report to 23 pages
+
+- **Phase/area:** Academic reporting / Progress Report 1.
+- **Summary:** Condensed Chapters 1, 2 and 4 into direct prose with less repetition and shorter supporting tables, reducing visible words from 9,537 to 6,383 (33.1%). Retained all 58 headings, 25 individual study discussions, 31 matched public references and both figures. Chapter 3 is unchanged in full. Regenerated the PDF at 23 pages with the original fonts, spacing and margins.
+- **Files/components:** `plans/reports/progress-report/report.md`, `report.pdf`, `research-notes.md`, `WORKLOG.md`.
+- **Validation:** Bundled Python authoring assertions and `tmp/report-short/verify.py` passed exact Chapter 3 comparison, heading preservation, 25 survey rows, 31 matched references/citations, private-file exclusion, figures and PDF dimensions/margins/fonts. Bundled Node `tmp/report-short/export.cjs` loaded both figures, found no table overflow and produced the matching PDF. All 23 pages were visually inspected; the final survey page was also rendered at 150 dpi. `git diff --check` passed. Documentation-only checks followed `plans/peergit-test.md`; application/database tests and new external research were unnecessary and not performed.
+- **Follow-up:** Google Docs page count remains unverified and depends on its formatting; 23 pages is the measured PDF count. Fill cover details and obtain mentor review. Prior research-access and prototype-acceptance limits remain.
+- **References:** User's shorter-version request; unchanged Chapter 3 comparison and previous dated progress records.
+
+### 2026-10-08T17:27Z — Remove private project citations from progress report
+
+- **Phase/area:** Academic reporting / Progress Report 1.
+- **Summary:** Removed seven private-file references, all associated citation markers and document-attribution wording from the submission while retaining the project facts. Regenerated the matching PDF with only 31 public references, all 58 headings and 25 research studies.
+- **Files/components:** `plans/reports/progress-report/report.md`, `report.pdf`, `research-notes.md`, `WORKLOG.md`.
+- **Validation:** Bundled Python `tmp/report-citations/revise.py` and `tmp/report-citations/verify.py` assertions passed heading preservation, 25 study rows, 31 matched references/citations, absence of private filenames/obsolete citation markers in Markdown and PDF text, figure paths, A4 dimensions, margins and fonts. Bundled Node `tmp/report-citations/export.cjs` regenerated the PDF with both figures and no table overflow. All 31 PDF pages were visually reviewed, with page 23 also inspected at 150 dpi. `git diff --check` passed. Application/database tests were not rerun because this is a documentation-only correction, as allowed by `plans/peergit-test.md`.
+- **Follow-up:** Fill cover identity placeholders and obtain mentor review. Existing research-access limits remain; no new research or runtime acceptance claim is made.
+- **References:** User's instruction to keep private project documents out of the submission citations.
+
+### 2026-10-08T17:10Z — Shorten and revise Phase I progress report
+
+- **Phase/area:** Academic reporting / Progress Report 1.
+- **Summary:** Revised the report into direct academic prose and shortened it by 14.2% while retaining all 58 headings, 25 studies, required comparison fields and figures. Used the latest implementation worklog records as the final progress source, corrected the local capture-test status and distinguished implemented features from remaining acceptance. Regenerated the matching 32-page PDF.
+- **Files/components:** `plans/reports/progress-report/report.md`, `report.pdf`, `research-notes.md`, `WORKLOG.md`; no application code, dependencies or test commands changed.
+- **Validation:** Bundled Python `tmp/report-review/verify.py` passed heading preservation, ordered 25-row/seven-column comparison, 38 matched references/citations, local links/figures, PDF dimensions/margins/fonts/sizes/page numbers and web-link checks. Bundled Node `tmp/report-review/export.cjs` found both figures and zero overflowing table cells. All 32 PDF pages were visually reviewed; final changes affected only pages 21–24, which were rechecked, including PDFium confirmation of a Poppler header-rendering discrepancy. `git diff --check` passed. Documentation-only checks followed `plans/peergit-test.md`; application and database suites were not rerun and no fresh runtime acceptance is claimed. Initial sandbox Edge launch failed; approved elevated temporary-headless export succeeded. Graphify query failed with `uv trampoline failed to canonicalize script path`; Graphify MCP is unavailable, but the existing graph was parsed before searches.
+- **Follow-up:** Fill cover identity placeholders and obtain mentor review. Research summaries were retained from the existing report without independently rechecking all full papers. Report files remain locally ignored by Git; no commit was made.
+- **References:** `plans/reports/GUIDELINES-PROGRESS-REPORT-1.docx`, current `plans/` documents and worklog implementation/validation records through 5 October 2026.
+
+### 2026-10-05T13:28Z — GitHub connection refresh, recovery, and project workspace
+
+- **Phase/area:** GitHub connections and project workspace.
+- **Summary:** Implemented installation-scoped repository refresh, 30-day private project recovery, cleanup fencing, and URL-addressable code/activity/recruitment/snapshot/settings tabs. Fixed the browser fixture to preserve project PATCH state across tab navigations, which had reset lifecycle to draft and hidden the role form.
+- **Files/components:** Additive migration `0009_github_connection_retention.sql`, GitHub/repository/project/recruitment handlers, worker, web components, `tests/e2e/walkthrough.cjs`, ignored `plans/peergit-test.md`.
+- **Validation:** Bundled Node `--check tests/e2e/walkthrough.cjs` and `git diff --check` passed. Previous focused Go tests, web typecheck, and shared runner Go/database/static checks passed before the fixture fix. The shared script could not start its checks now because Docker Desktop's Linux engine named pipe is unavailable (`permission denied ... dockerDesktopLinuxEngine`); browser acceptance after this fix remains unverified.
+- **Follow-up:** Start Docker Desktop and rerun `node scripts/test.mjs`; check live installation-change webhook and organization-repository behavior with controlled credentials.
+- **References:** None.
+
 ### 2026-10-05T12:13Z — Fix GitHub imports without descriptions
 
 - **Phase/area:** Phase 4 repository imports

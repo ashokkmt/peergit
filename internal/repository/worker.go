@@ -57,8 +57,8 @@ func (w *worker) reconcile(ctx context.Context, claim jobs.Claim) (string, error
 	var state string
 	var permissions []byte
 	err := w.pool.QueryRow(ctx, `SELECT b.id::text,b.owner_login,b.repository_name,b.external_repository_id,i.external_installation_id::text,i.id::text,i.status,i.permissions
-		FROM repository_bindings b JOIN github_installations i ON i.id=b.installation_id AND i.college_id=b.college_id
-		WHERE b.id=$1 AND b.is_current`, payload.BindingID).Scan(&id, &owner, &name, &repoID, &externalInstall, &localInstall, &state, &permissions)
+		FROM repository_bindings b JOIN github_installations i ON i.id=b.installation_id AND i.college_id=b.college_id JOIN repositories r ON r.id=b.repository_id AND r.college_id=b.college_id JOIN projects p ON p.id=r.project_id AND p.college_id=r.college_id
+		WHERE b.id=$1 AND b.is_current AND p.github_revoke_deadline IS NULL`, payload.BindingID).Scan(&id, &owner, &name, &repoID, &externalInstall, &localInstall, &state, &permissions)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
@@ -373,7 +373,7 @@ func (w *worker) capture(ctx context.Context, claim jobs.Claim) (string, error) 
 	var externalRepo int64
 	err := w.pool.QueryRow(ctx, `SELECT s.project_id::text,s.repository_id::text,s.binding_id::text,b.owner_login,b.repository_name,s.commit_sha,i.external_installation_id::text,s.state,COALESCE(s.object_key,''),b.external_repository_id
 		FROM repository_snapshots s JOIN repository_bindings b ON b.id=s.binding_id AND b.repository_id=s.repository_id AND b.college_id=s.college_id JOIN github_installations i ON i.id=b.installation_id AND i.college_id=b.college_id
-		WHERE s.id=$1 AND b.is_current AND b.access_state='active' AND i.status='active'`, payload.SnapshotID).Scan(&projectID, &repoID, &bindingID, &owner, &name, &sha, &installID, &state, &existingKey, &externalRepo)
+		JOIN projects p ON p.id=s.project_id AND p.college_id=s.college_id WHERE s.id=$1 AND p.github_revoke_deadline IS NULL AND b.is_current AND b.access_state='active' AND i.status='active'`, payload.SnapshotID).Scan(&projectID, &repoID, &bindingID, &owner, &name, &sha, &installID, &state, &existingKey, &externalRepo)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", errors.New("snapshot repository permission is no longer active")
 	}
@@ -429,6 +429,7 @@ func (w *worker) capture(ctx context.Context, claim jobs.Claim) (string, error) 
 		return "", err
 	}
 	if err = w.finishCapture(ctx, claim, payload.SnapshotID, receipt); err != nil {
+		_ = w.store.Delete(context.Background(), receipt.Key)
 		return "", err
 	}
 	return receipt.Key, nil
@@ -473,7 +474,7 @@ func (w *worker) finishCapture(ctx context.Context, c jobs.Claim, snapshotID str
 	if !yes {
 		return jobs.ErrStale
 	}
-	tag, err := tx.Exec(ctx, `UPDATE repository_snapshots SET state='verified',object_key=$3,archive_bytes=$4,archive_sha256=$5,verified_at=clock_timestamp(),failure_code=NULL WHERE id=$1 AND attempt_generation=$2 AND state='capturing'`, snapshotID, c.Generation, receipt.Key, receipt.Bytes, receipt.SHA256)
+	tag, err := tx.Exec(ctx, `UPDATE repository_snapshots s SET state='verified',object_key=$3,archive_bytes=$4,archive_sha256=$5,verified_at=clock_timestamp(),failure_code=NULL WHERE s.id=$1 AND s.attempt_generation=$2 AND s.state='capturing' AND EXISTS(SELECT 1 FROM projects p WHERE p.id=s.project_id AND p.college_id=s.college_id AND p.github_revoke_deadline IS NULL)`, snapshotID, c.Generation, receipt.Key, receipt.Bytes, receipt.SHA256)
 	if err != nil {
 		return err
 	}
@@ -519,6 +520,11 @@ func (w *worker) webhook(ctx context.Context, claim jobs.Claim) (string, error) 
 			if err != nil {
 				return "", err
 			}
+			if action == "deleted" {
+				if _, err = w.pool.Exec(ctx, `UPDATE github_installation_user_grants SET revoked_at=COALESCE(revoked_at,clock_timestamp()) WHERE installation_id IN (SELECT id FROM github_installations WHERE external_installation_id=$1)`, *externalInstall); err != nil {
+					return "", err
+				}
+			}
 			_, err = w.pool.Exec(ctx, `UPDATE repository_bindings SET access_state='permission_lost',sync_health='failed',last_error_code='installation_revoked' WHERE installation_id IN (SELECT id FROM github_installations WHERE external_installation_id=$1) AND is_current`, *externalInstall)
 			if err != nil {
 				return "", err
@@ -534,6 +540,9 @@ func (w *worker) webhook(ctx context.Context, claim jobs.Claim) (string, error) 
 			}
 		case "installation_repositories.removed":
 			for _, repo := range body.RepositoriesRemoved {
+				if _, err = w.pool.Exec(ctx, `DELETE FROM github_repository_candidates WHERE external_repository_id=$1 AND installation_id IN (SELECT id FROM github_installations WHERE external_installation_id=$2)`, repo.ID, *externalInstall); err != nil {
+					return "", err
+				}
 				_, err = w.pool.Exec(ctx, `UPDATE repository_bindings SET access_state='permission_lost',sync_health='failed',last_error_code='repository_removed' WHERE external_repository_id=$1 AND installation_id IN (SELECT id FROM github_installations WHERE external_installation_id=$2) AND is_current`, repo.ID, *externalInstall)
 				if err != nil {
 					return "", err

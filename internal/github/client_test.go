@@ -167,6 +167,45 @@ func TestUserRepositoryAuthorizationIncludesAdminPermissionAndBoundsReadme(t *te
 	}
 }
 
+func TestRepositoryBrowserBoundsTreeFilesAndCommitDiff(t *testing.T) {
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer installation-token" {
+			t.Errorf("missing installation token")
+		}
+		switch r.URL.Path {
+		case "/repos/test-owner/project/git/trees/" + sha:
+			_, _ = io.WriteString(w, `{"tree":[{"path":"src","type":"tree","sha":"`+sha+`"},{"path":"src/main.go","type":"blob","sha":"`+sha+`","size":5}]}`)
+		case "/repos/test-owner/project/contents/src/main.go":
+			_, _ = io.WriteString(w, `{"type":"file","size":5,"encoding":"base64","content":"aGVsbG8="}`)
+		case "/repos/test-owner/project/commits/" + sha:
+			_, _ = io.WriteString(w, `{"files":[{"filename":"src/main.go","status":"modified","additions":1,"deletions":0,"patch":"+hello"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	c := &Client{HTTP: server.Client(), API: server.URL}
+	tree, err := c.Tree(context.Background(), "test-owner/project", sha, "installation-token")
+	if err != nil || len(tree) != 2 {
+		t.Fatalf("tree=%+v err=%v", tree, err)
+	}
+	content, err := c.File(context.Background(), "test-owner/project", "src/main.go", sha, "installation-token")
+	if err != nil || content != "hello" {
+		t.Fatalf("content=%q err=%v", content, err)
+	}
+	diff, err := c.CommitDiff(context.Background(), "test-owner/project", sha, "installation-token")
+	if err != nil || len(diff) != 1 || diff[0].Patch != "+hello" {
+		t.Fatalf("diff=%+v err=%v", diff, err)
+	}
+	if _, err = c.File(context.Background(), "test-owner/project", "../secret", sha, "installation-token"); err == nil {
+		t.Fatal("path traversal accepted")
+	}
+	if _, err = c.Tree(context.Background(), "test-owner/project", "main", "installation-token"); err == nil {
+		t.Fatal("non-SHA accepted for tree")
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

@@ -244,12 +244,16 @@ func (h *Handler) finishRepositoryAuthorization(w http.ResponseWriter, r *http.R
 		h.fail(w, r, 403, "installation_not_authorized", "this GitHub account cannot access the selected App installation", nil)
 		return
 	}
-	if auth.Purpose == "connect" {
+	if auth.Purpose == "connect" || auth.Purpose == "refresh" {
 		if err = h.saveRepositoryCandidates(ctx, s, auth.InstallationID, externalInstall, user.ID, userToken); err != nil {
 			h.providerFailure(w, r, err)
 			return
 		}
-		http.Redirect(w, r, h.app.Origin+"/account/github?connected=1", http.StatusSeeOther)
+		flag := "connected=1"
+		if auth.Purpose == "refresh" {
+			flag = "refreshed=1"
+		}
+		http.Redirect(w, r, h.app.Origin+"/account/github?"+flag, http.StatusSeeOther)
 		return
 	}
 	if auth.Purpose == "link" && auth.ExternalRepositoryID != nil && auth.ProjectID != "" {
@@ -295,7 +299,7 @@ func (h *Handler) saveRepositoryCandidates(ctx context.Context, s identity.Sessi
 		VALUES($1,$2,$3,$4,clock_timestamp(),NULL) ON CONFLICT(college_id,user_id,installation_id) DO UPDATE SET external_user_id=EXCLUDED.external_user_id,confirmed_at=EXCLUDED.confirmed_at,revoked_at=NULL`, s.CollegeID, s.UserID, localInstallation, userID); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `DELETE FROM github_repository_candidates WHERE college_id=$1 AND user_id=$2`, s.CollegeID, s.UserID); err != nil {
+	if _, err = tx.Exec(ctx, `DELETE FROM github_repository_candidates WHERE college_id=$1 AND user_id=$2 AND installation_id=$3`, s.CollegeID, s.UserID, localInstallation); err != nil {
 		return err
 	}
 	for _, repo := range repos {
@@ -332,7 +336,7 @@ func (h *Handler) saveRepositoryCandidates(ctx context.Context, s identity.Sessi
 			continue
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO github_repository_candidates(college_id,user_id,installation_id,external_repository_id,owner_login,repository_name,description,default_branch,visibility,topics,expires_at,checked_at)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,clock_timestamp()+$11::interval,clock_timestamp()) ON CONFLICT(college_id,user_id,external_repository_id) DO UPDATE SET installation_id=EXCLUDED.installation_id,owner_login=EXCLUDED.owner_login,repository_name=EXCLUDED.repository_name,description=EXCLUDED.description,default_branch=EXCLUDED.default_branch,visibility=EXCLUDED.visibility,topics=EXCLUDED.topics,expires_at=EXCLUDED.expires_at,checked_at=EXCLUDED.checked_at`, s.CollegeID, s.UserID, localInstallation, repo.ID, parts[0], parts[1], truncate(repo.Description, 1000), repo.DefaultBranch, visibility, repo.Topics, githubCandidateTTL.String()); err != nil {
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,clock_timestamp()+$11::interval,clock_timestamp()) ON CONFLICT(college_id,user_id,installation_id,external_repository_id) DO UPDATE SET owner_login=EXCLUDED.owner_login,repository_name=EXCLUDED.repository_name,description=EXCLUDED.description,default_branch=EXCLUDED.default_branch,visibility=EXCLUDED.visibility,topics=EXCLUDED.topics,expires_at=EXCLUDED.expires_at,checked_at=EXCLUDED.checked_at`, s.CollegeID, s.UserID, localInstallation, repo.ID, parts[0], parts[1], truncate(repo.Description, 1000), repo.DefaultBranch, visibility, repo.Topics, githubCandidateTTL.String()); err != nil {
 			return err
 		}
 	}
@@ -345,7 +349,7 @@ func (h *Handler) myGitHubRepositories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := h.pool.Query(r.Context(), `SELECT c.external_repository_id,c.installation_id::text,c.owner_login,c.repository_name,c.description,c.default_branch,c.visibility,c.topics,c.expires_at
-		FROM github_repository_candidates c JOIN github_installation_user_grants g ON g.college_id=c.college_id AND g.user_id=c.user_id AND g.installation_id=c.installation_id AND g.revoked_at IS NULL
+		FROM github_repository_candidates c JOIN github_installation_user_grants g ON g.college_id=c.college_id AND g.user_id=c.user_id AND g.installation_id=c.installation_id AND g.revoked_at IS NULL JOIN github_installations i ON i.id=c.installation_id AND i.college_id=c.college_id AND i.status='active'
 		WHERE c.college_id=$1 AND c.user_id=$2 AND c.expires_at>clock_timestamp() ORDER BY lower(c.owner_login),lower(c.repository_name) LIMIT 1000`, s.CollegeID, s.UserID)
 	if err != nil {
 		h.err.Handle(w, r, err)
@@ -368,7 +372,12 @@ func (h *Handler) myGitHubRepositories(w http.ResponseWriter, r *http.Request) {
 		h.err.Handle(w, r, err)
 		return
 	}
-	_ = response.OK(w, map[string]any{"items": items})
+	var expired int
+	if err = h.pool.QueryRow(r.Context(), `SELECT count(*) FROM github_repository_candidates c JOIN github_installation_user_grants g ON g.college_id=c.college_id AND g.user_id=c.user_id AND g.installation_id=c.installation_id AND g.revoked_at IS NULL WHERE c.college_id=$1 AND c.user_id=$2 AND c.expires_at<=clock_timestamp()`, s.CollegeID, s.UserID).Scan(&expired); err != nil {
+		h.err.Handle(w, r, err)
+		return
+	}
+	_ = response.OK(w, map[string]any{"items": items, "expired_count": expired})
 }
 
 func (h *Handler) myGitHubInstallations(w http.ResponseWriter, r *http.Request) {
@@ -407,7 +416,8 @@ func (h *Handler) myGitHubInstallations(w http.ResponseWriter, r *http.Request) 
 }
 
 type importRepositoryRequest struct {
-	RepositoryID int64 `json:"repository_id"`
+	RepositoryID   int64  `json:"repository_id"`
+	InstallationID string `json:"installation_id"`
 }
 
 func (h *Handler) startGitHubImport(w http.ResponseWriter, r *http.Request) {
@@ -420,13 +430,13 @@ func (h *Handler) startGitHubImport(w http.ResponseWriter, r *http.Request) {
 		h.err.Handle(w, r, err)
 		return
 	}
-	if in.RepositoryID <= 0 {
+	if in.RepositoryID <= 0 || !uuidOK(in.InstallationID) {
 		h.fail(w, r, 400, "repository_invalid", "select an available GitHub repository", nil)
 		return
 	}
 	var install string
 	err = h.pool.QueryRow(r.Context(), `SELECT c.installation_id::text FROM github_repository_candidates c JOIN github_installation_user_grants g ON g.college_id=c.college_id AND g.user_id=c.user_id AND g.installation_id=c.installation_id AND g.revoked_at IS NULL
-		WHERE c.college_id=$1 AND c.user_id=$2 AND c.external_repository_id=$3 AND c.expires_at>clock_timestamp()`, s.CollegeID, s.UserID, in.RepositoryID).Scan(&install)
+		WHERE c.college_id=$1 AND c.user_id=$2 AND c.external_repository_id=$3 AND c.installation_id=$4 AND c.expires_at>clock_timestamp()`, s.CollegeID, s.UserID, in.RepositoryID, in.InstallationID).Scan(&install)
 	if errors.Is(err, pgx.ErrNoRows) {
 		h.fail(w, r, 409, "repository_candidate_expired", "reconnect GitHub to refresh available repositories", err)
 		return
