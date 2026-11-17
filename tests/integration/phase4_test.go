@@ -36,6 +36,25 @@ func TestPhase4RepositorySnapshotTenantContracts(t *testing.T) {
 	if err := pool.QueryRow(ctx, `INSERT INTO github_installations(college_id,external_installation_id,account_external_id,account_login,target_type,repository_selection,permissions,status,added_by) VALUES($1,41001,41002,'fixture','Organization','selected','{"contents":"read","metadata":"read"}','active',$2) RETURNING id::text`, college, user).Scan(&installation); err != nil {
 		t.Fatal(err)
 	}
+	var secondInstallation string
+	if err := pool.QueryRow(ctx, `INSERT INTO github_installations(college_id,external_installation_id,account_external_id,account_login,target_type,repository_selection,permissions,status,added_by) VALUES($1,41011,41012,'fixture-two','User','selected','{"contents":"read","metadata":"read"}','active',$2) RETURNING id::text`, college, user).Scan(&secondInstallation); err != nil {
+		t.Fatal(err)
+	}
+	for _, install := range []string{installation, secondInstallation} {
+		if _, err := pool.Exec(ctx, `INSERT INTO github_installation_user_grants(college_id,user_id,installation_id,external_user_id) VALUES($1,$2,$3,41002)`, college, user, install); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO github_repository_candidates(college_id,user_id,installation_id,external_repository_id,owner_login,repository_name,visibility,expires_at) VALUES($1,$2,$3,41003,'fixture','repo','private',now()+interval '15 minutes')`, college, user, install); err != nil {
+			t.Fatalf("same GitHub repository should remain addressable through each installation: %v", err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM github_repository_candidates WHERE college_id=$1 AND user_id=$2 AND installation_id=$3`, college, user, installation); err != nil {
+		t.Fatal(err)
+	}
+	var remaining int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM github_repository_candidates WHERE college_id=$1 AND user_id=$2 AND installation_id=$3`, college, user, secondInstallation).Scan(&remaining); err != nil || remaining != 1 {
+		t.Fatalf("refresh/delete for one installation affected another installation: count=%d err=%v", remaining, err)
+	}
 	if err := pool.QueryRow(ctx, `INSERT INTO repositories(college_id,project_id,created_by) VALUES($1,$2,$3) RETURNING id::text`, college, project, user).Scan(&repository); err != nil {
 		t.Fatal(err)
 	}
@@ -63,5 +82,11 @@ func TestPhase4RepositorySnapshotTenantContracts(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO repository_snapshots(college_id,project_id,repository_id,binding_id,requested_by,idempotency_key,request_hash,requested_ref,commit_sha,membership_snapshot) VALUES($1,$2,$3,$4,$5,'receipt-1',decode(repeat('00',32),'hex'),'main',repeat('b',40),'[]'::jsonb)`, college, project, repository, binding, user); err == nil {
 		t.Fatal("same actor's duplicate idempotency key was accepted")
+	}
+	if _, err := pool.Exec(ctx, `UPDATE projects SET github_revoke_deadline=now()+interval '30 days',github_revoke_owner=$2,github_revoke_installation=$3,github_revoke_previous_visibility=visibility,github_revoke_previous_lifecycle=lifecycle,visibility='private',lifecycle='archived' WHERE id=$1`, project, user, installation); err != nil {
+		t.Fatalf("30-day recovery state rejected: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE projects SET github_revoke_deadline=NULL,github_revoke_owner=NULL,github_revoke_installation=NULL,github_revoke_previous_visibility=NULL,github_revoke_previous_lifecycle=NULL,visibility='private',lifecycle='draft' WHERE id=$1`, project); err != nil {
+		t.Fatalf("private project recovery rejected: %v", err)
 	}
 }

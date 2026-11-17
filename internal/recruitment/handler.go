@@ -50,7 +50,7 @@ func (h *Handler) myApplications(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := h.pool.Query(r.Context(), `SELECT a.id::text,a.project_role_id::text,p.id::text,p.title,rr.title,a.status,a.version,a.created_at FROM applications a JOIN project_roles rr ON rr.id=a.project_role_id JOIN projects p ON p.id=rr.project_id AND p.college_id=a.college_id WHERE a.applicant_user_id=$1 AND a.college_id=$2 ORDER BY a.created_at DESC,a.id DESC LIMIT 50`, s.UserID, s.CollegeID)
+	rows, err := h.pool.Query(r.Context(), `SELECT a.id::text,a.project_role_id::text,p.id::text,p.title,rr.title,a.status,a.version,a.created_at FROM applications a JOIN project_roles rr ON rr.id=a.project_role_id JOIN projects p ON p.id=rr.project_id AND p.college_id=a.college_id WHERE a.applicant_user_id=$1 AND a.college_id=$2 AND p.github_revoke_deadline IS NULL ORDER BY a.created_at DESC,a.id DESC LIMIT 50`, s.UserID, s.CollegeID)
 	if err != nil {
 		h.err.Handle(w, r, err)
 		return
@@ -284,7 +284,7 @@ func (h *Handler) applications(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, 403, "project_manager_required", "project owner or maintainer access is required", nil)
 		return
 	}
-	rows, err := h.pool.Query(r.Context(), `SELECT a.id::text,a.project_role_id::text,a.applicant_user_id::text,u.display_name,a.message,a.status,a.version,a.created_at FROM applications a JOIN users u ON u.id=a.applicant_user_id WHERE a.college_id=$1 AND EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=$2 AND pm.user_id=$3 AND pm.role IN ('owner','maintainer')) AND a.project_role_id IN(SELECT id FROM project_roles WHERE project_id=$2) ORDER BY a.created_at DESC,a.id DESC LIMIT 100`, s.CollegeID, id, s.UserID)
+	rows, err := h.pool.Query(r.Context(), `SELECT a.id::text,a.project_role_id::text,a.applicant_user_id::text,u.display_name,a.message,a.status,a.version,a.created_at FROM applications a JOIN users u ON u.id=a.applicant_user_id WHERE a.college_id=$1 AND EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=$2 AND pm.user_id=$3 AND pm.role IN ('owner','maintainer')) AND EXISTS(SELECT 1 FROM projects p WHERE p.id=$2 AND p.github_revoke_deadline IS NULL) AND a.project_role_id IN(SELECT id FROM project_roles WHERE project_id=$2) ORDER BY a.created_at DESC,a.id DESC LIMIT 100`, s.CollegeID, id, s.UserID)
 	if err != nil {
 		h.err.Handle(w, r, err)
 		return
@@ -465,7 +465,7 @@ func (h *Handler) roles(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	rows, err := h.pool.Query(r.Context(), `SELECT rr.id::text,rr.title,rr.description,rr.openings,rr.status,rr.version,rr.difficulty,rr.good_first_task,rr.prerequisite_skills
 		FROM project_roles rr JOIN projects p ON p.id=rr.project_id AND p.college_id=rr.college_id
-		WHERE rr.project_id=$1 AND rr.college_id=$2 AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id) AND ((p.lifecycle='active' AND p.visibility IN ('campus','public') AND rr.status='open') OR EXISTS(SELECT 1 FROM project_members WHERE project_id=rr.project_id AND user_id=$3))
+		WHERE rr.project_id=$1 AND rr.college_id=$2 AND p.github_revoke_deadline IS NULL AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id) AND ((p.lifecycle='active' AND p.visibility IN ('campus','public') AND rr.status='open') OR EXISTS(SELECT 1 FROM project_members WHERE project_id=rr.project_id AND user_id=$3))
 		ORDER BY rr.created_at,rr.id`, id, s.CollegeID, s.UserID)
 	if err != nil {
 		h.err.Handle(w, r, err)

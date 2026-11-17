@@ -72,6 +72,25 @@ type CommitStats struct {
 	Deletions int `json:"deletions"`
 	Total     int `json:"total"`
 }
+type TreeEntry struct {
+	Path string `json:"path"`
+	Type string `json:"type"`
+	SHA  string `json:"sha"`
+	Size int64  `json:"size"`
+}
+type Branch struct {
+	Name   string `json:"name"`
+	Commit struct {
+		SHA string `json:"sha"`
+	} `json:"commit"`
+}
+type DiffFile struct {
+	Filename  string `json:"filename"`
+	Status    string `json:"status"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+	Patch     string `json:"patch"`
+}
 type User struct {
 	ID    int64  `json:"id"`
 	Login string `json:"login"`
@@ -450,6 +469,134 @@ func (c *Client) Resolve(ctx context.Context, repo, ref, token string) (string, 
 		return "", errors.New("invalid GitHub commit SHA")
 	}
 	return out.SHA, nil
+}
+
+func (c *Client) Tree(ctx context.Context, repo, sha, token string) ([]TreeEntry, error) {
+	path, err := repoPath(repo)
+	if err != nil {
+		return nil, err
+	}
+	if !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(sha) {
+		return nil, errors.New("tree requires an exact commit SHA")
+	}
+	resp, err := c.request(ctx, http.MethodGet, path+"/git/trees/"+sha+"?recursive=1", token)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Truncated bool        `json:"truncated"`
+		Tree      []TreeEntry `json:"tree"`
+	}
+	if err = decode(resp, &out); err != nil {
+		return nil, err
+	}
+	if out.Truncated {
+		return nil, errors.New("repository tree exceeds the supported response size")
+	}
+	if len(out.Tree) > 10000 {
+		return nil, errors.New("repository tree exceeds the supported entry limit")
+	}
+	for _, e := range out.Tree {
+		if e.Type != "blob" && e.Type != "tree" {
+			return nil, errors.New("GitHub returned an invalid tree entry")
+		}
+		if strings.HasPrefix(e.Path, "/") || strings.Contains(e.Path, "\\") || strings.Contains(e.Path, "../") {
+			return nil, errors.New("GitHub returned an unsafe tree path")
+		}
+	}
+	return out.Tree, nil
+}
+
+func (c *Client) Branches(ctx context.Context, repo, token string) ([]Branch, error) {
+	path, err := repoPath(repo)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.request(ctx, http.MethodGet, path+"/branches?per_page=100", token)
+	if err != nil {
+		return nil, err
+	}
+	var out []Branch
+	if err = decode(resp, &out); err != nil {
+		return nil, err
+	}
+	if len(out) > 100 {
+		return nil, errors.New("repository has too many branches for the browser")
+	}
+	for _, branch := range out {
+		if branch.Name == "" || !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(branch.Commit.SHA) {
+			return nil, errors.New("GitHub returned an invalid branch")
+		}
+	}
+	return out, nil
+}
+
+func (c *Client) CommitDiff(ctx context.Context, repo, sha, token string) ([]DiffFile, error) {
+	path, err := repoPath(repo)
+	if err != nil {
+		return nil, err
+	}
+	if !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(sha) {
+		return nil, errors.New("commit requires an exact SHA")
+	}
+	resp, err := c.request(ctx, http.MethodGet, path+"/commits/"+sha, token)
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Files []DiffFile `json:"files"`
+	}
+	if err = decode(resp, &out); err != nil {
+		return nil, err
+	}
+	total := 0
+	for _, f := range out.Files {
+		total += len(f.Patch)
+		if f.Filename == "" || f.Additions < 0 || f.Deletions < 0 || total > 1<<20 {
+			return nil, errors.New("commit diff exceeds the 1 MiB limit or is invalid")
+		}
+	}
+	return out.Files, nil
+}
+
+func (c *Client) File(ctx context.Context, repo, filePath, ref, token string) (string, error) {
+	base, err := repoPath(repo)
+	if err != nil {
+		return "", err
+	}
+	if len(filePath) == 0 || len(filePath) > 1024 || len(ref) == 0 || len(ref) > 255 {
+		return "", errors.New("file path or ref is invalid")
+	}
+	for _, part := range strings.Split(filePath, "/") {
+		if part == "" || part == "." || part == ".." || strings.ContainsAny(part, "\\\x00\r\n") {
+			return "", errors.New("file path is invalid")
+		}
+	}
+	segments := strings.Split(filePath, "/")
+	for i := range segments {
+		segments[i] = url.PathEscape(segments[i])
+	}
+	resp, err := c.request(ctx, http.MethodGet, base+"/contents/"+strings.Join(segments, "/")+"?ref="+url.QueryEscape(ref), token)
+	if err != nil {
+		return "", err
+	}
+	var out struct {
+		Type     string `json:"type"`
+		Size     int64  `json:"size"`
+		Encoding string `json:"encoding"`
+		Content  string `json:"content"`
+	}
+	if err = decode(resp, &out); err != nil {
+		return "", err
+	}
+	if out.Type != "file" || out.Size > 1<<20 || out.Encoding != "base64" {
+		return "", errors.New("file is binary, unavailable, or exceeds the 1 MiB limit")
+	}
+	data, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(out.Content, "\n", ""))
+	if err != nil || len(data) > 1<<20 || !utf8.Valid(data) {
+		return "", errors.New("file content is invalid or exceeds the 1 MiB limit")
+	}
+	return string(data), nil
 }
 func (c *Client) Archive(ctx context.Context, repo, sha, token string) (io.ReadCloser, error) {
 	if !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(sha) {

@@ -58,10 +58,19 @@ func (h *Handler) Register(r chi.Router) {
 		private.Get("/github/authorization/callback", h.finishRepositoryAuthorization)
 		private.Get("/me/github/repositories", h.myGitHubRepositories)
 		private.Get("/me/github/installations", h.myGitHubInstallations)
+		private.With(h.auth.RequireCSRF).Post("/me/github/installations/{installationID}/refresh", h.refreshGitHubInstallation)
+		private.Get("/me/github/installations/{installationID}/imports", h.githubInstallationImports)
+		private.With(h.auth.RequireCSRF).Post("/me/github/installations/{installationID}/revoke", h.revokeGitHubInstallation)
+		private.Get("/me/github/retained-projects", h.retainedGitHubProjects)
+		private.With(h.auth.RequireCSRF).Post("/projects/{id}/github/restore", h.restoreGitHubProject)
 		private.With(h.auth.RequireCSRF).Post("/projects/import/github", h.startGitHubImport)
 		private.With(h.auth.RequireCSRF).Post("/projects/{id}/github/link", h.startLegacyGitHubLink)
 		private.Get("/my/projects", h.myProjects)
 		private.Get("/projects/{id}/repository", h.projectRepository)
+		private.Get("/projects/{id}/repository/tree", h.repositoryTree)
+		private.Get("/projects/{id}/repository/branches", h.repositoryBranches)
+		private.Get("/projects/{id}/repository/commit", h.repositoryCommit)
+		private.Get("/projects/{id}/repository/file", h.repositoryFile)
 		private.With(h.auth.RequireCSRF).Post("/projects/{id}/repository/snapshots", h.requestSnapshot)
 		private.Get("/projects/{id}/repository/snapshots/{snapshotID}", h.snapshotStatus)
 		private.With(h.auth.RequireCSRF).Post("/projects/{id}/repository/snapshots/{snapshotID}/retry", h.retrySnapshot)
@@ -475,7 +484,7 @@ func (h *Handler) isProjectMember(ctx context.Context, projectID string, s ident
 		return false
 	}
 	var yes bool
-	err := h.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_members WHERE project_id=$1 AND college_id=$2 AND user_id=$3)`, projectID, s.CollegeID, s.UserID).Scan(&yes)
+	err := h.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_members pm JOIN projects p ON p.id=pm.project_id AND p.college_id=pm.college_id WHERE pm.project_id=$1 AND pm.college_id=$2 AND pm.user_id=$3 AND p.github_revoke_deadline IS NULL)`, projectID, s.CollegeID, s.UserID).Scan(&yes)
 	return err == nil && yes
 }
 func (h *Handler) campusSession(w http.ResponseWriter, r *http.Request) (identity.Session, bool) {
