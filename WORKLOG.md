@@ -21,6 +21,23 @@ Keep entries brief. Combine tightly related work completed together; create sepa
 
 ## Entries
 
+### 2026-11-17T12:48Z — Complete Phase 2 acceptance and Phase 3 journey
+
+- **Phase/area:** Phases 2–3 / identity, campus, media, projects, recruitment
+- **Summary:** Closed the remaining local Phase 2 acceptance gaps with provider failure, conflict, expiry, cross-account, race, rate-limit, review, upload-intent, SMTP retry, lease recovery, and stale-worker fencing coverage. Added campus/session regression checks and the responsive profile, account-navigation, and two-student application journeys. Phase 0–3 local gates are complete; Phase 4 was not started.
+- **Files/components:** `tests/integration/campus_verification_test.go`, `tests/integration/github_auth_test.go`, `tests/integration/phase2_test.go`, `tests/integration/phase3_test.go`, `tests/e2e/walkthrough.cjs`, `plans/implementation-phases.md`, `plans/peergit-test.md`.
+- **Validation:** `node scripts/test.mjs` passed with isolated `COMPOSE_PROJECT_NAME=peergit-phase03full`: migrations, DB-backed Go tests, vet, staticcheck, web typecheck/build, Playwright desktop/mobile journeys, Compose validation, and diff check. The pre-existing default DB volume was preserved after its migration checksum correctly rejected changed migration content. npm CI reported one critical dependency vulnerability; no dependency changes were made.
+- **Follow-up:** Production GitHub OAuth, approved TLS email, trusted-proxy IP configuration, and production object-retention/deletion remain release gates. Review the npm audit advisory before release.
+- **References:** `plans/implementation-phases.md`, `plans/peergit-test.md`.
+### 2026-11-17T11:49Z — Narrow CI triggers and cache Playwright browser
+
+- **Phase/area:** CI and test tooling
+- **Summary:** Restricted CI push checks to `main` while retaining PR checks targeting `main`, preventing redundant feature-branch push runs while preserving merged-branch and direct-push validation. Added a lockfile-keyed Playwright browser cache, made browser installation conditional on a cache miss, restored the runner's documented diff check, and aligned test guidance.
+- **Files/components:** `.github/workflows/ci.yml`, `scripts/test.mjs`, `plans/peergit-test.md`, `WORKLOG.md`.
+- **Validation:** `node --check scripts/test.mjs` and `git diff --check` passed using the bundled Node runtime. `node scripts/test.mjs` stopped at its initial `gofmt -l` check because 20 existing Go files are unformatted; no test services were started and those unrelated files were left unchanged. Workflow YAML was reviewed manually; `actionlint` is not installed.
+- **Follow-up:** None.
+- **References:** GitHub Actions event/filter documentation and the `microsoft/vscode` workflow pattern.
+
 ### 2026-10-08T18:33Z — Condense progress report to 23 pages
 
 - **Phase/area:** Academic reporting / Progress Report 1.

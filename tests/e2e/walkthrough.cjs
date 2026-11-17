@@ -98,7 +98,9 @@ const { chromium } = require('playwright');
     assert.equal(await accountMenu.locator('input').count(), 1, 'homepage should only expose the project search field');
     const menuSummary = accountMenu.locator('.account-menu summary');
     await menuSummary.click();
-    await accountMenu.getByRole('link', { name: 'GitHub connections' }).waitFor();
+    for (const label of ['Profile', 'Projects', 'GitHub connections', 'Settings']) {
+      await accountMenu.locator('.account-menu').getByRole('link', { name: label, exact: true }).waitFor();
+    }
     await accountMenu.keyboard.press('Escape');
     assert.equal(await accountMenu.locator('.account-menu').evaluate(element => element.open), false, 'Escape closes the account menu');
     assert.equal(await accountMenu.evaluate(() => document.activeElement.matches('.account-menu summary')), true, 'Escape returns focus to the menu button');
@@ -132,6 +134,26 @@ const { chromium } = require('playwright');
     assert.match(revokePrompt,/Imported fixture/);
     await accountMenu.close();
     console.log('Discovery-only homepage, accessible account menu, and private GitHub import initiation passed');
+
+    const profile = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await profile.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: true, csrf_token: 'profile-csrf', user: { id: 'profile-user', display_name: 'Profile Student', college_id: '', campus_status: 'unverified', account_type: 'unverified' } } }) }));
+    await profile.route('**/api/v1/me', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { id: 'profile-user', email: 'profile@users.noreply.test', display_name: 'Profile Student', college_id: '', account_type: 'unverified', campus_status: 'unverified', profile: {}, skills: [], consents: ['terms', 'privacy'] } }) }));
+    await profile.route('**/api/v1/media/intents', async route => {
+      assert.equal(route.request().postDataJSON().visibility, 'private', 'unverified profile images stay private');
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ data: { id: 'profile-intent' } }) });
+    });
+    await profile.route('**/api/v1/media/intents/profile-intent/content', async route => {
+      assert.match(route.request().headers()['content-type'] ?? '', /^multipart\/form-data;/);
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ data: { id: 'profile-image' } }) });
+    });
+    await profile.goto(`${baseURL}/account/profile`);
+    await profile.getByRole('heading', { name: 'Welcome, Profile Student' }).waitFor();
+    await profile.getByLabel('Profile image (PNG/JPEG, up to 5 MiB)').setInputFiles({ name: 'avatar.png', mimeType: 'image/png', buffer: Buffer.from('synthetic fixture bytes') });
+    await profile.getByText('Image uploaded and safely re-encoded. Save your profile to use it.').waitFor();
+    await profile.getByRole('link', { name: 'View your uploaded image' }).waitFor();
+    assert(await profile.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'profile image flow overflowed on mobile');
+    await profile.close();
+    console.log('Unverified profile image upload path passed at mobile width');
 
     const projectPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     projectPage.on('pageerror', error => console.error(`Project detail browser error: ${error.message}`));
@@ -185,6 +207,47 @@ const { chromium } = require('playwright');
     await projectPage.getByText('Team opening created.').waitFor();
     await projectPage.close();
     console.log('Repository refresh, project code/activity tabs, publication reversal, and recruiting controls passed');
+
+    const team = { members: [{ user_id: 'owner', display_name: 'Test Owner', role: 'owner' }], applications: [] };
+    const teamProject = { id: 'team-project', title: 'Campus robotics', summary: 'Build a campus robot', visibility: 'campus', lifecycle: 'active', project_type: 'open_source', recruiting: true, skills: [], version: 1 };
+    const teamRole = { id: 'team-role', title: 'Prototype builder', description: 'Build and test the sensor module.', openings: 1, status: 'open', version: 1, difficulty: 'beginner', good_first_task: true };
+    const mountStudent = async (name, userID, owner) => {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      await page.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: true, csrf_token: `${userID}-csrf`, user: { id: userID, display_name: name, college_id: 'campus-1', campus_status: 'verified', terms_accepted: true, privacy_accepted: true } } }) }));
+      await page.route('**/api/v1/projects/team-project', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { project: teamProject, description: '', viewer_role: owner ? 'owner' : (team.members.some(member => member.user_id === userID) ? 'member' : ''), members: team.members } }) }));
+      await page.route('**/api/v1/projects/team-project/roles', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [teamRole] } }) }));
+      await page.route('**/api/v1/projects/team-project/applications', async route => {
+        if (route.request().method() === 'POST') {
+          team.applications.push({ id: 'team-application', role_id: teamRole.id, applicant_name: name, message: route.request().postDataJSON().message, status: 'pending', version: 1 });
+          await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ data: { id: 'team-application' } }) });
+        } else {
+          await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: owner ? team.applications : [] } }) });
+        }
+      });
+      await page.route('**/api/v1/projects/team-project/applications/team-application/decision', async route => {
+        assert.equal(route.request().postDataJSON().decision, 'accepted');
+        team.applications[0].status = 'accepted';
+        team.members.push({ user_id: 'applicant', display_name: 'Test Applicant', role: 'member' });
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { status: 'accepted' } }) });
+      });
+      await page.goto(`${baseURL}/projects/team-project?tab=open-roles`);
+      await page.getByRole('heading', { name: 'Campus robotics' }).waitFor();
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${name} project page overflowed on mobile`);
+      return page;
+    };
+    const applicant = await mountStudent('Test Applicant', 'applicant', false);
+    await applicant.getByRole('textbox', { name: 'Why are you interested?' }).fill('I can build and test the sensor module.');
+    await applicant.getByRole('button', { name: 'Apply' }).click();
+    await applicant.getByText('Application sent.').waitFor();
+    const owner = await mountStudent('Test Owner', 'owner', true);
+    await owner.getByRole('heading', { name: 'Test Applicant · pending' }).waitFor();
+    await owner.getByRole('button', { name: 'Accept' }).click();
+    await owner.getByText('Application accepted.').waitFor();
+    await applicant.reload();
+    await applicant.getByText('Test Applicant · member').waitFor();
+    await applicant.close();
+    await owner.close();
+    console.log('Two-student project application and acceptance passed at mobile width');
 
     const onboarding = await browser.newPage({ viewport: { width: 390, height: 844 } });
     let confirmationPosts = 0;

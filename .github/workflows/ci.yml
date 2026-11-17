@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
 
 jobs:
   verify:
@@ -20,5 +22,10 @@ jobs:
           cache-dependency-path: |
             apps/web/package-lock.json
             tests/e2e/package-lock.json
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('tests/e2e/package-lock.json') }}
       - name: Run the shared CI and pre-commit test script
         run: node scripts/test.mjs

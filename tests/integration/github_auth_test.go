@@ -42,6 +42,10 @@ func TestGitHubOAuthUsesPKCEStableIDAndVerifiedPrivatePrimaryEmail(t *testing.T)
 				http.Error(w, "form", http.StatusBadRequest)
 				return
 			}
+			if r.Form.Get("code") == "token-failure" {
+				http.Error(w, "temporary provider failure", http.StatusBadGateway)
+				return
+			}
 			hash := sha256String(r.Form.Get("code_verifier"))
 			clientID := r.Form.Get("client_id")
 			if clientID == "" {
@@ -54,15 +58,27 @@ func TestGitHubOAuthUsesPKCEStableIDAndVerifiedPrivatePrimaryEmail(t *testing.T)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": r.Form.Get("code"), "token_type": "bearer", "expires_in": 3600})
 		case "/api/user":
+			if r.Header.Get("Authorization") == "Bearer profile-failure" {
+				http.Error(w, "temporary provider failure", http.StatusBadGateway)
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"id":981234,"login":"stable-handle","name":"Test Person"}`)
+			if r.Header.Get("Authorization") == "Bearer email-conflict" {
+				_, _ = io.WriteString(w, `{"id":981235,"login":"conflict-handle","name":"Conflicting Email"}`)
+			} else {
+				_, _ = io.WriteString(w, `{"id":981234,"login":"stable-handle","name":"Test Person"}`)
+			}
 		case "/api/user/emails":
 			w.Header().Set("Content-Type", "application/json")
-			if r.Header.Get("Authorization") != "Bearer verified" && r.Header.Get("Authorization") != "Bearer unverified" {
+			if r.Header.Get("Authorization") == "Bearer email-failure" {
+				http.Error(w, "temporary provider failure", http.StatusBadGateway)
+				return
+			}
+			if r.Header.Get("Authorization") != "Bearer verified" && r.Header.Get("Authorization") != "Bearer unverified" && r.Header.Get("Authorization") != "Bearer email-conflict" {
 				http.Error(w, "auth", http.StatusUnauthorized)
 				return
 			}
-			verified := r.Header.Get("Authorization") == "Bearer verified"
+			verified := r.Header.Get("Authorization") != "Bearer unverified"
 			_ = json.NewEncoder(w).Encode([]map[string]any{{"email": "private@contact.test", "primary": true, "verified": verified, "visibility": nil}})
 		default:
 			http.NotFound(w, r)
@@ -133,6 +149,91 @@ func TestGitHubOAuthUsesPKCEStableIDAndVerifiedPrivatePrimaryEmail(t *testing.T)
 	}
 	if replay := callback(state, "verified", cookie); replay.Code != http.StatusUnauthorized {
 		t.Fatalf("replayed state accepted: %d", replay.Code)
+	}
+	var campusID string
+	if err := pool.QueryRow(ctx, `INSERT INTO colleges(slug,name) VALUES('github-campus-test','GitHub Campus Test') RETURNING id::text`).Scan(&campusID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE users SET college_id=$2,account_type='campus' WHERE id=$1`, userID, campusID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO campus_verifications(college_id,user_id,source) VALUES($1,$2,'administrator_review')`, campusID, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO campus_roles(college_id,user_id,role) VALUES($1,$2,'student')`, campusID, userID); err != nil {
+		t.Fatal(err)
+	}
+	sessionRequest := httptest.NewRequest(http.MethodGet, "/session", nil)
+	sessionRequest.AddCookie(session)
+	sessionResponse := httptest.NewRecorder()
+	router.ServeHTTP(sessionResponse, sessionRequest)
+	var sessionEnvelope struct {
+		Data struct {
+			CSRF string `json:"csrf_token"`
+		} `json:"data"`
+	}
+	if sessionResponse.Code != http.StatusOK || json.Unmarshal(sessionResponse.Body.Bytes(), &sessionEnvelope) != nil || sessionEnvelope.Data.CSRF == "" {
+		t.Fatalf("campus session before logout status=%d body=%s", sessionResponse.Code, sessionResponse.Body.String())
+	}
+	logout := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	logout.Header.Set("Origin", "http://peergit.test")
+	logout.Header.Set("X-CSRF-Token", sessionEnvelope.Data.CSRF)
+	logout.AddCookie(session)
+	logoutResponse := httptest.NewRecorder()
+	router.ServeHTTP(logoutResponse, logout)
+	if logoutResponse.Code != http.StatusNoContent {
+		t.Fatalf("logout status=%d body=%s", logoutResponse.Code, logoutResponse.Body.String())
+	}
+	state, cookie = start()
+	relogin := callback(state, "verified", cookie)
+	if relogin.Code != http.StatusSeeOther {
+		t.Fatalf("campus relogin status=%d body=%s", relogin.Code, relogin.Body.String())
+	}
+	var reloginSession *http.Cookie
+	for _, c := range relogin.Result().Cookies() {
+		if c.Name == "peergit_session" {
+			reloginSession = c
+		}
+	}
+	if reloginSession == nil {
+		t.Fatal("campus relogin did not issue a session")
+	}
+	currentSession := httptest.NewRequest(http.MethodGet, "/session", nil)
+	currentSession.AddCookie(reloginSession)
+	currentSessionResponse := httptest.NewRecorder()
+	router.ServeHTTP(currentSessionResponse, currentSession)
+	var currentSessionEnvelope struct {
+		Data struct {
+			User struct {
+				CollegeID    string `json:"college_id"`
+				CampusStatus string `json:"campus_status"`
+			} `json:"user"`
+		} `json:"data"`
+	}
+	if currentSessionResponse.Code != http.StatusOK || json.Unmarshal(currentSessionResponse.Body.Bytes(), &currentSessionEnvelope) != nil || currentSessionEnvelope.Data.User.CollegeID != campusID || currentSessionEnvelope.Data.User.CampusStatus != "verified" {
+		t.Fatalf("campus affiliation did not survive sign-out/sign-in: status=%d body=%s", currentSessionResponse.Code, currentSessionResponse.Body.String())
+	}
+	for _, code := range []string{"token-failure", "profile-failure", "email-failure", "email-conflict"} {
+		state, cookie = start()
+		failed := callback(state, code, cookie)
+		if failed.Code == http.StatusSeeOther {
+			t.Fatalf("provider failure or email conflict %q created a login session", code)
+		}
+		for _, issued := range failed.Result().Cookies() {
+			if issued.Name == "peergit_session" && issued.Value != "" {
+				t.Fatalf("provider failure or email conflict %q issued a session", code)
+			}
+		}
+	}
+	var conflictingUsers, identities int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE email_normalized='private@contact.test'`).Scan(&conflictingUsers); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM user_identities WHERE provider='github' AND subject IN ('981234','981235')`).Scan(&identities); err != nil {
+		t.Fatal(err)
+	}
+	if conflictingUsers != 1 || identities != 1 {
+		t.Fatalf("failed provider/conflicting email created extra identity state: users=%d identities=%d", conflictingUsers, identities)
 	}
 	state, cookie = start()
 	if rejected := callback(state, "unverified", cookie); rejected.Code != http.StatusForbidden {

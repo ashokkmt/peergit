@@ -175,6 +175,31 @@ func TestPhase2SessionConsentAdminAndTenantIsolation(t *testing.T) {
 	if profileResponse.Code != http.StatusOK {
 		t.Fatalf("profile status=%d body=%s", profileResponse.Code, profileResponse.Body.String())
 	}
+	if _, err := pool.Exec(ctx, `UPDATE campus_verifications SET revoked_at=now() WHERE college_id=$1 AND user_id=$2 AND revoked_at IS NULL`, collegeID, targetID); err != nil {
+		t.Fatal(err)
+	}
+	revokedSession := httptest.NewRequest(http.MethodGet, "http://peergit.test/api/v1/session", nil)
+	revokedSession.AddCookie(&http.Cookie{Name: "peergit_session", Value: "target-session"})
+	revokedResponse := httptest.NewRecorder()
+	router.ServeHTTP(revokedResponse, revokedSession)
+	var revokedEnvelope struct {
+		Data struct {
+			User struct {
+				CollegeID    string `json:"college_id"`
+				CampusStatus string `json:"campus_status"`
+			} `json:"user"`
+		} `json:"data"`
+	}
+	if revokedResponse.Code != http.StatusOK || json.Unmarshal(revokedResponse.Body.Bytes(), &revokedEnvelope) != nil || revokedEnvelope.Data.User.CollegeID != "" || revokedEnvelope.Data.User.CampusStatus != "inactive" {
+		t.Fatalf("revoked campus session retained access: status=%d body=%s", revokedResponse.Code, revokedResponse.Body.String())
+	}
+	revokedAdminRead := httptest.NewRequest(http.MethodGet, "http://peergit.test/api/v1/admin/users", nil)
+	revokedAdminRead.AddCookie(&http.Cookie{Name: "peergit_session", Value: "target-session"})
+	revokedAdminResponse := httptest.NewRecorder()
+	router.ServeHTTP(revokedAdminResponse, revokedAdminRead)
+	if revokedAdminResponse.Code != http.StatusForbidden {
+		t.Fatalf("revoked user accessed campus administration: status=%d body=%s", revokedAdminResponse.Code, revokedAdminResponse.Body.String())
+	}
 	mutate(http.MethodPost, "/api/v1/admin/organizations", `{"kind":"club","slug":"robotics-club","name":"Robotics Club"}`, http.StatusCreated)
 	mutate(http.MethodPost, "/api/v1/admin/invitations", `{"email":"guest@outside.test","account_type":"external","external_access_kind":"mentor","expires_hours":24}`, http.StatusCreated)
 	mutate(http.MethodPost, "/api/v1/admin/users/"+targetID+"/status", `{"suspended":true}`, http.StatusOK)
@@ -185,6 +210,28 @@ func TestPhase2SessionConsentAdminAndTenantIsolation(t *testing.T) {
 	var sessions int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE user_id=$1`, targetID).Scan(&sessions); err != nil || sessions != 0 {
 		t.Fatalf("suspended user retained %d sessions err=%v", sessions, err)
+	}
+	var deletedID string
+	if err := pool.QueryRow(ctx, `INSERT INTO users(email,email_normalized,display_name,handle,account_type) VALUES('deleted@contact.test','deleted@contact.test','Deleted User','phase2_deleted','unverified') RETURNING id::text`).Scan(&deletedID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO sessions(user_id,token_hash,csrf_hash,expires_at) VALUES($1,$2,$3,now()+interval '1 hour')`, deletedID, sessionHash(key, "deleted-user-session"), sessionCSRFHash(key, "deleted-user-session")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE users SET status='deleted' WHERE id=$1`, deletedID); err != nil {
+		t.Fatal(err)
+	}
+	deletedSession := httptest.NewRequest(http.MethodGet, "http://peergit.test/api/v1/session", nil)
+	deletedSession.AddCookie(&http.Cookie{Name: "peergit_session", Value: "deleted-user-session"})
+	deletedResponse := httptest.NewRecorder()
+	router.ServeHTTP(deletedResponse, deletedSession)
+	var deletedEnvelope struct {
+		Data struct {
+			Authenticated bool `json:"authenticated"`
+		} `json:"data"`
+	}
+	if deletedResponse.Code != http.StatusOK || json.Unmarshal(deletedResponse.Body.Bytes(), &deletedEnvelope) != nil || deletedEnvelope.Data.Authenticated {
+		t.Fatalf("deleted user retained session access: status=%d body=%s", deletedResponse.Code, deletedResponse.Body.String())
 	}
 	wrongOrigin := httptest.NewRequest(http.MethodPut, "http://peergit.test/api/v1/me/consent", bytes.NewBufferString(`{"purpose":"portfolio","policy_version":"v1","granted":true}`))
 	wrongOrigin.Header.Set("Content-Type", "application/json")

@@ -278,9 +278,12 @@ try {
   const e2eDirectory = join(root, 'tests', 'e2e');
   await installNodePackages(e2eDirectory);
   const browserPath = installedChromiumPath(e2eDirectory);
-  if (process.env.CI === 'true' || !existsSync(browserPath)) {
+  if (process.env.CI === 'true' && process.platform === 'linux') {
+    await run(npm, ['exec', '--', 'playwright', 'install-deps', 'chromium'], { cwd: e2eDirectory });
+  }
+  if (!existsSync(browserPath)) {
     const playwrightArgs = ['exec', '--', 'playwright', 'install'];
-    if (process.platform === 'linux') playwrightArgs.push('--with-deps');
+    if (process.platform === 'linux' && process.env.CI !== 'true') playwrightArgs.push('--with-deps');
     playwrightArgs.push('chromium');
     await run(npm, playwrightArgs, { cwd: e2eDirectory });
   } else {
@@ -292,7 +295,7 @@ try {
   await waitForWeb();
   await run(npm, ['test'], { cwd: e2eDirectory });
   await run('docker', ['compose', '-f', composeFile, 'config', '--quiet']);
-  // await run('git', ['diff', '--check']);
+  await run('git', ['diff', '--check']);
   console.log('\nAll PeerGit checks passed.');
 } catch (error) {
   console.error(`\nTest script failed: ${error.message}`);

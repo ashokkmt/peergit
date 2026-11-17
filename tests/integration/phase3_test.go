@@ -154,6 +154,10 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 		return id
 	}
 	call("lead", http.MethodPost, "/api/v1/projects", `{"slug":"must-not-exist","title":"Form project","summary":"Repository-free project creation is disabled","project_type":"side_project","visibility":"private","lifecycle":"draft"}`, http.StatusConflict)
+	var repositoryFreeProjectCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM projects WHERE college_id=$1 AND slug='must-not-exist'`, college).Scan(&repositoryFreeProjectCount); err != nil || repositoryFreeProjectCount != 0 {
+		t.Fatalf("repository-free project request persisted %d project(s), err=%v", repositoryFreeProjectCount, err)
+	}
 	hiddenProjectID := seedImportedProject("phase3-private", "Private notes", "A private workspace", "private", "draft", 930001)
 	hiddenRoleID := decodeID(call("lead", http.MethodPost, "/api/v1/projects/"+hiddenProjectID+"/roles", `{"title":"Private role","description":"Do not disclose this role","openings":1}`, http.StatusCreated), "id")
 	var prerequisiteCount int
