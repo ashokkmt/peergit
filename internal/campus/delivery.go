@@ -9,17 +9,58 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/mail"
 	"net/smtp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/resend/resend-go/v4"
 	"peergit/internal/platform/jobs"
 )
 
-type MailConfig struct{ Host, From, Username, Password, TLSMode string }
+type MailConfig struct {
+	Host, From, Username, Password, TLSMode string
+	Resend                                  *ResendSender
+	SuppressionKey                          string
+}
+
+const resendRequestTimeout = 8 * time.Second
+
+// ResendSender owns one SDK and HTTP client for the worker process.
+type ResendSender struct {
+	client     *resend.Client
+	httpClient *http.Client
+}
+
+func NewResendSender(apiKey string) *ResendSender {
+	if strings.TrimSpace(apiKey) == "" {
+		return nil
+	}
+	var transport http.RoundTripper = http.DefaultTransport
+	if defaultTransport, ok := http.DefaultTransport.(*http.Transport); ok {
+		cloned := defaultTransport.Clone()
+		cloned.MaxIdleConns = 10
+		cloned.MaxIdleConnsPerHost = 2
+		cloned.IdleConnTimeout = 90 * time.Second
+		transport = cloned
+	}
+	httpClient := &http.Client{Transport: transport, Timeout: resendRequestTimeout}
+	return &ResendSender{client: resend.NewCustomClient(httpClient, apiKey), httpClient: httpClient}
+}
+
+func (s *ResendSender) CloseIdleConnections() {
+	if s != nil && s.httpClient != nil {
+		s.httpClient.CloseIdleConnections()
+	}
+}
+
+func (s *ResendSender) send(ctx context.Context, deliveryID string, data deliveryPayload) (string, error) {
+	return sendResendWithClient(ctx, s.client, deliveryID, data)
+}
 
 func DeliveryHandler(pool *pgxpool.Pool, encryptionKey string, mail MailConfig) jobs.Handler {
 	return func(ctx context.Context, claim jobs.Claim) (string, error) {
@@ -54,6 +95,13 @@ func DeliveryHandler(pool *pgxpool.Pool, encryptionKey string, mail MailConfig) 
 		decryptor := &Handler{encryptionKey: encryptionKey}
 		payload, err := decryptor.decrypt(encrypted)
 		if err != nil {
+			var permanent *jobs.PermanentError
+			if errors.As(err, &permanent) {
+				_, updateErr := pool.Exec(ctx, `UPDATE campus_email_deliveries SET encrypted_payload=''::bytea,delivery_status='failed',last_error_code=$2,status_at=clock_timestamp() WHERE id=$1 AND sent_at IS NULL AND EXISTS(SELECT 1 FROM jobs WHERE id=$3 AND worker=$4 AND generation=$5 AND state='running' AND lease_until>clock_timestamp())`, deliveryID, permanent.Code, claim.ID, claim.Worker, claim.Generation)
+				if updateErr != nil {
+					return "", updateErr
+				}
+			}
 			return "", err
 		}
 		var data deliveryPayload
@@ -73,15 +121,77 @@ func DeliveryHandler(pool *pgxpool.Pool, encryptionKey string, mail MailConfig) 
 			_, _ = pool.Exec(ctx, `UPDATE campus_email_deliveries SET encrypted_payload=''::bytea WHERE id=$1 AND sent_at IS NULL`, deliveryID)
 			return "", nil
 		}
-		if err = sendMail(ctx, mail, data); err != nil {
+		if mail.SuppressionKey != "" {
+			var suppressed bool
+			if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM email_suppressions WHERE recipient_key=$1)`, recipientKey(mail.SuppressionKey, to)).Scan(&suppressed); err != nil {
+				return "", err
+			}
+			if suppressed {
+				_, err := pool.Exec(ctx, `UPDATE campus_email_deliveries SET encrypted_payload=''::bytea,delivery_status='suppressed',status_at=clock_timestamp() WHERE id=$1 AND sent_at IS NULL AND EXISTS(SELECT 1 FROM jobs WHERE id=$2 AND worker=$3 AND generation=$4 AND state='running' AND lease_until>clock_timestamp())`, deliveryID, claim.ID, claim.Worker, claim.Generation)
+				return "", err
+			}
+		}
+		provider := "smtp"
+		var messageID string
+		if mail.Resend != nil {
+			provider = "resend"
+			messageID, err = mail.Resend.send(ctx, deliveryID, data)
+		} else {
+			err = sendMail(ctx, mail, data)
+		}
+		if err != nil {
 			return "", err
 		}
-		tag, err := pool.Exec(ctx, `UPDATE campus_email_deliveries SET sent_at=now(),encrypted_payload=''::bytea,attempts=LEAST(attempts+1,3) WHERE id=$1 AND sent_at IS NULL AND EXISTS(SELECT 1 FROM jobs WHERE id=$2 AND worker=$3 AND generation=$4 AND state='running' AND lease_until>clock_timestamp())`, deliveryID, claim.ID, claim.Worker, claim.Generation)
+		tag, err := pool.Exec(ctx, `UPDATE campus_email_deliveries SET sent_at=now(),encrypted_payload=''::bytea,attempts=LEAST(attempts+1,3),provider=$5,provider_message_id=NULLIF($6,''),delivery_status='accepted',status_at=clock_timestamp() WHERE id=$1 AND sent_at IS NULL AND EXISTS(SELECT 1 FROM jobs WHERE id=$2 AND worker=$3 AND generation=$4 AND state='running' AND lease_until>clock_timestamp())`, deliveryID, claim.ID, claim.Worker, claim.Generation, provider, messageID)
 		if err == nil && tag.RowsAffected() != 1 {
 			return "", jobs.ErrStale
 		}
 		return "", err
 	}
+}
+
+func sendResendWithClient(ctx context.Context, client *resend.Client, deliveryID string, data deliveryPayload) (string, error) {
+	request, err := client.Emails.SendWithOptions(ctx, &resend.SendEmailRequest{
+		From: "PeerGit Accounts <auth@mail.peergit.com>", To: []string{data.To}, Subject: "Verify your PeerGit campus email",
+		ReplyTo: "support@peergit.com", Text: fmt.Sprintf("Confirm your campus email using this link (it expires in 10 minutes):\n%s\n\nOr enter this six-digit code: %s", data.Link, data.Code),
+		Html: fmt.Sprintf("<p>Confirm your campus email using this link (it expires in 10 minutes):</p><p><a href=\"%s\">Verify campus email</a></p><p>Or enter this six-digit code: <strong>%s</strong></p>", htmlEscape(data.Link), htmlEscape(data.Code)),
+	}, &resend.SendEmailOptions{IdempotencyKey: "campus-verification/" + deliveryID})
+	if err != nil {
+		var rateLimit *resend.RateLimitError
+		if errors.As(err, &rateLimit) {
+			seconds, parseErr := strconv.Atoi(rateLimit.RetryAfter)
+			if parseErr == nil && seconds > 0 {
+				return "", retryAfterError{err: err, delay: time.Duration(seconds) * time.Second}
+			}
+			return "", err
+		}
+		var apiError *resend.ResendError
+		if errors.As(err, &apiError) && apiError.StatusCode >= 400 && apiError.StatusCode < 500 {
+			if apiError.StatusCode == http.StatusConflict && apiError.Name == "concurrent_idempotent_requests" {
+				return "", err
+			}
+			code := "resend_rejected"
+			if apiError.StatusCode == http.StatusConflict && apiError.Name == "invalid_idempotent_request" {
+				code = "resend_idempotency_conflict"
+			}
+			return "", &jobs.PermanentError{Code: code, Err: err}
+		}
+		return "", err
+	}
+	return request.Id, nil
+}
+
+type retryAfterError struct {
+	err   error
+	delay time.Duration
+}
+
+func (e retryAfterError) Error() string                              { return e.err.Error() }
+func (e retryAfterError) Unwrap() error                              { return e.err }
+func (e retryAfterError) RetryAfterDuration(time.Time) time.Duration { return e.delay }
+
+func htmlEscape(value string) string {
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&#39;").Replace(value)
 }
 
 func RunDeliveryCleanup(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) {

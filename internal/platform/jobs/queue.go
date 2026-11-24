@@ -173,6 +173,18 @@ func (q Queue) RetryWithCode(ctx context.Context, c Claim, delay time.Duration, 
 	return err
 }
 
+func (q Queue) FailWithCode(ctx context.Context, c Claim, errorCode string) error {
+	if !safeCode(errorCode) {
+		return errors.New("safe failure code is required")
+	}
+	tag, err := q.Pool.Exec(ctx, `UPDATE jobs SET state='dead',lease_until=NULL,worker=NULL,last_error_code=$4,updated_at=clock_timestamp()
+		WHERE id=$1 AND worker=$2 AND generation=$3 AND state='running' AND lease_until>clock_timestamp()`, c.ID, c.Worker, c.Generation, errorCode)
+	if err == nil && tag.RowsAffected() != 1 {
+		return ErrStale
+	}
+	return err
+}
+
 func (q Queue) RecoverExhausted(ctx context.Context) error {
 	_, err := q.Pool.Exec(ctx, `UPDATE jobs SET state='dead',lease_until=NULL,worker=NULL,generation=generation+1,updated_at=clock_timestamp()
 	 WHERE (state='running' AND attempts>=3 AND lease_until<=clock_timestamp())

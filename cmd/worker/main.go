@@ -39,6 +39,9 @@ func run() error {
 	if cfg.DatabaseURL == "" {
 		return errors.New("DATABASE_URL is required for the worker")
 	}
+	if (cfg.AppEnv == "production" || cfg.AppEnv == "staging") && cfg.ResendAPIKey == "" {
+		return errors.New("RESEND_API_KEY is required for the production email worker")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	pool, err := database.Open(ctx, cfg.DatabaseURL, cfg.DatabaseMax)
 	cancel()
@@ -71,14 +74,15 @@ func run() error {
 	if cfg.ObjectEndpoint != "" {
 		objectStore = storage.New(cfg.ObjectEndpoint, cfg.ObjectBucket, cfg.ObjectRegion, cfg.ObjectAccessKey, cfg.ObjectSecretKey)
 	}
+	resendSender := campus.NewResendSender(workerResendKey(cfg.AppEnv, cfg.ResendAPIKey))
+	defer resendSender.CloseIdleConnections()
+	jobHandlers := repository.JobHandlers(pool, githubClient, cfg.GitHubAppID, githubKey, objectStore, logger)
+	jobHandlers["campus_verification_email"] = campus.DeliveryHandler(pool, cfg.VerificationEmailKey, campus.MailConfig{Host: cfg.SMTPHost, From: cfg.SMTPFrom, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword, TLSMode: cfg.SMTPTLSMode, Resend: resendSender, SuppressionKey: cfg.VerificationHashKey})
 	go func() {
-		handlers := map[string]jobs.Handler{
-			"campus_verification_email": campus.DeliveryHandler(pool, cfg.VerificationEmailKey, campus.MailConfig{Host: cfg.SMTPHost, From: cfg.SMTPFrom, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword, TLSMode: cfg.SMTPTLSMode}),
-		}
-		for jobType, handler := range repository.JobHandlers(pool, githubClient, cfg.GitHubAppID, githubKey, objectStore, logger) {
-			handlers[jobType] = handler
-		}
-		results <- (jobs.Queue{Pool: pool}).RunConcurrent(workerCtx, workerName, handlers, logger, 10)
+		results <- (jobs.Queue{Pool: pool}).RunConcurrentTypes(workerCtx, workerName+"-email", jobHandlers, logger, 2, []string{"campus_verification_email"})
+	}()
+	go func() {
+		results <- (jobs.Queue{Pool: pool}).RunConcurrentTypes(workerCtx, workerName+"-general", jobHandlers, logger, 8, []string{"github_webhook", "github_reconcile", "github_overview", "snapshot"})
 	}()
 	go func() {
 		results <- (outbox.Queue{Pool: pool}).Run(workerCtx, workerName, map[string]outbox.Handler{}, logger)
@@ -107,11 +111,18 @@ func run() error {
 		}
 		results <- nil
 	}()
-	for range 5 {
+	for range 6 {
 		if err := <-results; err != nil {
 			cancelWorker()
 			return err
 		}
 	}
 	return nil
+}
+
+func workerResendKey(appEnv, key string) string {
+	if appEnv == "staging" || appEnv == "production" {
+		return key
+	}
+	return ""
 }

@@ -44,6 +44,9 @@ func run() error {
 	}
 	logger := logging.New(cfg.AppEnv, cfg.LogLevel)
 	slog.SetDefault(logger)
+	if (cfg.AppEnv == "production" || cfg.AppEnv == "staging") && cfg.ResendWebhookSecret == "" {
+		return errors.New("RESEND_WEBHOOK_SECRET is required for the production API")
+	}
 	errorManager := errormanager.NewManager(logger)
 	var pool *pgxpool.Pool
 	if cfg.DatabaseURL != "" {
@@ -86,7 +89,8 @@ func run() error {
 		OAuthClientID: cfg.GitHubRepositoryClientID, OAuthClientSecret: cfg.GitHubRepositoryClientSecret, OAuthRedirectURL: cfg.GitHubRepositoryRedirectURL,
 		OAuthAuthorizeURL: cfg.GitHubAuthorizeURL, OAuthTokenURL: cfg.GitHubTokenURL, APIURL: cfg.GitHubAPIURL,
 	}, logger, errorManager)
-	router := httpserver.NewRouter(healthHandler, logger, errorManager, identityHandler.Register, campusHandler.Register, mediaHandler.Register, projectHandler.Register, recruitmentHandler.Register, repositoryHandler.Register)
+	webhookHandler := campus.NewResendWebhookHandler(pool, cfg.ResendWebhookSecret, cfg.VerificationHashKey, logger)
+	router := httpserver.NewRouter(healthHandler, logger, errorManager, webhookHandler.Register, identityHandler.Register, campusHandler.Register, mediaHandler.Register, projectHandler.Register, recruitmentHandler.Register, repositoryHandler.Register)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {

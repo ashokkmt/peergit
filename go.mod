@@ -10,6 +10,7 @@ require (
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/joho/godotenv v1.5.1
+	github.com/resend/resend-go/v4 v4.13.0
 	golang.org/x/oauth2 v0.30.0
 )
 

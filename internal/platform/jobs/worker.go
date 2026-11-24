@@ -21,11 +21,23 @@ const (
 
 type Handler func(context.Context, Claim) (objectKey string, err error)
 
+type PermanentError struct {
+	Code string
+	Err  error
+}
+
+func (e *PermanentError) Error() string { return e.Err.Error() }
+func (e *PermanentError) Unwrap() error { return e.Err }
+
 func (q Queue) Run(ctx context.Context, worker string, handlers map[string]Handler, logger *slog.Logger) error {
 	return q.RunConcurrent(ctx, worker, handlers, logger, 1)
 }
 
 func (q Queue) RunConcurrent(ctx context.Context, worker string, handlers map[string]Handler, logger *slog.Logger, concurrency int) error {
+	return q.RunConcurrentTypes(ctx, worker, handlers, logger, concurrency, nil)
+}
+
+func (q Queue) RunConcurrentTypes(ctx context.Context, worker string, handlers map[string]Handler, logger *slog.Logger, concurrency int, types []string) error {
 	if concurrency < 1 || concurrency > 32 {
 		return errors.New("worker concurrency must be between 1 and 32")
 	}
@@ -41,9 +53,16 @@ func (q Queue) RunConcurrent(ctx context.Context, worker string, handlers map[st
 		}
 		return nil
 	}
-	types := make([]string, 0, len(handlers))
-	for jobType := range handlers {
-		types = append(types, jobType)
+	if len(types) == 0 {
+		types = make([]string, 0, len(handlers))
+		for jobType := range handlers {
+			types = append(types, jobType)
+		}
+	}
+	for _, jobType := range types {
+		if _, ok := handlers[jobType]; !ok {
+			return errors.New("worker type filter contains an unregistered handler")
+		}
 	}
 	sort.Strings(types)
 	var workers sync.WaitGroup
@@ -121,6 +140,14 @@ func (q Queue) runClaim(ctx context.Context, claim Claim, handler Handler, logge
 		err = errors.New("snapshot handler completed without an object key")
 	}
 	if err != nil {
+		var permanent *PermanentError
+		if errors.As(err, &permanent) {
+			if failErr := q.FailWithCode(context.Background(), claim, permanent.Code); failErr != nil {
+				logger.ErrorContext(ctx, "permanent job failure could not be recorded", "job_id", claim.ID, "job_type", claim.Type, "error", failErr)
+			}
+			logger.WarnContext(ctx, "job permanently failed", "job_id", claim.ID, "job_type", claim.Type, "error_code", permanent.Code)
+			return
+		}
 		delay := retryDelay(claim.Attempt)
 		var retryAfter interface{ RetryAfterDuration(time.Time) time.Duration }
 		if errors.As(err, &retryAfter) {

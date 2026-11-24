@@ -244,7 +244,7 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var profile json.RawMessage
-	var skills []string
+	skills := []string{}
 	consents := []string{}
 	if err := h.pool.QueryRow(r.Context(), `SELECT profile FROM users WHERE id=$1`, s.UserID).Scan(&profile); err != nil {
 		h.err.Handle(w, r, err)

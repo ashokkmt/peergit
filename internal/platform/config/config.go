@@ -39,6 +39,8 @@ type Config struct {
 	GitHubRepositoryClientSecret string
 	GitHubRepositoryRedirectURL  string
 	SMTPHost                     string
+	ResendAPIKey                 string
+	ResendWebhookSecret          string
 	SMTPFrom                     string
 	SMTPUsername                 string
 	SMTPPassword                 string
@@ -99,6 +101,8 @@ func Load() (*Config, error) {
 		GitHubRepositoryClientSecret: getEnv("GITHUB_REPOSITORY_CLIENT_SECRET", ""),
 		GitHubRepositoryRedirectURL:  getEnv("GITHUB_REPOSITORY_REDIRECT_URL", ""),
 		SMTPHost:                     getEnv("SMTP_HOST", "127.0.0.1:1025"),
+		ResendAPIKey:                 getEnv("RESEND_API_KEY", ""),
+		ResendWebhookSecret:          getEnv("RESEND_WEBHOOK_SECRET", ""),
 		SMTPFrom:                     getEnv("SMTP_FROM", "PeerGit <noreply@localhost>"),
 		SMTPUsername:                 getEnv("SMTP_USERNAME", ""),
 		SMTPPassword:                 getEnv("SMTP_PASSWORD", ""),
@@ -200,8 +204,8 @@ func (c Config) Validate() error {
 		return errors.New("SMTP_USERNAME and SMTP_PASSWORD must be configured together")
 	}
 	if c.AppEnv == "production" || c.AppEnv == "staging" {
-		if c.SMTPTLSMode == "none" || c.SMTPFrom == "" || len(c.VerificationHashKey) < 32 || len(c.VerificationEmailKey) < 32 || strings.HasPrefix(c.VerificationHashKey, "local-development-only") || strings.HasPrefix(c.VerificationEmailKey, "local-development-only") {
-			return errors.New("staging and production require authenticated mail configuration and unique verification keys")
+		if len(c.VerificationHashKey) < 32 || len(c.VerificationEmailKey) < 32 || strings.HasPrefix(c.VerificationHashKey, "local-development-only") || strings.HasPrefix(c.VerificationEmailKey, "local-development-only") {
+			return errors.New("staging and production require unique verification keys")
 		}
 	}
 	for _, endpoint := range []string{c.GitHubAuthorizeURL, c.GitHubTokenURL, c.GitHubAPIURL} {

@@ -72,6 +72,7 @@ func TestConfigValidation(t *testing.T) {
 		GitHubRepositoryClientID: "repo-client-id", GitHubRepositoryClientSecret: "repo-client-secret", GitHubRepositoryRedirectURL: "https://example.edu/api/v1/github/authorization/callback",
 		GitHubAppID: "12345", GitHubAppSlug: "peergit-campus", GitHubAppPrivateKey: `.secrets/github-app.pem`, GitHubWebhookSecret: "0123456789abcdef0123456789abcdef",
 		SMTPHost: "smtp.example.edu:587", SMTPFrom: "PeerGit <notify@example.edu>", SMTPTLSMode: "starttls", VerificationHashKey: "unique-verification-hash-key-for-test", VerificationEmailKey: "unique-verification-encryption-key-test",
+		ResendAPIKey: "re_test_key",
 	}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("valid config rejected: %v", err)

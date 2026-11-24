@@ -135,7 +135,7 @@ func (h *Handler) startCampusChallenge(w http.ResponseWriter, r *http.Request) {
 	var other string
 	err = tx.QueryRow(r.Context(), `SELECT id::text FROM campus_emails WHERE email_normalized=$1 AND verified_at IS NOT NULL AND user_id<>$2`, email, s.UserID).Scan(&other)
 	if err == nil {
-		h.fail(w, r, http.StatusConflict, "campus_email_unavailable", "this campus email cannot be used for this account", nil)
+		h.fail(w, r, http.StatusConflict, "campus_email_unavailable", "this campus email is already in use; choose a different campus email", nil)
 		return
 	}
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -146,7 +146,7 @@ func (h *Handler) startCampusChallenge(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRow(r.Context(), `INSERT INTO campus_emails(user_id,college_id,email_normalized) VALUES($1,$2,$3) ON CONFLICT(college_id,email_normalized) DO UPDATE SET user_id=EXCLUDED.user_id WHERE campus_emails.user_id=EXCLUDED.user_id RETURNING id::text`, s.UserID, collegeID, email).Scan(&campusEmailID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			h.fail(w, r, http.StatusConflict, "campus_email_unavailable", "this campus email cannot be used for this account", nil)
+			h.fail(w, r, http.StatusConflict, "campus_email_unavailable", "this campus email is already in use; choose a different campus email", nil)
 		} else {
 			h.err.Handle(w, r, err)
 		}
