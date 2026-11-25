@@ -12,6 +12,7 @@ import (
 )
 
 func (h *Handler) browserBinding(w http.ResponseWriter, r *http.Request) (string, string, string, string, bool) {
+	w.Header().Set("Cache-Control", "private, no-store")
 	s, ok := h.campusSession(w, r)
 	if !ok {
 		return "", "", "", "", false
@@ -49,6 +50,14 @@ func (h *Handler) repositoryTree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ref := strings.TrimSpace(r.URL.Query().Get("ref"))
+	pinned := r.URL.Query().Get("sha")
+	if pinned != "" {
+		if !regexpCommitSHA(pinned) {
+			h.fail(w, r, 400, "commit_sha_invalid", "select a valid commit", nil)
+			return
+		}
+		ref = pinned
+	}
 	if ref == "" {
 		ref = branch
 	}
@@ -64,17 +73,47 @@ func (h *Handler) repositoryTree(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	repo := owner + "/" + name
-	sha, err := h.api.Resolve(ctx, repo, ref, token)
+	sha := pinned
+	if sha == "" {
+		sha, err = h.api.Resolve(ctx, repo, ref, token)
+		if err != nil {
+			h.providerFailure(w, r, err)
+			return
+		}
+	}
+	tree, truncated, err := h.api.BrowseTree(ctx, repo, sha, token)
 	if err != nil {
 		h.providerFailure(w, r, err)
 		return
 	}
-	tree, err := h.api.Tree(ctx, repo, sha, token)
+	_ = response.OK(w, map[string]any{"ref": ref, "sha": sha, "tree": tree, "truncated": truncated})
+}
+
+func (h *Handler) repositoryHistory(w http.ResponseWriter, r *http.Request) {
+	owner, name, install, ref, ok := h.browserBinding(w, r)
+	if !ok {
+		return
+	}
+	if selected := strings.TrimSpace(r.URL.Query().Get("ref")); selected != "" {
+		ref = selected
+	}
+	if ref == "" || len(ref) > 255 {
+		h.fail(w, r, 400, "repository_ref_invalid", "select a valid branch", nil)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	token, err := h.browserToken(r.WithContext(ctx), install)
 	if err != nil {
 		h.providerFailure(w, r, err)
 		return
 	}
-	_ = response.OK(w, map[string]any{"ref": ref, "sha": sha, "tree": tree})
+	items, err := h.api.BranchCommits(ctx, owner+"/"+name, token, ref)
+	if err != nil {
+		h.providerFailure(w, r, err)
+		return
+	}
+	_ = response.OK(w, map[string]any{"items": items, "ref": ref})
 }
 
 func (h *Handler) repositoryBranches(w http.ResponseWriter, r *http.Request) {

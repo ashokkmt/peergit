@@ -46,7 +46,7 @@ const { chromium } = require('playwright');
   });
   await new Promise((resolve, reject) => { provider.once('error', reject); provider.listen(8090, '127.0.0.1', resolve); });
   try {
-    for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+    for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }, { width: 320, height: 700 }]) {
       const page = await browser.newPage({ viewport });
       await page.route('**/readyz', route => route.fulfill({ status: 200, headers: { 'X-Request-ID': 'phase1-browser-check' }, body: '{}' }));
       await page.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: false } }) }));
@@ -59,7 +59,20 @@ const { chromium } = require('playwright');
       assert.equal((await page.evaluate(() => document.activeElement.textContent)).trim(), 'Skip to content');
       await page.keyboard.press('Enter');
       assert.equal(await page.evaluate(() => location.hash), '#main-content');
-      await page.getByRole('heading', { name: 'Good projects grow with good people.' }).waitFor();
+      await page.getByRole('heading', { name: /Build something\s*worth sharing/ }).waitFor();
+      const appearance = page.getByRole('combobox', { name: 'Appearance' });
+      for (const theme of ['dark', 'light', 'system']) {
+        if (theme === 'system') await page.emulateMedia({ colorScheme: 'dark' });
+        await appearance.selectOption(theme);
+        const expected = theme === 'system' ? 'dark' : theme;
+        await page.waitForFunction(expected => document.querySelector('link[rel=manifest]').getAttribute('href') === '/manifest-' + expected + '.json', expected);
+        assert.equal(await page.locator('link[rel=icon]').getAttribute('href'), '/icons/favicon-' + expected + '.ico');
+        const selectedManifest = await page.request.get(baseURL + '/manifest-' + expected + '.json');
+        assert.equal(selectedManifest.ok(), true);
+        assert.equal((await selectedManifest.json()).icons[0].src, '/icons/icon-192-' + expected + '.png');
+        await page.reload();
+        await page.waitForFunction(theme => (document.documentElement.dataset.theme || 'system') === theme, theme);
+      }
       const readyStatus = page.locator('.service-status');
       await readyStatus.getByText('Local API is ready').waitFor();
       assert.match(await readyStatus.textContent(), /Request ID: phase1-browser-check/);
@@ -80,11 +93,27 @@ const { chromium } = require('playwright');
     await unavailable.close();
     console.log('Service-unavailable state passed');
 
+    const previews = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    for (const [path, heading] of [
+      ['/preview/native', 'PeerGit hosted repositories'],
+      ['/inbox', 'Inbox'],
+      ['/projects/sample/work', 'Tasks & milestones'],
+      ['/u/example-student', 'Example Student'],
+      ['/campus/overview', 'Campus overview'],
+      ['/campus/reports', 'Cohorts, verification & reports'],
+    ]) {
+      await previews.goto(baseURL + path);
+      await previews.getByRole('heading', { level: 1, name: heading }).waitFor();
+      await previews.getByText('Will get implemented in a later phase', { exact: false }).first().waitFor();
+      assert(await previews.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `horizontal overflow on ${path}`);
+    }
+    await previews.close();
+
     const signup = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await signup.goto(`${baseURL}/signup`);
     await signup.getByRole('heading', { name: 'Start with GitHub' }).waitFor();
     await signup.getByRole('link', { name: /Continue with GitHub/ }).waitFor();
-    await signup.getByRole('navigation', { name: 'Account' }).getByRole('link', { name: 'Log in' }).waitFor();
+    await signup.getByRole('navigation', { name: 'Account' }).getByRole('link', { name: 'Sign in' }).waitFor();
     await signup.goto(`${baseURL}/login`);
     await signup.getByRole('heading', { name: 'Log in to PeerGit' }).waitFor();
     await signup.close();
@@ -98,7 +127,7 @@ const { chromium } = require('playwright');
     assert.equal(await accountMenu.locator('input').count(), 1, 'homepage should only expose the project search field');
     const menuSummary = accountMenu.locator('.account-menu summary');
     await menuSummary.click();
-    for (const label of ['Profile', 'Projects', 'GitHub connections', 'Settings']) {
+    for (const label of ['Profile', 'My projects', 'GitHub connection', 'Account settings']) {
       await accountMenu.locator('.account-menu').getByRole('link', { name: label, exact: true }).waitFor();
     }
     await accountMenu.keyboard.press('Escape');
@@ -106,10 +135,20 @@ const { chromium } = require('playwright');
     assert.equal(await accountMenu.evaluate(() => document.activeElement.matches('.account-menu summary')), true, 'Escape returns focus to the menu button');
     await accountMenu.route('**/api/v1/me/github/repositories', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [{ id: 41003, installation_id: 'local-install-1', full_name: 'test-owner/fixture', description: 'Synthetic repository', visibility: 'private', default_branch: 'main', topics: [], expires_at: new Date(Date.now()+60000).toISOString() }], expired_count: 0 } }) }));
     await accountMenu.route('**/api/v1/me/github/installations', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [{ id: 'local-install-1', installation_id: '41001', account: 'test-owner', target_type: 'User', status: 'active', confirmed_at: new Date().toISOString() }] } }) }));
-    await accountMenu.route('**/api/v1/me/github/retained-projects', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [] } }) }));
+    let retainedProjects = [];
+    await accountMenu.route('**/api/v1/me/github/retained-projects', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: retainedProjects } }) }));
     await accountMenu.route('**/api/v1/me/github/installations/local-install-1/refresh', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authorization_url: 'http://127.0.0.1:8090/repository-authorize' } }) }));
     await accountMenu.route('**/api/v1/me/github/installations/local-install-1/imports', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [{title:'Imported fixture'}] } }) }));
-    await accountMenu.route('**/api/v1/me/github/installations/local-install-1/revoke', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { retained_projects:['imported-fixture'], delete_after:new Date(Date.now()+30*86400000).toISOString() } }) }));
+    await accountMenu.route('**/api/v1/me/github/installations/local-install-1/revoke', route => {
+      const deleteAfter = new Date(Date.now() + 30 * 86400000).toISOString();
+      retainedProjects = [{ id: 'imported-fixture', title: 'Imported fixture', delete_after: deleteAfter }];
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { retained_projects: ['imported-fixture'], delete_after: deleteAfter } }) });
+    });
+    await accountMenu.route('**/api/v1/projects/imported-fixture/github/restore', route => {
+      assert.equal(route.request().method(), 'POST');
+      retainedProjects = [];
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { id: 'imported-fixture', visibility: 'private' } }) });
+    });
     await accountMenu.route('**/api/v1/projects/import/github', async route => {
       assert.equal(route.request().postDataJSON().repository_id, 41003);
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authorization_url: 'http://127.0.0.1:8090/repository-authorize' } }) });
@@ -132,6 +171,8 @@ const { chromium } = require('playwright');
     await accountMenu.getByText('Connection revoked. Its imports are hidden').waitFor();
     assert.match(revokePrompt,/recoverable for 30 days/);
     assert.match(revokePrompt,/Imported fixture/);
+    await accountMenu.getByRole('button', { name: 'Restore privately' }).click();
+    await accountMenu.getByText('Imported fixture restored privately.').waitFor();
     await accountMenu.close();
     console.log('Discovery-only homepage, accessible account menu, and private GitHub import initiation passed');
 
@@ -147,7 +188,7 @@ const { chromium } = require('playwright');
       await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ data: { id: 'profile-image' } }) });
     });
     await profile.goto(`${baseURL}/account/profile`);
-    await profile.getByRole('heading', { name: 'Welcome, Profile Student' }).waitFor();
+    await profile.getByRole('heading', { name: 'Profile Student' }).waitFor();
     await profile.getByLabel('Profile image (PNG/JPEG, up to 5 MiB)').setInputFiles({ name: 'avatar.png', mimeType: 'image/png', buffer: Buffer.from('synthetic fixture bytes') });
     await profile.getByText('Image uploaded and safely re-encoded. Save your profile to use it.').waitFor();
     await profile.getByRole('link', { name: 'View your uploaded image' }).waitFor();
@@ -159,14 +200,30 @@ const { chromium } = require('playwright');
     projectPage.on('pageerror', error => console.error(`Project detail browser error: ${error.message}`));
     projectPage.on('console', message => { if (message.type() === 'error') console.error(`Project detail console error: ${message.text()}`); });
     await projectPage.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: true, csrf_token: 'project-csrf', user: { display_name: 'Test Owner', college_id: 'campus-1', terms_accepted: true, privacy_accepted: true } } }) }));
-    await projectPage.route('**/api/v1/projects/imported-project/repository', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { repository: { id: 'binding-1', full_name: 'test-owner/imported-project', html_url: 'https://github.com/test-owner/imported-project', description: 'Synthetic repo', default_branch: 'main', topics: [], languages: {}, readme_markdown: '', access_state: 'active', sync_health: 'current', limitations: 'LFS and submodule content is not captured.' }, contributions: [{id:'commit-1',kind:'commit',canonical_id:'git:sha1:0123456789abcdef0123456789abcdef01234567',title:'Initial commit',summary:'Initial commit',author_name:'Test Owner',author_login:'test-owner'}], snapshots: [] } }) }));
+    await projectPage.route('**/api/v1/projects/imported-project/repository', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { repository: { id: 'binding-1', full_name: 'test-owner/imported-project', html_url: 'https://github.com/test-owner/imported-project', description: 'Synthetic repo', default_branch: 'main', topics: [], languages: {}, readme_markdown: '', access_state: 'active', sync_health: 'current', limitations: 'LFS and submodule content is not captured.' }, contributions: [{id:'commit-1',kind:'commit',canonical_id:'git:sha1:0123456789abcdef0123456789abcdef01234567',title:'Initial commit',summary:'Initial commit',author_name:'Test Owner',author_login:'test-owner'}, {id:'issue-19',kind:'issue',number:19,state:'open',title:'Example issue',summary:'Synchronized issue detail'}, {id:'pr-14',kind:'pull_request',number:14,state:'open',title:'Example pull request',summary:'Synchronized pull request detail'}], snapshots: [] } }) }));
     await projectPage.route('**/api/v1/projects/imported-project/repository/branches', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { default_branch:'main',items:[{name:'main',commit:{sha:'0123456789abcdef0123456789abcdef01234567'}}] } }) }));
-    await projectPage.route('**/api/v1/projects/imported-project/repository/tree**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { ref:'main',sha:'0123456789abcdef0123456789abcdef01234567',tree:[{path:'README.md',type:'blob',size:5,sha:'0123456789abcdef0123456789abcdef01234567'}] } }) }));
+    const fixtureSHA = '0123456789abcdef0123456789abcdef01234567';
+    let treeRateLimited = true;
+    await projectPage.route('**/api/v1/projects/imported-project/repository/tree**', route => {
+      if (treeRateLimited) {
+        treeRateLimited = false;
+        return route.fulfill({ status: 429, contentType: 'application/json', body: JSON.stringify({ error: { message: 'GitHub rate limit reached' } }) });
+      }
+      const query = new URL(route.request().url()).searchParams;
+      assert.equal(query.get('sha') || query.get('ref'), query.has('sha') ? fixtureSHA : 'main');
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { ref:'main',sha:fixtureSHA,tree:[{path:'README.md',type:'blob',size:5,sha:fixtureSHA}] } }) });
+    });
+    await projectPage.route('**/api/v1/projects/imported-project/repository/history**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [{ sha: fixtureSHA, commit: { message: 'Initial commit', author: { name: 'Test Owner', date: '2026-11-25T12:00:00Z' } } }] } }) }));
     await projectPage.route('**/api/v1/projects/imported-project/repository/file**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { path:'README.md',ref:'0123456789abcdef0123456789abcdef01234567',content:'# Hi' } }) }));
     await projectPage.route('**/api/v1/projects/imported-project/repository/commit**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { sha:'0123456789abcdef0123456789abcdef01234567',files:[{filename:'README.md',status:'modified',patch:'+hello'}] } }) }));
     await projectPage.route('**/api/v1/projects/imported-project/applications', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [] } }) }));
     const mockProject = { id: 'imported-project', title: 'Imported project', summary: 'Original summary', visibility: 'private', lifecycle: 'draft', project_type: 'open_source', recruiting: false, skills: [], version: 1 };
+    let projectAccess = true;
     await projectPage.route('**/api/v1/projects/imported-project', async route => {
+      if (!projectAccess) {
+        await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Project unavailable' } }) });
+        return;
+      }
       if (route.request().method() === 'PATCH') {
         const body = route.request().postDataJSON();
         assert.equal(body.summary, 'Updated summary');
@@ -187,11 +244,26 @@ const { chromium } = require('playwright');
     const projectResponse = await projectPage.goto(`${baseURL}/projects/imported-project`);
     try { await projectPage.getByRole('heading', { name: 'Imported project' }).waitFor({ timeout: 5000 }); }
     catch { throw new Error(`Imported project page did not render (HTTP ${projectResponse?.status()}): ${await projectPage.locator('body').innerText()}`); }
+    await projectPage.getByRole('alert').filter({ hasText: 'GitHub rate limit reached' }).waitFor();
+    await projectPage.getByRole('button', { name: 'Retry' }).click();
     await projectPage.getByRole('button', { name: 'README.md' }).click();
+    await projectPage.getByText('# Hi').waitFor();
+    assert.equal(new URL(projectPage.url()).searchParams.get('path'), 'README.md');
+    await projectPage.goBack();
+    await projectPage.getByRole('button', { name: 'README.md' }).waitFor();
+    await projectPage.goForward();
     await projectPage.getByText('# Hi').waitFor();
     await projectPage.getByRole('link', { name: 'Activity' }).click();
     await projectPage.getByRole('button', { name: 'Initial commit' }).click();
     await projectPage.getByText('+hello').waitFor();
+    assert.equal(new URL(projectPage.url()).searchParams.get('commit'), '0123456789abcdef0123456789abcdef01234567');
+    await projectPage.getByRole('link', { name: 'Observed issues' }).click();
+    await projectPage.getByRole('link', { name: /Example issue/ }).click();
+    await projectPage.getByText('Synchronized issue detail').waitFor();
+    assert.equal(new URL(projectPage.url()).searchParams.get('item'), 'issue-19');
+    await projectPage.getByRole('link', { name: 'Pull requests', exact: true }).click();
+    await projectPage.getByRole('link', { name: /Example pull request/ }).click();
+    await projectPage.getByText('Synchronized pull request detail').waitFor();
     await projectPage.getByRole('link', { name: 'Settings' }).click();
     await projectPage.getByRole('textbox', { name: 'Summary' }).fill('Updated summary');
     await projectPage.getByRole('button', { name: 'Save details' }).click();
@@ -205,6 +277,13 @@ const { chromium } = require('playwright');
     await projectPage.getByRole('textbox', { name: 'What will the member work on?' }).fill('Improve the project documentation.');
     await projectPage.getByRole('button', { name: 'Create opening' }).click();
     await projectPage.getByText('Team opening created.').waitFor();
+    await projectPage.goto(`${baseURL}/projects/imported-project?tab=code&ref=old-ref&sha=${fixtureSHA}&path=README.md`);
+    await projectPage.getByText('# Hi').waitFor();
+    await projectPage.getByText('Pinned revision', { exact: false }).waitFor();
+    projectAccess = false;
+    await projectPage.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+    await projectPage.getByRole('alert').filter({ hasText: 'Project unavailable' }).waitFor();
+    assert.equal(await projectPage.getByText('# Hi').count(), 0);
     await projectPage.close();
     console.log('Repository refresh, project code/activity tabs, publication reversal, and recruiting controls passed');
 
@@ -292,7 +371,7 @@ const { chromium } = require('playwright');
     await live.goto(`${baseURL}/signup`);
     await live.getByRole('link', { name: /Continue with GitHub/ }).click();
     await live.getByRole('heading', { name: 'Set up your PeerGit account' }).waitFor();
-    await live.getByRole('heading', { name: /Welcome,/ }).waitFor();
+    await live.getByRole('heading', { name: /Test Student/ }).waitFor();
     assert.equal(await live.locator('.account-panel [role="alert"]').count(), 0, 'a new account with no skills should load without a profile error');
     await live.locator('input[type="checkbox"]').nth(0).check();
     await live.locator('input[type="checkbox"]').nth(1).check();

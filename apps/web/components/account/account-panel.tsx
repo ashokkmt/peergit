@@ -139,7 +139,19 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
   if (!me) return <section className="account-panel" aria-labelledby="account-title"><div><p className="eyebrow">Campus access</p><h2 id="account-title">Sign in to continue</h2><p>Start with GitHub, then verify a campus email to use campus features.</p><a className="primary-link" href="/api/v1/auth/github">Continue with GitHub <span aria-hidden="true">→</span></a></div>{problem && <p className="form-error" role="alert">{problem}</p>}</section>;
 
   return <section className="account-panel" aria-labelledby="account-title">
-    <div className="account-heading"><div><p className="eyebrow">Your PeerGit account</p><h2 id="account-title">{section === "profile" ? `Welcome, ${me.display_name}` : "Account settings"}</h2><p>{me.email}{me.college_id ? " · campus verified" : me.campus_status === "inactive" ? " · campus access inactive" : me.account_type === "unverified" ? " · campus not verified" : " · external account"}</p>{me.campus_status === "unverified" && <a href="/onboarding">Continue campus onboarding</a>}</div></div>
+    <div className="account-heading">
+      <div>
+        <p className="eyebrow">Your PeerGit account</p>
+        <h2 id="account-title">{section === "profile" ? me.display_name : "Account settings"}</h2>
+        <p>{me.email} · {me.college_id ? "Campus verified" : me.campus_status === "inactive" ? "Campus access inactive" : me.account_type === "unverified" ? "Campus verification needed" : "External account"}</p>
+        {section === "profile" && me.profile?.headline && <p>{me.profile.headline}</p>}
+        {section === "profile" && me.skills.length > 0 && <ul className="skill-list" aria-label="Skills">{me.skills.map(skill => <li key={skill}>{skill}</li>)}</ul>}
+        {me.campus_status === "unverified" && <a href="/onboarding">Continue campus onboarding</a>}
+      </div>
+      {section === "profile" && (me.profile?.avatar_media_id
+        ? <img className="profile-avatar" src={`/api/v1/media/${encodeURIComponent(me.profile.avatar_media_id)}`} alt="" />
+        : <span className="avatar" aria-hidden="true">{me.display_name.slice(0, 1).toUpperCase()}</span>)}
+    </div>
     {problem && <p className="form-error" role="alert">{problem}</p>}{message && <p className="form-success" role="status">{message}</p>}
     {section === "profile" && <form className="account-form" onSubmit={saveProfile}>
       <h3>Profile and privacy</h3>

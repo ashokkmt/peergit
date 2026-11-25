@@ -77,6 +77,7 @@ type TreeEntry struct {
 	Type string `json:"type"`
 	SHA  string `json:"sha"`
 	Size int64  `json:"size"`
+	Mode string `json:"mode"`
 }
 type Branch struct {
 	Name   string `json:"name"`
@@ -322,6 +323,14 @@ func (c *Client) InstallationRepositories(ctx context.Context, token string) ([]
 }
 
 func (c *Client) Commits(ctx context.Context, repo, token string, since time.Time, page int) ([]Commit, error) {
+	return c.commits(ctx, repo, token, since, page, "")
+}
+
+func (c *Client) BranchCommits(ctx context.Context, repo, token, ref string) ([]Commit, error) {
+	return c.commits(ctx, repo, token, time.Time{}, 1, ref)
+}
+
+func (c *Client) commits(ctx context.Context, repo, token string, since time.Time, page int, ref string) ([]Commit, error) {
 	path, err := repoPath(repo)
 	if err != nil {
 		return nil, err
@@ -330,6 +339,10 @@ func (c *Client) Commits(ctx context.Context, repo, token string, since time.Tim
 		return nil, errors.New("commit page is outside the supported range")
 	}
 	query := url.Values{"per_page": {"100"}, "page": {fmt.Sprint(page)}}
+	if ref != "" {
+		query.Set("sha", ref)
+		query.Set("per_page", "30")
+	}
 	if !since.IsZero() {
 		query.Set("since", since.UTC().Format(time.RFC3339))
 	}
@@ -472,39 +485,48 @@ func (c *Client) Resolve(ctx context.Context, repo, ref, token string) (string, 
 }
 
 func (c *Client) Tree(ctx context.Context, repo, sha, token string) ([]TreeEntry, error) {
-	path, err := repoPath(repo)
+	tree, truncated, err := c.BrowseTree(ctx, repo, sha, token)
 	if err != nil {
 		return nil, err
 	}
+	if truncated {
+		return nil, errors.New("repository tree exceeds the supported response size")
+	}
+	return tree, nil
+}
+
+func (c *Client) BrowseTree(ctx context.Context, repo, sha, token string) ([]TreeEntry, bool, error) {
+	path, err := repoPath(repo)
+	if err != nil {
+		return nil, false, err
+	}
 	if !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(sha) {
-		return nil, errors.New("tree requires an exact commit SHA")
+		return nil, false, errors.New("tree requires an exact commit SHA")
 	}
 	resp, err := c.request(ctx, http.MethodGet, path+"/git/trees/"+sha+"?recursive=1", token)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var out struct {
 		Truncated bool        `json:"truncated"`
 		Tree      []TreeEntry `json:"tree"`
 	}
 	if err = decode(resp, &out); err != nil {
-		return nil, err
-	}
-	if out.Truncated {
-		return nil, errors.New("repository tree exceeds the supported response size")
+		return nil, false, err
 	}
 	if len(out.Tree) > 10000 {
-		return nil, errors.New("repository tree exceeds the supported entry limit")
+		out.Truncated = true
+		out.Tree = out.Tree[:10000]
 	}
 	for _, e := range out.Tree {
-		if e.Type != "blob" && e.Type != "tree" {
-			return nil, errors.New("GitHub returned an invalid tree entry")
+		if e.Type != "blob" && e.Type != "tree" && e.Type != "commit" {
+			return nil, false, errors.New("GitHub returned an invalid tree entry")
 		}
 		if strings.HasPrefix(e.Path, "/") || strings.Contains(e.Path, "\\") || strings.Contains(e.Path, "../") {
-			return nil, errors.New("GitHub returned an unsafe tree path")
+			return nil, false, errors.New("GitHub returned an unsafe tree path")
 		}
 	}
-	return out.Tree, nil
+	return out.Tree, out.Truncated, nil
 }
 
 func (c *Client) Branches(ctx context.Context, repo, token string) ([]Branch, error) {

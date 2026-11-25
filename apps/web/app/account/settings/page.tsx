@@ -1,7 +1,6 @@
-import { AccountNavigation } from "@/components/account/account-navigation";
+import { AppearanceControl } from "@/components/layout/appearance-control";
 import { AccountPanel } from "@/components/account/account-panel";
-import { SiteHeader } from "@/components/layout/site-header";
 
 export default function SettingsPage() {
-  return <><SiteHeader /><div className="account-layout"><AccountNavigation /><main><AccountPanel section="settings" /></main></div></>;
+  return <><AccountPanel section="settings" /><section className="panel"><h2>Appearance</h2><p>Choose the theme for this device.</p><AppearanceControl /></section></>;
 }

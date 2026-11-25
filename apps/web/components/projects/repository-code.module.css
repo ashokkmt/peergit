@@ -1,0 +1,4 @@
+.sha { overflow-wrap: anywhere; }
+.commit { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem; margin-bottom: 1rem; }
+.commit p { margin: 0; }
+.wrapped { white-space: pre-wrap !important; overflow-wrap: anywhere; }

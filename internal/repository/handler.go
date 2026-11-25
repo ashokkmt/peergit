@@ -69,6 +69,7 @@ func (h *Handler) Register(r chi.Router) {
 		private.Get("/projects/{id}/repository", h.projectRepository)
 		private.Get("/projects/{id}/repository/tree", h.repositoryTree)
 		private.Get("/projects/{id}/repository/branches", h.repositoryBranches)
+		private.Get("/projects/{id}/repository/history", h.repositoryHistory)
 		private.Get("/projects/{id}/repository/commit", h.repositoryCommit)
 		private.Get("/projects/{id}/repository/file", h.repositoryFile)
 		private.With(h.auth.RequireCSRF).Post("/projects/{id}/repository/snapshots", h.requestSnapshot)
@@ -79,6 +80,7 @@ func (h *Handler) Register(r chi.Router) {
 }
 
 func (h *Handler) projectRepository(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "private, no-store")
 	s, ok := h.campusSession(w, r)
 	if !ok {
 		return
@@ -99,7 +101,7 @@ func (h *Handler) projectRepository(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var binding map[string]any
-	var bindingID, owner, name, access, syncHealth string
+	var bindingID, owner, name, access, syncHealth, installationStatus string
 	var externalID int64
 	var synced *time.Time
 	var permissions []byte
@@ -107,7 +109,7 @@ func (h *Handler) projectRepository(w http.ResponseWriter, r *http.Request) {
 	var topics []string
 	var languages []byte
 	var defaultBranch string
-	err = h.pool.QueryRow(r.Context(), `SELECT b.id::text,b.external_repository_id,b.owner_login,b.repository_name,b.default_branch,b.access_state,b.sync_health,b.last_synced_at,i.permissions,b.html_url,b.description,b.topics,b.languages,b.readme_markdown FROM repository_bindings b JOIN github_installations i ON i.id=b.installation_id AND i.college_id=b.college_id WHERE b.repository_id=$1 AND b.college_id=$2 AND b.is_current`, repositoryID, s.CollegeID).Scan(&bindingID, &externalID, &owner, &name, &defaultBranch, &access, &syncHealth, &synced, &permissions, &htmlURL, &description, &topics, &languages, &readme)
+	err = h.pool.QueryRow(r.Context(), `SELECT b.id::text,b.external_repository_id,b.owner_login,b.repository_name,b.default_branch,b.access_state,b.sync_health,b.last_synced_at,i.permissions,b.html_url,b.description,b.topics,b.languages,b.readme_markdown,i.status FROM repository_bindings b JOIN github_installations i ON i.id=b.installation_id AND i.college_id=b.college_id WHERE b.repository_id=$1 AND b.college_id=$2 AND b.is_current`, repositoryID, s.CollegeID).Scan(&bindingID, &externalID, &owner, &name, &defaultBranch, &access, &syncHealth, &synced, &permissions, &htmlURL, &description, &topics, &languages, &readme, &installationStatus)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		h.err.Handle(w, r, err)
 		return
@@ -120,12 +122,20 @@ func (h *Handler) projectRepository(w http.ResponseWriter, r *http.Request) {
 		if languageMap == nil {
 			languageMap = map[string]int64{}
 		}
+		if access != "active" || installationStatus != "active" {
+			htmlURL, readme, description, topics, languageMap = "", "", "", nil, map[string]int64{}
+		}
 		binding = map[string]any{"id": bindingID, "external_repository_id": externalID, "owner": owner, "name": name, "full_name": owner + "/" + name, "html_url": htmlURL, "description": description, "default_branch": defaultBranch, "topics": topics, "languages": languageMap, "readme_markdown": readme, "access_state": access, "sync_health": syncHealth, "last_synced_at": synced, "capabilities": grants, "limitations": "Git LFS objects and submodule contents are not independently captured."}
 	}
+	if binding != nil {
+		binding["provider"] = "github"
+		binding["source_access"] = access == "active" && installationStatus == "active"
+	}
 	contributions := make([]map[string]any, 0)
-	rows, err := h.pool.Query(r.Context(), `SELECT c.id::text,c.kind,c.canonical_id,c.github_author_id,c.author_login,c.author_name,c.title,c.summary,c.occurred_at,c.additions,c.deletions,c.changed_files,u.id::text
+	rows, err := h.pool.Query(r.Context(), `SELECT c.id::text,c.kind,c.canonical_id,c.github_author_id,c.author_login,c.author_name,c.title,c.summary,c.occurred_at,c.additions,c.deletions,c.changed_files,u.id::text,o.data,o.provider_updated_at,o.observed_at
 		FROM contributions c LEFT JOIN user_identities ui ON ui.provider='github' AND ui.subject=c.github_author_id::text LEFT JOIN users u ON u.id=ui.user_id AND u.college_id=c.college_id AND u.status='active'
-		WHERE c.repository_id=$1 AND c.college_id=$2 ORDER BY c.occurred_at DESC NULLS LAST,c.id DESC LIMIT 100`, repositoryID, s.CollegeID)
+		LEFT JOIN LATERAL (SELECT data,provider_updated_at,observed_at FROM contribution_observations WHERE contribution_id=c.id AND binding_id=NULLIF($3,'')::uuid AND college_id=c.college_id ORDER BY provider_updated_at DESC NULLS LAST, observed_at DESC LIMIT 1) o ON true
+		WHERE c.repository_id=$1 AND c.college_id=$2 AND $4 AND (c.kind='commit' OR o.data IS NOT NULL) ORDER BY c.occurred_at DESC NULLS LAST,c.id DESC LIMIT 100`, repositoryID, s.CollegeID, bindingID, access == "active" && installationStatus == "active")
 	if err != nil {
 		h.err.Handle(w, r, err)
 		return
@@ -138,11 +148,21 @@ func (h *Handler) projectRepository(w http.ResponseWriter, r *http.Request) {
 		var occurred *time.Time
 		var additions, deletions, files *int
 		var linked *string
-		if err = rows.Scan(&id, &kind, &canonical, &githubID, &login, &author, &title, &summary, &occurred, &additions, &deletions, &files, &linked); err != nil {
+		var observation []byte
+		var updated, observed *time.Time
+		if err = rows.Scan(&id, &kind, &canonical, &githubID, &login, &author, &title, &summary, &occurred, &additions, &deletions, &files, &linked, &observation, &updated, &observed); err != nil {
 			h.err.Handle(w, r, err)
 			return
 		}
 		item = map[string]any{"id": id, "kind": kind, "canonical_id": canonical, "github_author_id": githubID, "author_login": login, "author_name": author, "title": title, "summary": summary, "occurred_at": occurred, "additions": additions, "deletions": deletions, "changed_files": files, "linked_user_id": linked}
+		var details struct {
+			Number int    `json:"number"`
+			State  string `json:"state"`
+		}
+		if json.Unmarshal(observation, &details) == nil && details.Number > 0 {
+			item["number"], item["state"] = details.Number, details.State
+		}
+		item["provider_updated_at"], item["observed_at"] = updated, observed
 		contributions = append(contributions, item)
 	}
 	if err = rows.Err(); err != nil {
@@ -377,7 +397,15 @@ func (h *Handler) downloadSnapshot(w http.ResponseWriter, r *http.Request) {
 	var key, sha string
 	var projectID = chi.URLParam(r, "id")
 	var id = chi.URLParam(r, "snapshotID")
-	err := h.pool.QueryRow(r.Context(), `SELECT object_key,commit_sha FROM repository_snapshots WHERE id=$1 AND project_id=$2 AND college_id=$3 AND state='verified' AND EXISTS(SELECT 1 FROM projects p WHERE p.id=$2 AND p.college_id=$3 AND p.lifecycle<>'archived') AND EXISTS(SELECT 1 FROM project_members WHERE project_id=$2 AND college_id=$3 AND user_id=$4)`, id, projectID, s.CollegeID, s.UserID).Scan(&key, &sha)
+	err := h.pool.QueryRow(r.Context(), `SELECT s.object_key,s.commit_sha
+		FROM repository_snapshots s
+		JOIN projects p ON p.id=s.project_id AND p.college_id=s.college_id
+		JOIN repository_bindings b ON b.id=s.binding_id AND b.repository_id=s.repository_id AND b.college_id=s.college_id
+		JOIN github_installations i ON i.id=b.installation_id AND i.college_id=b.college_id
+		WHERE s.id=$1 AND s.project_id=$2 AND s.college_id=$3 AND s.state='verified'
+		AND p.lifecycle<>'archived' AND p.github_revoke_deadline IS NULL
+		AND b.is_current AND b.access_state='active' AND i.status='active'
+		AND EXISTS(SELECT 1 FROM project_members WHERE project_id=$2 AND college_id=$3 AND user_id=$4)`, id, projectID, s.CollegeID, s.UserID).Scan(&key, &sha)
 	if err != nil {
 		h.fail(w, r, 404, "snapshot_not_found", "verified snapshot is no longer available", err)
 		return
@@ -502,7 +530,13 @@ func (h *Handler) campusSession(w http.ResponseWriter, r *http.Request) (identit
 func (h *Handler) providerFailure(w http.ResponseWriter, r *http.Request, err error) {
 	var status int
 	var code, msg string
-	if github.IsDenied(err) {
+	var providerErr *github.HTTPError
+	if errors.As(err, &providerErr) && providerErr.RateLimited {
+		if providerErr.RetryAfter != "" {
+			w.Header().Set("Retry-After", providerErr.RetryAfter)
+		}
+		status, code, msg = 429, "github_rate_limited", "GitHub rate limit reached. Try again shortly."
+	} else if github.IsDenied(err) {
 		status, code, msg = 403, "github_access_denied", "GitHub installation cannot access this resource"
 	} else {
 		status, code, msg = 502, "github_unavailable", "GitHub could not complete the request"

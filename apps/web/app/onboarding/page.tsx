@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { AccountPanel } from "@/components/account/account-panel";
 import { BrandLogo } from "@/components/layout/brand-logo";
+import { AppearanceControl } from "@/components/layout/appearance-control";
 
 type Envelope<T> = { data?: T; error?: { message: string } };
 type Status = { campus_verified: boolean; campus_id: string; account_type: string; pending_challenge?: { challenge_id: string; email: string; expires_at: string } };
@@ -15,7 +16,7 @@ export default function OnboardingPage() {
   async function requestReview(event:FormEvent){event.preventDefault();setProblem("");setMessage("");try{const response=await fetch("/api/v1/me/campus-review-requests",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},body:JSON.stringify({campus_id:campus,campus_email:email,reason:reviewReason})});const result=await response.json() as Envelope<{state:string}>;if(!response.ok||result.error)throw new Error(result.error?.message??"Campus review request could not be submitted.");setMessage("Your request is in the campus review queue.")}catch(e){setProblem(e instanceof Error?e.message:"Campus review request could not be submitted.")}}
   return <main>
     <a className="skip-link" href="#onboarding-content">Skip to content</a>
-    <header className="topbar"><BrandLogo /><nav aria-label="Account"><a href="/">Explore public projects</a></nav></header>
+    <header className="topbar"><BrandLogo /><AppearanceControl /><nav aria-label="Account"><a href="/explore">Explore projects</a></nav></header>
     <section id="onboarding-content" className="hero" aria-labelledby="onboarding-title">
       <p className="eyebrow">One more step</p><h1 id="onboarding-title">Set up your PeerGit account</h1>
       <p className="intro">Your GitHub sign-in does not verify campus membership. Campus access starts after you confirm your campus email.</p>

@@ -1,0 +1,4 @@
+.heroGrid { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr); gap:clamp(1.5rem,5vw,5rem); align-items:center; }
+.projectPreview { position:relative; border-color:var(--control); box-shadow:var(--shadow); }
+.projectPreview ul { padding-left:1.2rem; }
+@media (max-width:850px) { .heroGrid { grid-template-columns:minmax(0,1fr); } }

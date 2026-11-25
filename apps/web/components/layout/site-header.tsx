@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { BrandLogo } from "./brand-logo";
+import { AppearanceControl } from "./appearance-control";
 
 type Session = { authenticated: boolean; csrf_token?: string; user?: { display_name: string; account_type: string; campus_status: string; college_id: string } };
 
@@ -23,12 +24,21 @@ export function SiteHeader() {
 
   return <header className="topbar">
     <BrandLogo />
-    <nav aria-label="Main navigation"><a href="/">Discover</a>{session.user?.college_id && <a href="/projects">Projects</a>}</nav>
+    <nav aria-label="Main navigation"><a href="/explore">Explore projects</a><a href="/#how-it-works">How it works</a><a href="/institutes">For institutes</a>{session.user?.college_id && <a href="/home">My workspace</a>}</nav>
+    <details className="mobile-main-menu">
+      <summary>Menu</summary>
+      <nav className="account-menu-panel" aria-label="Mobile navigation">
+        <a href="/explore">Explore projects</a><a href="/#how-it-works">How it works</a><a href="/institutes">For institutes</a>
+        {session.user?.college_id && <a href="/home">My workspace</a>}
+        {!session.authenticated && <a href="/signup">Join PeerGit</a>}
+      </nav>
+    </details>
+    <AppearanceControl />
     {session.authenticated && session.user ? <details className="account-menu" ref={menu}>
       <summary aria-label={`Account menu for ${session.user.display_name}`}><span className="avatar" aria-hidden="true">{session.user.display_name.slice(0, 1).toUpperCase()}</span><span className="account-menu-name">{session.user.display_name}</span></summary>
       <div className="account-menu-panel"><p className="menu-account-name">{session.user.display_name}</p><p className="menu-campus">{session.user.campus_status === "verified" ? "Campus verified" : session.user.campus_status === "inactive" ? "Campus access inactive" : session.user.campus_status === "external" ? "External account" : "Campus verification needed"}</p>
-        <a href="/account/profile">Profile</a><a href="/projects">Projects</a><a href="/account/github">GitHub connections</a><a href="/account/settings">Settings</a><button type="button" onClick={() => void signOut()}>Sign out</button>
+        <a href="/account/profile">Profile</a><a href="/projects">My projects</a><a href="/account/github">GitHub connection</a><a href="/account/settings">Account settings</a><button type="button" onClick={() => void signOut()}>Sign out</button>
       </div>
-    </details> : <nav aria-label="Sign in"><a href="/login">Log in</a><a href="/signup">Sign up</a></nav>}
+    </details> : <nav aria-label="Sign in"><a href="/login">Sign in</a><a className="primary-link" href="/signup">Join PeerGit</a></nav>}
   </header>;
 }
