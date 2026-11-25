@@ -1,97 +1,121 @@
 import { SiteHeader } from "@/components/layout/site-header";
+import { SiteFooter } from "@/components/layout/site-footer";
 
 export default function InstitutesPage() {
   return (
     <>
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
       <SiteHeader />
-      <main id="main-content" className="page-container">
-        <section className="institute-banner">
-          <p className="eyebrow">PeerGit for institutes</p>
-          <h1>Give campus projects a trusted place to grow.</h1>
-          <p className="intro">
-            Verify affiliation, organize programs, and review authorized project
-            evidence inside a workspace scoped to your institution.
+      <main id="main-content" className="page-container" style={{ flex: 1, display: "flex", flexDirection: "column", gap: "48px" }}>
+        <section style={{ maxWidth: "48rem", display: "flex", flexDirection: "column", gap: "14px" }}>
+          <span className="t-label-md" style={{ color: "var(--link)" }}>
+            Institutional overview
+          </span>
+          <h1 className="t-headline-lg">
+            Verify affiliation, supervise academic work, and review authorized evidence.
+          </h1>
+          <p className="t-body-lg muted" style={{ margin: 0 }}>
+            Colleges operate a separate workspace scoped strictly to their tenant. PeerGit surfaces
+            verifiable snapshots and coverage gaps without productivity scores or automatic grades.
           </p>
-          <a className="primary-link" href="/campus/overview">
-            See the example campus workspace
-          </a>
-        </section>
-        <section className="content">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Designed for campus teams</p>
-              <h2>Support student work with clear context</h2>
-            </div>
-          </div>
-          <div className="steps">
-            <article>
-              <span>01 · AFFILIATION</span>
-              <h3>Verify campus membership</h3>
-              <p>
-                Students verify through a campus mailbox or an authorized
-                administrator review. GitHub identity remains a separate account
-                connection.
-              </p>
-            </article>
-            <article>
-              <span>02 · PROGRAMS</span>
-              <h3>Organize cohorts and projects</h3>
-              <p>
-                Course and cohort spaces group project work by an authorized
-                academic context when those phases are enabled.
-              </p>
-            </article>
-            <article>
-              <span>03 · EVIDENCE</span>
-              <h3>Review what is actually recorded</h3>
-              <p>
-                See source, receipt time, integrity and coverage. Missing linked
-                evidence stays visible as a gap, not a verdict.
-              </p>
-            </article>
-            <article>
-              <span>04 · PRIVACY</span>
-              <h3>Share only by permission</h3>
-              <p>
-                Students choose what appears in a showcase. Campus detail views
-                and exports require their own access grants.
-              </p>
-            </article>
+          <div style={{ paddingTop: "6px" }}>
+            <a className="primary-link" href="/campus/overview">
+              See the example campus workspace
+            </a>
           </div>
         </section>
-        <section className="panel">
-          <p className="eyebrow">Privacy by design</p>
-          <h2>Signals support a conversation; they do not grade a student.</h2>
-          <p className="muted">
-            PeerGit shows recorded commits, reviews, tasks and snapshots with
-            source and freshness. It does not generate productivity scores,
-            individual leaderboards or automatic grades. Authorized reviewers
-            consider off-platform work and context.
-          </p>
+
+        <section aria-label="Institutional workflow" className="pg-grid-4">
+          <article className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            <span className="t-label-sm" style={{ color: "var(--link)" }}>
+              1 · Verify affiliation
+            </span>
+            <h2 className="t-title-sm">Mailbox or admin review</h2>
+            <p className="t-body-sm muted" style={{ margin: 0 }}>
+              Confirm campus membership separately from personal GitHub accounts.
+            </p>
+          </article>
+          <article className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            <span className="t-label-sm" style={{ color: "var(--link)" }}>
+              2 · Organize programs
+            </span>
+            <h2 className="t-title-sm">Courses &amp; cohorts</h2>
+            <p className="t-body-sm muted" style={{ margin: 0 }}>
+              Group capstones, labs, and innovation programs by term.
+            </p>
+          </article>
+          <article className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            <span className="t-label-sm" style={{ color: "var(--link)" }}>
+              3 · Review evidence
+            </span>
+            <h2 className="t-title-sm">Exact-SHA receipts</h2>
+            <p className="t-body-sm muted" style={{ margin: 0 }}>
+              Inspect authorized snapshots with coverage and freshness labels.
+            </p>
+          </article>
+          <article className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            <span className="t-label-sm" style={{ color: "var(--link)" }}>
+              4 · Share outcomes
+            </span>
+            <h2 className="t-title-sm">Consented showcases</h2>
+            <p className="t-body-sm muted" style={{ margin: 0 }}>
+              Publish approved outcomes with small-group privacy suppression.
+            </p>
+          </article>
         </section>
-        <section className="panel">
-          <h2>What each institutional role can see</h2>
-          <dl>
-            <dt>
-              <strong>Campus administrator</strong>
-            </dt>
-            <dd>
-              Affiliation requests and campus administration within their
-              institution.
-            </dd>
-            <dt>
-              <strong>Faculty evaluator</strong>
-            </dt>
-            <dd>
-              Assigned cohorts and evidence they are authorized to review.
-            </dd>
-            <dt>
-              <strong>Public visitor</strong>
-            </dt>
-            <dd>Project presentations shared in the public showcase.</dd>
-          </dl>
+
+        <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <h2 className="t-title-lg">What each institutional role can see</h2>
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Role</th>
+                  <th>Permitted scope</th>
+                  <th>Explicit boundary</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style={{ fontWeight: 500 }}>Campus Administrator</td>
+                  <td className="muted">
+                    Affiliation queue, cohort aggregates, consented showcase editor
+                  </td>
+                  <td className="muted">
+                    Cannot read private source code or direct messages without grant
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ fontWeight: 500 }}>Faculty / Evaluator</td>
+                  <td className="muted">
+                    Assigned courses, submitted SHA receipts, qualitative feedback
+                  </td>
+                  <td className="muted">
+                    Scoped strictly to assigned cohorts and submission windows
+                  </td>
+                </tr>
+                <tr>
+                  <td style={{ fontWeight: 500 }}>Program Staff</td>
+                  <td className="muted">
+                    Program milestones, conflict-of-interest review queue, exports
+                  </td>
+                  <td className="muted">
+                    Small groups suppressed in both screen and CSV exports
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="t-body-sm muted" style={{ margin: 0 }}>
+            Signals support a conversation; they do not grade a student. Authorized reviewers
+            consider off-platform work and context alongside recorded commits, reviews, and
+            snapshots.
+          </p>
         </section>
       </main>
+      <SiteFooter />
     </>
   );
 }

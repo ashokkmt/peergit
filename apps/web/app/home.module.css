@@ -1,4 +1,184 @@
-.heroGrid { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr); gap:clamp(1.5rem,5vw,5rem); align-items:center; }
-.projectPreview { position:relative; border-color:var(--control); box-shadow:var(--shadow); }
-.projectPreview ul { padding-left:1.2rem; }
-@media (max-width:850px) { .heroGrid { grid-template-columns:minmax(0,1fr); } }
+.heroBand {
+  background: var(--surface);
+  border-bottom: 1px solid var(--hairline);
+  padding: 48px 0 64px;
+}
+
+@media (min-width: 768px) {
+  .heroBand {
+    padding: 72px 0;
+  }
+}
+
+.heroGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 40px;
+  align-items: center;
+}
+
+@media (min-width: 1024px) {
+  .heroGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 48px;
+  }
+}
+
+.heroCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.heroCard {
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-xl);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+@media (min-width: 640px) {
+  .heroCard {
+    padding: 24px;
+  }
+}
+
+.heroCardHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.heroDirectory {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.heroCommitRow {
+  background: var(--raised);
+  border-bottom: 1px solid var(--hairline);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.heroFileRow {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--hairline);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.heroFileRow:last-child {
+  border-bottom: 0;
+}
+
+.heroRoleRow {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sectionPad {
+  padding: 56px 0;
+}
+
+@media (min-width: 768px) {
+  .sectionPad {
+    padding: 72px 0;
+  }
+}
+
+.surfaceSection {
+  background: var(--surface);
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  padding: 56px 0;
+}
+
+@media (min-width: 768px) {
+  .surfaceSection {
+    padding: 72px 0;
+  }
+}
+
+.editorialItem {
+  border-top: 1px solid var(--hairline);
+  padding-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stepCard {
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.artifactCard {
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.instituteGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 32px;
+  align-items: center;
+}
+
+@media (min-width: 1024px) {
+  .instituteGrid {
+    grid-template-columns: 5fr 7fr;
+    gap: 48px;
+  }
+}
+
+.ctaBanner {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-xl);
+  padding: clamp(24px, 4vw, 48px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  align-items: center;
+}
+
+@media (min-width: 1024px) {
+  .ctaBanner {
+    grid-template-columns: 7fr 5fr;
+  }
+}

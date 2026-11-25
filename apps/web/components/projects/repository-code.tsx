@@ -69,6 +69,7 @@ export function RepositoryCode({
   const [selectedBranch, setSelectedBranch] = useState("");
   const [wrap, setWrap] = useState(false);
   const [copied, setCopied] = useState("");
+  const [fileQuery, setFileQuery] = useState("");
   const base = `/projects/${encodeURIComponent(projectID)}`;
   const api = `/api/v1${base}/repository`;
 
@@ -226,17 +227,21 @@ export function RepositoryCode({
 
   if (problem)
     return (
-      <section className="panel">
-        <h2>Code</h2>
-        <p role="alert">{problem}</p>
+      <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+        <h2 className="t-title-md">Code</h2>
+        <p className="form-error" role="alert" style={{ margin: 0 }}>
+          {problem}
+        </p>
         <div className="button-row">
           <button
-            className="secondary-button"
+            className="secondary-button pg-btn-compact"
             onClick={() => setRetry((value) => value + 1)}
           >
             Retry
           </button>
-          <a href={base}>Repository root</a>
+          <a className="t-label-md" href={base}>
+            Repository root
+          </a>
         </div>
       </section>
     );
@@ -246,7 +251,7 @@ export function RepositoryCode({
     ? data.path.split("/").slice(0, -1).join("/")
     : data.path;
   const prefix = folder ? folder + "/" : "";
-  const rows = data.entries
+  const folderRows = data.entries
     .filter(
       (entry) =>
         entry.path.startsWith(prefix) &&
@@ -258,73 +263,111 @@ export function RepositoryCode({
         Number(b.type === "tree") - Number(a.type === "tree") ||
         a.path.localeCompare(b.path),
     );
+  const matchingEntries = fileQuery.trim()
+    ? data.entries.filter((entry) =>
+        entry.path.toLowerCase().includes(fileQuery.trim().toLowerCase()),
+      )
+    : folderRows;
 
   return (
-    <section className="repository-code" aria-labelledby="code-title">
-      <div className="section-heading">
-        <div>
-          <h2 id="code-title">Code</h2>
-          <p>
-            {data.pinned ? "Pinned revision" : "Branch revision"}{" "}
-            <code className={styles.sha}>{data.sha}</code>
-          </p>
-        </div>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            window.location.assign(
-              `${base}?${new URLSearchParams({ tab: "code", ref: selectedBranch })}`,
-            );
-          }}
-        >
-          <label htmlFor="repository-ref">Branch</label>
-          <select
-            id="repository-ref"
-            value={selectedBranch}
-            onChange={(event) => setSelectedBranch(event.target.value)}
+    <section
+      className="repository-code"
+      aria-labelledby="code-title"
+      style={{ display: "flex", flexDirection: "column", gap: "18px", margin: 0 }}
+    >
+      <h2 id="code-title" className="sr-only">
+        Code
+      </h2>
+
+      {/* Code Toolbar */}
+      <div className="code-toolbar">
+        <div className="code-toolbar-left">
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              window.location.assign(
+                `${base}?${new URLSearchParams({ tab: "code", ref: selectedBranch })}`,
+              );
+            }}
           >
-            {!data.branches.some((item) => item.name === data.branch) && (
-              <option value={data.branch}>{data.branch}</option>
-            )}
-            {data.branches.map((item) => (
-              <option key={item.name}>{item.name}</option>
-            ))}
-          </select>
-          <button className="secondary-button" disabled={!selectedBranch}>
-            Go
-          </button>
-        </form>
-      </div>
-      <div className={`panel ${styles.commit}`}>
-        <div>
-          <strong>{data.commit?.title || "Branch tip"}</strong>
-          {data.tip && (
-            <p>
-              <code>{data.tip.slice(0, 12)}</code> {data.commit?.author_name}
-            </p>
-          )}
+            <label htmlFor="repository-ref" className="sr-only">
+              Branch
+            </label>
+            <select
+              id="repository-ref"
+              value={selectedBranch}
+              onChange={(event) => setSelectedBranch(event.target.value)}
+            >
+              {!data.branches.some((item) => item.name === data.branch) && (
+                <option value={data.branch}>{data.branch}</option>
+              )}
+              {data.branches.map((item) => (
+                <option key={item.name}>{item.name}</option>
+              ))}
+            </select>
+            <button className="secondary-button pg-btn-compact" disabled={!selectedBranch}>
+              Go
+            </button>
+          </form>
+
+          <span className="pg-pill pg-pill-raised t-mono-sm tabular-nums" title={data.sha}>
+            {data.pinned ? "Pinned revision" : "Branch revision"}: {data.sha.slice(0, 8)}
+          </span>
+          <span className="sr-only">{data.sha}</span>
         </div>
-        <a
-          href={`${base}?${new URLSearchParams({ tab: "activity", ...(data.branch && { ref: data.branch }) })}`}
-        >
-          Commit history
-        </a>
+
+        <div className="code-toolbar-right">
+          <label className="sr-only" htmlFor="find-file-input">
+            Find a file
+          </label>
+          <input
+            id="find-file-input"
+            type="search"
+            className="pg-input"
+            value={fileQuery}
+            onChange={(e) => setFileQuery(e.target.value)}
+            placeholder="Find a file…"
+            style={{ width: "auto", flex: "1 1 200px", minWidth: "160px", minHeight: "38px", padding: "6px 10px" }}
+          />
+          <button
+            type="button"
+            className="secondary-button pg-btn-compact"
+            onClick={() =>
+              void copy(
+                new URL(codeURL(data.path, true), window.location.origin).href,
+                "Permalink copied.",
+              )
+            }
+          >
+            Copy permalink
+          </button>
+        </div>
       </div>
+
       {data.truncated && (
-        <p role="status">Only part of this tree is available here.</p>
+        <p className="pg-callout" role="status">
+          Only part of this tree is available here.
+        </p>
       )}
+
+      {copied && (
+        <p className="t-body-sm" role="status" style={{ color: "var(--success)", margin: 0 }}>
+          {copied}
+        </p>
+      )}
+
       <div className="code-browser">
         <nav aria-label="Repository files">
-          <a href={codeURL("")}>Repository root</a>
+          <a href={codeURL("")} style={{ fontWeight: 600 }}>
+            Repository root
+          </a>
           {folder && (
-            <p>
-              <a href={codeURL(folder.split("/").slice(0, -1).join("/"))}>
-                Parent directory
-              </a>
-            </p>
+            <a href={codeURL(folder.split("/").slice(0, -1).join("/"))}>
+              ↑ Parent directory
+            </a>
           )}
           <ul>
-            {rows.map((entry) => (
+            {matchingEntries.slice(0, 80).map((entry) => (
               <li key={entry.path}>
                 <button
                   type="button"
@@ -332,82 +375,135 @@ export function RepositoryCode({
                   onClick={() => window.location.assign(codeURL(entry.path))}
                 >
                   <span aria-hidden="true">
-                    {entry.type === "tree" ? "▸" : "▤"}{" "}
+                    {entry.type === "tree" ? "▸" : "▤"}
                   </span>
-                  {entry.path.split("/").at(-1)}
+                  <span style={{ overflowWrap: "anywhere" }}>
+                    {fileQuery.trim() ? entry.path : entry.path.split("/").at(-1)}
+                  </span>
                 </button>
               </li>
             ))}
           </ul>
-          {!rows.length && <p>No files in this directory.</p>}
+          {!matchingEntries.length && (
+            <p className="t-body-sm muted" style={{ margin: "6px 0 0" }}>
+              No files match this filter.
+            </p>
+          )}
         </nav>
-        <article aria-label={data.path || "Repository directory"}>
+
+        <article className="code-reading-pane" aria-label={data.path || "Repository directory"}>
+          {/* Latest Commit Strip */}
+          <div className="commit-strip">
+            <div>
+              <strong className="t-body-md">{data.commit?.title || "Branch tip"}</strong>
+              {data.tip && (
+                <p className="t-body-sm muted" style={{ margin: "2px 0 0" }}>
+                  <code className="t-mono-sm">{data.tip.slice(0, 7)}</code>{" "}
+                  {data.commit?.author_name}
+                </p>
+              )}
+            </div>
+            <a
+              className="t-label-md"
+              href={`${base}?${new URLSearchParams({
+                tab: "activity",
+                ...(data.branch && { ref: data.branch }),
+              })}`}
+            >
+              Commit history
+            </a>
+          </div>
+
           {data.file ? (
-            <>
-              <a href={codeURL(folder)}>Back to files</a>
-              <h3 className={styles.sha}>{data.path}</h3>
-              <div className="button-row">
-                <button
-                  className="secondary-button"
-                  onClick={() =>
-                    void copy(
-                      new URL(codeURL(data.path, true), window.location.origin)
-                        .href,
-                      "Permalink copied.",
-                    )
-                  }
-                >
-                  Copy permalink
-                </button>
-                {data.content !== null && (
-                  <>
-                    <button
-                      className="secondary-button"
-                      onClick={() =>
-                        void copy(data.content ?? "", "File copied.")
-                      }
-                    >
-                      Copy file
-                    </button>
-                    <button
-                      className="secondary-button"
-                      aria-pressed={wrap}
-                      onClick={() => setWrap(!wrap)}
-                    >
-                      Wrap lines
-                    </button>
-                  </>
-                )}
+            <div className="code-file-box">
+              <div className="code-file-header">
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px" }}>
+                  <a className="t-label-md" href={codeURL(folder)}>
+                    ← Back to files
+                  </a>
+                  <h3 className={`t-mono-sm ${styles.sha}`} style={{ fontWeight: 600 }}>
+                    {data.path}
+                  </h3>
+                </div>
+                <div className="button-row">
+                  <button
+                    className="secondary-button pg-btn-compact"
+                    type="button"
+                    onClick={() =>
+                      void copy(
+                        new URL(codeURL(data.path, true), window.location.origin).href,
+                        "Permalink copied.",
+                      )
+                    }
+                  >
+                    Copy permalink
+                  </button>
+                  {data.content !== null && (
+                    <>
+                      <button
+                        className="secondary-button pg-btn-compact"
+                        type="button"
+                        onClick={() => void copy(data.content ?? "", "File copied.")}
+                      >
+                        Copy file
+                      </button>
+                      <button
+                        className="secondary-button pg-btn-compact"
+                        type="button"
+                        aria-pressed={wrap}
+                        onClick={() => setWrap(!wrap)}
+                      >
+                        Wrap lines
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
-              <p role="status">{copied}</p>
               {data.content !== null ? (
-                <pre tabIndex={0} className={wrap ? styles.wrapped : undefined}>
+                <pre
+                  tabIndex={0}
+                  className={wrap ? `code-pre ${styles.wrapped}` : "code-pre"}
+                >
                   {data.content}
                 </pre>
               ) : (
-                <p>
-                  {data.fileProblem ||
-                    "This file type or size cannot be previewed."}
+                <p className="t-body-md muted" style={{ padding: "16px", margin: 0 }}>
+                  {data.fileProblem || "This file type or size cannot be previewed."}
                 </p>
               )}
-            </>
+            </div>
           ) : (
             <>
-              <h3 className={styles.sha}>{folder || "Repository root"}</h3>
-              <ul>
-                {rows.map((entry) => (
-                  <li key={entry.path}>
+              <div className="dir-table">
+                <div
+                  className="dir-row"
+                  style={{ background: "var(--raised)", fontWeight: 600 }}
+                >
+                  <span className={styles.sha}>{folder || "Repository root"}</span>
+                  <span className="t-label-sm muted">{folderRows.length} entries</span>
+                </div>
+                {folderRows.map((entry) => (
+                  <div className="dir-row" key={entry.path}>
                     <a href={codeURL(entry.path)}>
+                      {entry.type === "tree" ? "📁 " : "📄 "}
                       {entry.path.split("/").at(-1)}
                     </a>
-                    {entry.type === "blob" && ` · ${entry.size} bytes`}
-                  </li>
+                    <span className="t-body-sm muted tabular-nums">
+                      {entry.type === "blob" ? `${entry.size} bytes` : "Directory"}
+                    </span>
+                  </div>
                 ))}
-              </ul>
+              </div>
+
               {data.readme !== null && (
-                <section>
-                  <h4>README at this revision</h4>
-                  <pre className={styles.wrapped}>{data.readme}</pre>
+                <section className="code-file-box">
+                  <div className="code-file-header">
+                    <h4 className="t-mono-sm" style={{ margin: 0, fontWeight: 600 }}>
+                      README at this revision
+                    </h4>
+                    <span className="t-label-sm muted">Sanitized preview</span>
+                  </div>
+                  <pre className={`readme-text ${styles.wrapped}`}>{data.readme}</pre>
                 </section>
               )}
             </>

@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { PreviewBadge } from "@/components/layout/preview-banner";
 
 type Envelope<T> = { data?: T; error?: { message?: string } };
 type Binding = {
@@ -50,14 +51,43 @@ type Data = {
   snapshots: Snapshot[];
 };
 
+function renderDiffLines(patch: string) {
+  return patch.split("\n").map((line, index) => {
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      return (
+        <span key={index} className="diff-line-add" aria-label="Added line">
+          {line}
+        </span>
+      );
+    }
+    if (line.startsWith("-") && !line.startsWith("---")) {
+      return (
+        <span key={index} className="diff-line-del" aria-label="Removed line">
+          {line}
+        </span>
+      );
+    }
+    if (line.startsWith("@@")) {
+      return (
+        <span key={index} className="diff-line-hunk">
+          {line}
+        </span>
+      );
+    }
+    return <span key={index} style={{ display: "block" }}>{line}</span>;
+  });
+}
+
 export function RepositoryOverview({
   projectID,
   csrf,
   tab = "code",
+  viewerRole = "",
 }: {
   projectID: string;
   csrf: string;
   tab?: string;
+  viewerRole?: string;
 }) {
   const [data, setData] = useState<Data>({
     repository: null,
@@ -73,12 +103,12 @@ export function RepositoryOverview({
     sha: string;
     files: { filename: string; patch?: string; status: string }[];
   } | null>(null);
+
   const api = useCallback(
     async <T,>(path: string, init?: RequestInit): Promise<T> => {
       const headers = new Headers(init?.headers);
       if (init?.body) headers.set("Content-Type", "application/json");
-      if (init?.method && init.method !== "GET")
-        headers.set("X-CSRF-Token", csrf);
+      if (init?.method && init.method !== "GET") headers.set("X-CSRF-Token", csrf);
       const r = await fetch(path, {
         ...init,
         headers,
@@ -89,12 +119,12 @@ export function RepositoryOverview({
         r.status === 204
           ? { data: undefined }
           : ((await r.json()) as Envelope<T>);
-      if (!r.ok)
-        throw new Error(v.error?.message ?? "Repository request failed.");
+      if (!r.ok) throw new Error(v.error?.message ?? "Repository request failed.");
       return v.data as T;
     },
     [csrf],
   );
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -104,24 +134,24 @@ export function RepositoryOverview({
       setData({ repository: null, contributions: [], snapshots: [] });
       setDiff(null);
       setProblem(
-        e instanceof Error
-          ? e.message
-          : "Repository evidence could not be loaded.",
+        e instanceof Error ? e.message : "Repository evidence could not be loaded.",
       );
     } finally {
       setLoading(false);
     }
   }, [api, projectID]);
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
   const [history, setHistory] = useState<Contribution[] | null>(null);
   const [historyProblem, setHistoryProblem] = useState("");
   useEffect(() => {
     if (tab !== "activity") return;
     const controller = new AbortController();
-    const ref = new URLSearchParams(location.search).get("ref");
-    const query = ref ? "?" + new URLSearchParams({ ref }) : "";
+    const branchRef = new URLSearchParams(location.search).get("ref");
+    const query = branchRef ? "?" + new URLSearchParams({ ref: branchRef }) : "";
     type Entry = {
       sha: string;
       commit: { message: string; author: { name: string; date: string } };
@@ -153,6 +183,7 @@ export function RepositoryOverview({
       });
     return () => controller.abort();
   }, [api, projectID, tab]);
+
   const commits =
     history ?? data.contributions.filter((item) => item.kind === "commit");
   const [selection, setSelection] = useState("");
@@ -163,6 +194,7 @@ export function RepositoryOverview({
       ) ?? "",
     );
   }, [tab]);
+
   async function capture(e: FormEvent) {
     e.preventDefault();
     if (!data.repository) return;
@@ -182,6 +214,7 @@ export function RepositoryOverview({
       setBusy(false);
     }
   }
+
   async function retry(id: string) {
     setBusy(true);
     try {
@@ -197,6 +230,7 @@ export function RepositoryOverview({
       setBusy(false);
     }
   }
+
   useEffect(() => {
     if (tab !== "activity" || !selection || !/^[a-f0-9]{40}$/.test(selection))
       return;
@@ -216,6 +250,7 @@ export function RepositoryOverview({
       });
     return () => controller.abort();
   }, [api, projectID, selection, tab]);
+
   const base = `/projects/${encodeURIComponent(projectID)}`;
   const providerURL =
     /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/.test(
@@ -223,34 +258,24 @@ export function RepositoryOverview({
     )
       ? data.repository?.html_url.replace(/\/$/, "")
       : undefined;
+
   return (
-    <section className="repository-panel" aria-label="Repository evidence">
-      {tab === "code" && (
-        <div className="repository-heading">
-          <div>
-            <p className="eyebrow">GitHub project</p>
-            <h2 id="repository-overview-title">Code</h2>
-          </div>
-          <button
-            className="secondary-button"
-            type="button"
-            disabled={loading || busy}
-            onClick={() => void refresh()}
-          >
-            Refresh
-          </button>
-        </div>
-      )}
+    <section
+      className="repository-panel"
+      aria-label="Repository evidence"
+      style={{ display: "flex", flexDirection: "column", gap: "20px" }}
+    >
       {problem && (
-        <p className="form-error" role="alert">
+        <p className="form-error" role="alert" style={{ margin: 0 }}>
           {problem}
         </p>
       )}
       {message && (
-        <p className="form-success" role="status">
+        <p className="form-success" role="status" style={{ margin: 0 }}>
           {message}
         </p>
       )}
+
       {loading ? (
         <p role="status">Loading repository…</p>
       ) : !data.repository ? (
@@ -263,115 +288,209 @@ export function RepositoryOverview({
       ) : (
         <>
           {tab === "code" && (
-            <>
-              <h3>
-                {providerURL ? (
-                  <a href={providerURL} target="_blank" rel="noreferrer">
-                    {data.repository.full_name} ↗
-                  </a>
-                ) : (
-                  data.repository.full_name
+            <div
+              className="pg-card"
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "16px",
+              }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px" }}>
+                  <strong className="t-title-sm">
+                    {providerURL ? (
+                      <a href={providerURL} target="_blank" rel="noreferrer">
+                        {data.repository.full_name} ↗
+                      </a>
+                    ) : (
+                      data.repository.full_name
+                    )}
+                  </strong>
+                  <span className="t-body-sm muted">
+                    {data.repository.access_state.replaceAll("_", " ")} · sync{" "}
+                    {data.repository.sync_health.replaceAll("_", " ")}
+                    {data.repository.last_synced_at
+                      ? ` · ${new Date(data.repository.last_synced_at).toLocaleString()}`
+                      : ""}
+                  </span>
+                </div>
+                <p className="t-body-sm muted" style={{ margin: 0 }}>
+                  {data.repository.description || "No repository description."} · Default branch:{" "}
+                  <code className="t-mono-sm">{data.repository.default_branch || "not set"}</code>
+                  {Object.keys(data.repository.languages).length > 0
+                    ? ` · Languages: ${Object.keys(data.repository.languages).join(", ")}`
+                    : ""}
+                </p>
+                {data.repository.limitations && (
+                  <p className="t-body-sm muted" style={{ margin: 0 }}>
+                    {data.repository.limitations}
+                  </p>
                 )}
-              </h3>
-              <p>
-                {data.repository.description || "No repository description."}
-              </p>
-              <p>
-                {data.repository.access_state.replaceAll("_", " ")} · sync{" "}
-                {data.repository.sync_health.replaceAll("_", " ")}
-                {data.repository.last_synced_at
-                  ? ` · ${new Date(data.repository.last_synced_at).toLocaleString()}`
-                  : ""}
-              </p>
-              <p>
-                Source access:{" "}
-                {data.repository.source_access === false
-                  ? "unavailable"
-                  : "authorized members"}{" "}
-                · Default branch: {data.repository.default_branch || "not set"}
-              </p>
-              {data.repository.topics.length > 0 && (
-                <ul className="skill-list">
-                  {data.repository.topics.map((t) => (
-                    <li key={t}>{t}</li>
-                  ))}
-                </ul>
-              )}
-              {Object.keys(data.repository.languages).length > 0 && (
-                <p>
-                  Languages: {Object.keys(data.repository.languages).join(", ")}
+              </div>
+              <button
+                className="secondary-button pg-btn-compact"
+                type="button"
+                disabled={loading || busy}
+                onClick={() => void refresh()}
+              >
+                Refresh
+              </button>
+            </div>
+          )}
+
+          {tab === "activity" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                }}
+              >
+                <div>
+                  <h2 className="t-title-lg">Commit activity</h2>
+                  <p className="t-body-sm muted" style={{ margin: "4px 0 0" }}>
+                    Commit records are observations from the connected GitHub repository. Unmatched
+                    authors stay unlinked.
+                  </p>
+                </div>
+                <div className="button-row">
+                  <a className="secondary-button pg-btn-compact" href={`${base}?tab=issues`}>
+                    Observed issues
+                  </a>
+                  <a
+                    className="secondary-button pg-btn-compact"
+                    href={`${base}?tab=pull-requests`}
+                  >
+                    Observed pull requests
+                  </a>
+                </div>
+              </div>
+
+              {historyProblem && (
+                <p className="pg-callout" role="status">
+                  {historyProblem}
                 </p>
               )}
-              <p className="repository-limits">{data.repository.limitations}</p>
-            </>
-          )}
-          {tab === "activity" && (
-            <>
-              <h2>Commit activity</h2>
-              <div className="button-row">
-                <a href={`${base}?tab=issues`}>Observed issues</a>
-                <a href={`${base}?tab=pull-requests`}>Observed pull requests</a>
-              </div>
-              <p className="muted">
-                Commit records are observations from the connected GitHub
-                repository. Unmatched authors stay unlinked.
-              </p>
-              {historyProblem && <p role="status">{historyProblem}</p>}
-              {commits.length ? (
-                <ul className="repository-activity">
-                  {commits.map((c) => (
-                    <li key={c.id}>
-                      <div>
-                        <button
-                          className="text-button"
-                          type="button"
-                          onClick={() =>
-                            location.assign(
-                              `${base}?${new URLSearchParams({ tab: "activity", commit: c.canonical_id.replace(/^git:sha1:/, ""), ...(new URLSearchParams(location.search).get("ref") && { ref: new URLSearchParams(location.search).get("ref")! }) })}`,
-                            )
-                          }
+
+              <div className="split-layout">
+                <div className="split-list-panel">
+                  <div
+                    style={{
+                      padding: "12px 16px",
+                      borderBottom: "1px solid var(--hairline)",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <span className="t-title-sm">Commits</span>
+                    <span className="t-label-sm muted">{commits.length} observed</span>
+                  </div>
+                  {commits.length ? (
+                    <div className="list-rail">
+                      {commits.map((c) => {
+                        const sha = c.canonical_id.replace(/^git:sha1:/, "");
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            className="list-item"
+                            aria-current={selection === sha ? "true" : undefined}
+                            onClick={() =>
+                              location.assign(
+                                `${base}?${new URLSearchParams({
+                                  tab: "activity",
+                                  commit: sha,
+                                  ...(new URLSearchParams(location.search).get("ref") && {
+                                    ref: new URLSearchParams(location.search).get("ref")!,
+                                  }),
+                                })}`,
+                              )
+                            }
+                            style={{ cursor: "pointer", borderRight: 0, borderTop: 0 }}
+                          >
+                            <strong className="t-body-md" style={{ display: "block" }}>
+                              {c.title || c.canonical_id}
+                            </strong>
+                            <small>
+                              {c.author_name || c.author_login || "Unlinked GitHub account"} ·{" "}
+                              <code className="t-mono-sm">{sha.slice(0, 7)}</code> ·{" "}
+                              {c.occurred_at
+                                ? new Date(c.occurred_at).toLocaleDateString()
+                                : "Date unavailable"}
+                            </small>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="t-body-md muted" style={{ padding: "16px", margin: 0 }}>
+                      Commit evidence has not synced yet.
+                    </p>
+                  )}
+                </div>
+
+                <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "16px" }}>
+                  {diff ? (
+                    <>
+                      <div
+                        className="pg-card"
+                        style={{
+                          display: "flex",
+                          flexWrap: "wrap",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "12px",
+                        }}
+                      >
+                        <div>
+                          <h3 className="t-title-md">Commit {diff.sha.slice(0, 12)}</h3>
+                          <p className="t-body-sm muted" style={{ margin: "4px 0 0" }}>
+                            {diff.files.length} {diff.files.length === 1 ? "file" : "files"} changed
+                          </p>
+                        </div>
+                        <a
+                          className="secondary-button pg-btn-compact"
+                          href={`${base}?tab=code&sha=${diff.sha}`}
                         >
-                          {c.title || c.canonical_id}
-                        </button>
-                        <p>
-                          {c.author_name ||
-                            c.author_login ||
-                            "Unlinked GitHub account"}
-                        </p>
-                        {c.summary && <p>{c.summary}</p>}
+                          Browse tree at SHA
+                        </a>
                       </div>
-                      <time>
-                        {c.occurred_at
-                          ? new Date(c.occurred_at).toLocaleString()
-                          : "Date unavailable"}
-                      </time>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p>Commit evidence has not synced yet.</p>
-              )}
-              {diff && (
-                <section className="account-form">
-                  <h3>Commit {diff.sha.slice(0, 12)}</h3>
-                  <a href={`${base}?tab=code&sha=${diff.sha}`}>
-                    Browse this revision
-                  </a>
-                  {diff.files.map((file) => (
-                    <article key={file.filename}>
-                      <h4>
-                        {file.filename} · {file.status}
-                      </h4>
-                      <pre className="readme-text">
-                        {file.patch ||
-                          "Diff omitted by GitHub for a binary or large file."}
-                      </pre>
-                    </article>
-                  ))}
-                </section>
-              )}
-            </>
+
+                      {diff.files.map((file) => (
+                        <article key={file.filename} className="code-file-box">
+                          <div className="code-file-header">
+                            <code className="t-mono-sm" style={{ fontWeight: 600 }}>
+                              {file.filename}
+                            </code>
+                            <span className="t-label-sm muted">{file.status} · Unified diff</span>
+                          </div>
+                          <pre className="code-pre">
+                            {file.patch
+                              ? renderDiffLines(file.patch)
+                              : "Diff omitted by GitHub for a binary or large file."}
+                          </pre>
+                        </article>
+                      ))}
+                    </>
+                  ) : (
+                    <div className="pg-card">
+                      <p className="t-body-md muted" style={{ margin: 0 }}>
+                        Select a commit from the history list to inspect changed files and diffs.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
+
           {(tab === "issues" || tab === "pull-requests") &&
             (() => {
               const isIssue = tab === "issues";
@@ -381,198 +500,307 @@ export function RepositoryOverview({
               const selected = records.find((item) => item.id === selection);
               const label = isIssue ? "Issues" : "Pull requests";
               return (
-                <>
-                  <div className="repository-heading">
-                    <h2>{label}</h2>
+                <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+                  <div className="section-heading" style={{ marginBottom: 0 }}>
+                    <div>
+                      <h2 className="t-title-lg">{label}</h2>
+                      <p className="t-body-sm muted" style={{ margin: "4px 0 0" }}>
+                        PeerGit displays synchronized summaries. Open GitHub for the complete record
+                        and to make changes.
+                      </p>
+                    </div>
                     {providerURL && (
                       <a
-                        className="secondary-button"
+                        className="secondary-button pg-btn-compact"
                         href={providerURL + (isIssue ? "/issues" : "/pulls")}
                       >
                         Open on GitHub ↗
                       </a>
                     )}
                   </div>
-                  <p className="muted">
-                    PeerGit displays synchronized summaries. Open GitHub for the
-                    complete record and to make changes.
-                  </p>
+
                   {selection && !selected && (
-                    <p role="status">
+                    <p className="pg-callout" role="status">
                       This record is unavailable in the current observations.
                     </p>
                   )}
+
                   <div className="split-layout">
-                    <nav className="list-rail" aria-label={label}>
+                    <nav className="split-list-panel list-rail" aria-label={label}>
                       {records.map((item) => (
                         <a
                           key={item.id}
                           className="list-item"
-                          aria-current={
-                            selected?.id === item.id ? "true" : undefined
-                          }
-                          href={
-                            base +
-                            "?" +
-                            new URLSearchParams({ tab, item: item.id })
-                          }
+                          aria-current={selected?.id === item.id ? "true" : undefined}
+                          href={base + "?" + new URLSearchParams({ tab, item: item.id })}
                         >
-                          {item.number ? "#" + item.number + " " : ""}
-                          {item.title || "Title unavailable"}
-                          <small>{item.state || "State unavailable"}</small>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", marginBottom: "4px" }}>
+                            <span className="t-mono-sm muted">
+                              {item.number ? `#${item.number}` : ""}
+                            </span>
+                            <span className="pg-pill pg-pill-success">
+                              {item.state || "State unavailable"}
+                            </span>
+                          </div>
+                          <strong className="t-title-sm" style={{ display: "block" }}>
+                            {item.title || "Title unavailable"}
+                          </strong>
                         </a>
                       ))}
                       {!records.length && (
-                        <p>No synchronized summaries available.</p>
+                        <p className="t-body-md muted" style={{ padding: "16px", margin: 0 }}>
+                          No synchronized summaries available.
+                        </p>
                       )}
                     </nav>
-                    {selected && (
-                      <article className="panel">
-                        <p className="eyebrow">
-                          {selected.state || "State unavailable"}
-                        </p>
-                        <h3>{selected.title || "Title unavailable"}</h3>
-                        <p className="record-summary">
-                          {selected.summary || "Summary unavailable."}
-                        </p>
-                        <p className="muted">
-                          Observed{" "}
-                          {selected.observed_at
-                            ? new Date(selected.observed_at).toLocaleString()
-                            : "at an unknown time"}
-                          .
-                        </p>
-                        {providerURL && selected.number && (
-                          <a
-                            href={
-                              providerURL +
-                              (isIssue ? "/issues/" : "/pull/") +
-                              selected.number
-                            }
+
+                    <div style={{ minWidth: 0 }}>
+                      {selected ? (
+                        <article className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexWrap: "wrap",
+                              alignItems: "flex-start",
+                              justifyContent: "space-between",
+                              gap: "12px",
+                              paddingBottom: "14px",
+                              borderBottom: "1px solid var(--hairline)",
+                            }}
                           >
-                            Open record on GitHub ↗
-                          </a>
-                        )}
-                      </article>
-                    )}
+                            <div>
+                              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px" }}>
+                                <span className="pg-pill pg-pill-success">
+                                  {selected.state || "State unavailable"} · GitHub{" "}
+                                  {isIssue ? "Issue" : "PR"}
+                                  {selected.number ? ` #${selected.number}` : ""}
+                                </span>
+                                <span className="t-label-sm muted">
+                                  {isIssue
+                                    ? "Repository issue (distinct from Project tasks)"
+                                    : "Synchronized pull request observation"}
+                                </span>
+                              </div>
+                              <h3 className="t-title-lg" style={{ marginTop: "8px" }}>
+                                {selected.title || "Title unavailable"}
+                              </h3>
+                            </div>
+                            {providerURL && selected.number && (
+                              <a
+                                className="secondary-button pg-btn-compact"
+                                href={
+                                  providerURL +
+                                  (isIssue ? "/issues/" : "/pull/") +
+                                  selected.number
+                                }
+                              >
+                                Open record on GitHub ↗
+                              </a>
+                            )}
+                          </div>
+
+                          <p className="t-body-md record-summary" style={{ margin: 0 }}>
+                            {selected.summary || "Summary unavailable."}
+                          </p>
+                          <p className="t-body-sm muted" style={{ margin: 0 }}>
+                            Observed{" "}
+                            {selected.observed_at
+                              ? new Date(selected.observed_at).toLocaleString()
+                              : "at an unknown time"}
+                            .
+                          </p>
+
+                          <div className="pg-callout" style={{ flexDirection: "column", gap: "6px" }}>
+                            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "8px", width: "100%" }}>
+                              <strong className="t-label-md" style={{ color: "var(--link)" }}>
+                                {isIssue
+                                  ? "Qualified Pilot Preview (Native Issue Composer)"
+                                  : "Qualified Pilot Preview (Native PR Review & Merge)"}
+                              </strong>
+                              <PreviewBadge phase="Stage B1" />
+                            </div>
+                            <span>
+                              {isIssue
+                                ? "For PeerGit-hosted repositories, team members can reply, label, and close/reopen issues directly here."
+                                : "Native Conversation, Commits, Changes diff, and branch-protected merge rules activate in Stage B1."}
+                            </span>
+                          </div>
+                        </article>
+                      ) : (
+                        <div className="pg-card">
+                          <p className="t-body-md muted" style={{ margin: 0 }}>
+                            Select an item from the list to inspect its synchronized summary and
+                            upstream GitHub link.
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </>
+                </div>
               );
             })()}
+
           {tab === "security" && (
-            <>
-              <p className="eyebrow">Access and source protection</p>
-              <h2>Security</h2>
-              <div className="notice">
-                PeerGit does not run hosted Actions, source scans or dependency
-                alerts. Source remains governed by GitHub access. Project
-                publication never changes repository visibility.
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              <div>
+                <p className="eyebrow">Access and source protection</p>
+                <h2 className="t-title-lg">Security</h2>
               </div>
-              <div className="feature-grid" style={{ marginTop: "1rem" }}>
-                <article className="feature-card">
-                  <h3>Provider authority</h3>
-                  <p>
-                    {data.repository?.full_name ?? "Repository"} ·{" "}
-                    {data.repository?.sync_health?.replaceAll("_", " ") ??
-                      "status unavailable"}
-                  </p>
-                  <p className="muted">
+
+              <div className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                  <h3 className="t-title-md">Repository access</h3>
+                  <span className="t-label-sm muted">
                     Last observed{" "}
-                    {data.repository?.last_synced_at
-                      ? new Date(
-                          data.repository.last_synced_at,
-                        ).toLocaleString()
+                    {data.repository.last_synced_at
+                      ? new Date(data.repository.last_synced_at).toLocaleString()
                       : "time unavailable"}
-                    .
-                  </p>
-                </article>
-                <article className="feature-card">
-                  <h3>Project audience</h3>
-                  <p>
-                    PeerGit’s project presentation has its own visibility
-                    setting. Private source and snapshots stay limited to
-                    authorized project members.
-                  </p>
-                </article>
-                <article className="feature-card">
-                  <h3>Repository controls</h3>
-                  <p>
-                    Default branch protection and repository credentials are
-                    managed with GitHub and your account connection.
-                  </p>
-                  <a href="/account/github">Review GitHub connection →</a>
-                </article>
-              </div>
-            </>
-          )}
-          {tab === "snapshots" && (
-            <>
-              <h2>Immutable snapshots</h2>
-              <form className="repository-capture" onSubmit={capture}>
-                <label htmlFor="snapshot-ref">
-                  Record a snapshot of a branch, tag, or commit
-                </label>
-                <div>
-                  <input
-                    id="snapshot-ref"
-                    value={ref}
-                    onChange={(e) => setRef(e.target.value)}
-                    maxLength={255}
-                    required
-                  />
-                  <button
-                    className="primary-button"
-                    disabled={busy || data.repository.access_state !== "active"}
-                  >
-                    Capture
-                  </button>
+                  </span>
                 </div>
-              </form>
-              {data.snapshots.length ? (
-                <ul className="repository-snapshots">
-                  {data.snapshots.map((s) => (
-                    <li key={s.id}>
-                      <div>
-                        <strong>{s.state.replaceAll("_", " ")}</strong>
-                        <p>
-                          {s.ref} → <code>{s.commit_sha}</code> ·{" "}
-                          {new Date(s.receipt_at).toLocaleString()}
-                          {s.failure_code ? ` · ${s.failure_code}` : ""}
-                        </p>
-                        {s.archive_sha256 && (
-                          <p className="record-summary">
-                            Archive SHA-256 <code>{s.archive_sha256}</code>
-                          </p>
-                        )}
-                      </div>
-                      <div className="snapshot-actions">
-                        {s.state === "verified" &&
-                          data.repository?.source_access !== false && (
-                            <a
-                              className="secondary-button"
-                              href={`/api/v1/projects/${projectID}/repository/snapshots/${s.id}/download`}
+
+                <div className="pg-grid-3">
+                  <div className="pg-card-canvas">
+                    <span className="t-label-sm muted">Provider authority</span>
+                    <strong className="t-title-sm" style={{ display: "block", marginTop: "4px", color: "var(--success)" }}>
+                      {data.repository.full_name} · {data.repository.sync_health.replaceAll("_", " ")}
+                    </strong>
+                  </div>
+                  <div className="pg-card-canvas">
+                    <span className="t-label-sm muted">Effective role</span>
+                    <strong className="t-title-sm" style={{ display: "block", marginTop: "4px" }}>
+                      {viewerRole || "Project member"}
+                    </strong>
+                  </div>
+                  <div className="pg-card-canvas">
+                    <span className="t-label-sm muted">Source access</span>
+                    <strong className="t-title-sm" style={{ display: "block", marginTop: "4px" }}>
+                      {data.repository.source_access === false
+                        ? "Unavailable"
+                        : "Authorized members"}
+                    </strong>
+                  </div>
+                </div>
+
+                <p className="t-body-sm muted" style={{ margin: 0 }}>
+                  Default branch protection and repository credentials are managed with GitHub and
+                  your account connection. Project publication never changes repository visibility.
+                </p>
+
+                <div className="button-row">
+                  <a className="t-label-md" href="/account/github">
+                    Review GitHub connection →
+                  </a>
+                  {providerURL && (
+                    <a className="t-label-md" href={`${providerURL}/settings`}>
+                      Open GitHub repository settings ↗
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              <div className="pg-callout">
+                <span>
+                  PeerGit does not run hosted Actions, source scans or dependency alerts. Source
+                  remains governed by GitHub access.
+                </span>
+              </div>
+            </div>
+          )}
+
+          {tab === "snapshots" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              <div className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                <div>
+                  <h2 className="t-title-lg">Immutable snapshots</h2>
+                  <p className="t-body-sm muted" style={{ margin: "4px 0 0" }}>
+                    Snapshots pin an exact 40-character SHA. Timing (receipt) and integrity (archive
+                    verified) are tracked separately.
+                  </p>
+                </div>
+
+                <form className="repository-capture" onSubmit={capture}>
+                  <label htmlFor="snapshot-ref">
+                    Record a snapshot of a branch, tag, or commit
+                  </label>
+                  <div>
+                    <input
+                      id="snapshot-ref"
+                      value={ref}
+                      onChange={(e) => setRef(e.target.value)}
+                      maxLength={255}
+                      required
+                    />
+                    <button
+                      className="primary-button"
+                      disabled={busy || data.repository.access_state !== "active"}
+                    >
+                      Capture
+                    </button>
+                  </div>
+                </form>
+
+                {data.snapshots.length ? (
+                  <ul className="repository-snapshots">
+                    {data.snapshots.map((s) => (
+                      <li key={s.id}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px" }}>
+                            <strong className="t-title-sm">
+                              {s.state.replaceAll("_", " ")}
+                            </strong>
+                            <span
+                              className={`pg-pill ${
+                                s.state === "verified" ? "pg-pill-success" : "pg-pill-warning"
+                              }`}
                             >
-                              Download
-                            </a>
+                              {s.state === "verified"
+                                ? "Archive verified"
+                                : s.state.replaceAll("_", " ")}
+                            </span>
+                          </div>
+                          <p className="t-body-sm muted" style={{ margin: 0 }}>
+                            {s.ref} → <code className="t-mono-sm">{s.commit_sha}</code> ·{" "}
+                            {new Date(s.receipt_at).toLocaleString()}
+                            {s.failure_code ? ` · ${s.failure_code}` : ""}
+                          </p>
+                          {s.archive_sha256 && (
+                            <p className="t-body-sm muted record-summary" style={{ margin: 0 }}>
+                              Archive SHA-256{" "}
+                              <code className="t-mono-sm">{s.archive_sha256}</code>
+                            </p>
                           )}
-                        {s.retry_available && (
-                          <button
-                            className="secondary-button"
-                            type="button"
-                            onClick={() => void retry(s.id)}
-                            disabled={busy}
-                          >
-                            Retry same SHA
-                          </button>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p>No snapshots yet.</p>
-              )}
-            </>
+                        </div>
+                        <div className="snapshot-actions">
+                          {s.state === "verified" &&
+                            data.repository?.source_access !== false && (
+                              <a
+                                className="secondary-button pg-btn-compact"
+                                href={`/api/v1/projects/${projectID}/repository/snapshots/${s.id}/download`}
+                              >
+                                Download
+                              </a>
+                            )}
+                          {s.retry_available && (
+                            <button
+                              className="secondary-button pg-btn-compact"
+                              type="button"
+                              onClick={() => void retry(s.id)}
+                              disabled={busy}
+                            >
+                              Retry same SHA
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="t-body-md muted" style={{ margin: 0 }}>
+                    No snapshots yet.
+                  </p>
+                )}
+              </div>
+            </div>
           )}
         </>
       )}

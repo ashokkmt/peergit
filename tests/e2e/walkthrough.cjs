@@ -48,9 +48,15 @@ const { chromium } = require('playwright');
   try {
     for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }, { width: 320, height: 700 }]) {
       const page = await browser.newPage({ viewport });
+      let publicItems = [];
       await page.route('**/readyz', route => route.fulfill({ status: 200, headers: { 'X-Request-ID': 'phase1-browser-check' }, body: '{}' }));
       await page.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: false } }) }));
-      await page.route('**/api/v1/projects**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [], next_cursor: '' } }) }));
+      await page.route('**/api/v1/projects**', route => {
+        const term = new URL(route.request().url()).searchParams.get('q') || '';
+        const items = term ? publicItems.filter(item => item.title.toLowerCase().includes(term.toLowerCase())) : publicItems;
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items, next_cursor: '' } }) });
+      });
+      await page.emulateMedia({ colorScheme: 'light' });
       await page.goto(baseURL);
       assert.equal(await page.evaluate(() => window.innerWidth), viewport.width);
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'horizontal overflow');
@@ -60,22 +66,29 @@ const { chromium } = require('playwright');
       await page.keyboard.press('Enter');
       assert.equal(await page.evaluate(() => location.hash), '#main-content');
       await page.getByRole('heading', { name: /Build something\s*worth sharing/ }).waitFor();
-      const appearance = page.getByRole('combobox', { name: 'Appearance' });
-      for (const theme of ['dark', 'light', 'system']) {
-        if (theme === 'system') await page.emulateMedia({ colorScheme: 'dark' });
-        await appearance.selectOption(theme);
-        const expected = theme === 'system' ? 'dark' : theme;
-        await page.waitForFunction(expected => document.querySelector('link[rel=manifest]').getAttribute('href') === '/manifest-' + expected + '.json', expected);
-        assert.equal(await page.locator('link[rel=icon]').getAttribute('href'), '/icons/favicon-' + expected + '.ico');
-        const selectedManifest = await page.request.get(baseURL + '/manifest-' + expected + '.json');
-        assert.equal(selectedManifest.ok(), true);
-        assert.equal((await selectedManifest.json()).icons[0].src, '/icons/icon-192-' + expected + '.png');
-        await page.reload();
-        await page.waitForFunction(theme => (document.documentElement.dataset.theme || 'system') === theme, theme);
-      }
+      assert.equal(await page.evaluate(() => document.documentElement.dataset.theme || 'system'), 'system');
+      assert.equal(await page.getByRole('combobox', { name: 'Appearance' }).count(), 0, 'direct pages should use theme toggle button instead of dropdown');
+      const toggle = page.getByRole('button', { name: 'Toggle color theme' });
+      await toggle.click();
+      await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+      await page.waitForFunction(() => document.querySelector('link[rel=manifest]').getAttribute('href') === '/manifest-dark.json');
+      assert.equal(await page.locator('link[rel=icon]').getAttribute('href'), '/icons/favicon-dark.ico');
+      await page.reload();
+      await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+      await toggle.click();
+      await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
+      await page.waitForFunction(() => document.querySelector('link[rel=manifest]').getAttribute('href') === '/manifest-light.json');
+      assert.equal(await page.locator('link[rel=icon]').getAttribute('href'), '/icons/favicon-light.ico');
+      const selectedManifest = await page.request.get(baseURL + '/manifest-light.json');
+      assert.equal(selectedManifest.ok(), true);
+      assert.equal((await selectedManifest.json()).icons[0].src, '/icons/icon-192-light.png');
       const readyStatus = page.locator('.service-status');
       await readyStatus.getByText('Local API is ready').waitFor();
       assert.match(await readyStatus.textContent(), /Request ID: phase1-browser-check/);
+      await page.getByRole('heading', { name: 'Be the first to share a public project' }).waitFor();
+      assert.equal(await page.getByRole('searchbox', { name: 'Search projects' }).count(), 0, 'homepage hides search when zero public projects exist');
+      publicItems = [{ id: 'sample-pub', title: 'Campus Transit Board', summary: 'Live arrivals', project_type: 'civic_campus', visibility: 'public', recruiting: true, skills: ['Go'] }];
+      await page.reload();
       const search = page.getByRole('searchbox', { name: 'Search projects' });
       await search.fill('robotics');
       await page.getByRole('button', { name: 'Search' }).click();
@@ -83,13 +96,29 @@ const { chromium } = require('playwright');
       await page.close();
       console.log(`Walkthrough passed at ${viewport.width} × ${viewport.height}`);
     }
+    const settingsTheme = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await settingsTheme.emulateMedia({ colorScheme: 'dark' });
+    await settingsTheme.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: false } }) }));
+    await settingsTheme.goto(`${baseURL}/account/settings`);
+    const appearance = settingsTheme.getByRole('combobox', { name: 'Appearance' });
+    for (const theme of ['dark', 'light', 'system']) {
+      await appearance.selectOption(theme);
+      const expected = theme === 'system' ? 'dark' : theme;
+      await settingsTheme.waitForFunction(expected => document.querySelector('link[rel=manifest]').getAttribute('href') === '/manifest-' + expected + '.json', expected);
+      await settingsTheme.reload();
+      await settingsTheme.waitForFunction(theme => (document.documentElement.dataset.theme || 'system') === theme, theme);
+    }
+    await settingsTheme.close();
+
     const unavailable = await browser.newPage();
     await unavailable.route('**/readyz', route => route.fulfill({ status: 503, headers: { 'X-Request-ID': 'phase1-unavailable-check' }, body: '{}' }));
     await unavailable.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: false } }) }));
+    await unavailable.route('**/api/v1/projects**', route => route.fulfill({ status: 502, contentType: 'text/html', body: '<!DOCTYPE html><html><body>Bad Gateway</body></html>' }));
     await unavailable.goto(baseURL);
     const unavailableStatus = unavailable.locator('.service-status');
     await unavailableStatus.getByText('The API is unavailable. You can still explore this preview.').waitFor();
     assert.match(await unavailableStatus.textContent(), /Request ID: phase1-unavailable-check/);
+    await unavailable.getByRole('alert').getByText("Couldn't fetch public projects right now").waitFor();
     await unavailable.close();
     console.log('Service-unavailable state passed');
 
@@ -124,7 +153,8 @@ const { chromium } = require('playwright');
     await accountMenu.route('**/api/v1/projects**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [] } }) }));
     await accountMenu.goto(baseURL);
     assert.equal(await accountMenu.getByRole('button', { name: /Create project/i }).count(), 0, 'homepage must not expose repository-free project creation');
-    assert.equal(await accountMenu.locator('input').count(), 1, 'homepage should only expose the project search field');
+    assert.equal(await accountMenu.locator('input').count(), 0, 'homepage should hide project search when zero public projects exist');
+    await accountMenu.getByRole('link', { name: 'Add your project' }).waitFor();
     const menuSummary = accountMenu.locator('.account-menu summary');
     await menuSummary.click();
     for (const label of ['Profile', 'My projects', 'GitHub connection', 'Account settings']) {
