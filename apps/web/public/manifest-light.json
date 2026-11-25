@@ -1,6 +1,9 @@
 {
   "name": "PeerGit",
   "short_name": "peergit",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
   "icons": [
     {
       "src": "/icons/icon-192-light.png",

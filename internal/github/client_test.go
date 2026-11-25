@@ -210,6 +210,22 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+func TestBranchCommitsScopesAndBoundsProviderHistory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/campus/demo/commits" || r.URL.Query().Get("sha") != "feature/shuttle" || r.URL.Query().Get("per_page") != "30" {
+			t.Errorf("unexpected history request: %s", r.URL)
+		}
+		_, _ = io.WriteString(w, `[{"sha":"0123456789abcdef0123456789abcdef01234567","commit":{"message":"Update routes"}}]`)
+	}))
+	defer server.Close()
+	client := New()
+	client.API = server.URL
+	items, err := client.BranchCommits(context.Background(), "campus/demo", "test-token", "feature/shuttle")
+	if err != nil || len(items) != 1 || items[0].Commit.Message != "Update routes" {
+		t.Fatalf("history = %+v, err = %v", items, err)
+	}
+}
+
 func TestArchivePinsSHAAndDoesNotForwardToken(t *testing.T) {
 	sha := strings.Repeat("a", 40)
 	calls := 0

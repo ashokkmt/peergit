@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"peergit/internal/platform/storage"
 	"peergit/internal/project"
 	"peergit/internal/recruitment"
+	"peergit/internal/repository"
 	"peergit/migrations"
 )
 
@@ -72,7 +74,16 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 	recruitmentHandler := recruitment.NewHandler(pool, auth, logger, errs)
 	mediaHandler := media.NewHandler(pool, storage.New("http://127.0.0.1:1", "test", "us-east-1", "key", "secret"), auth, errs)
 	campusHandler := campus.NewHandler(pool, auth, "http://peergit.test", errs, string(key), "phase3 delivery encryption secret")
-	router := httpserver.NewRouter(health.NewHandler(logger, errs, pool), logger, errs, auth.Register, campusHandler.Register, mediaHandler.Register, projectHandler.Register, recruitmentHandler.Register)
+	archiveStore := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/test/example.tar.gz" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte("fixture archive bytes"))
+	}))
+	defer archiveStore.Close()
+	repositoryHandler := repository.NewHandler(pool, auth, nil, storage.New(archiveStore.URL, "test", "us-east-1", "fixture-key", "fixture-secret"), repository.AppConfig{}, logger, errs)
+	router := httpserver.NewRouter(health.NewHandler(logger, errs, pool), logger, errs, auth.Register, campusHandler.Register, mediaHandler.Register, projectHandler.Register, recruitmentHandler.Register, repositoryHandler.Register)
 	loadCSRF := func(actor string) {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, "http://peergit.test/api/v1/session", nil)
@@ -188,6 +199,45 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 		t.Fatal(err)
 	}
 	publicProjectID := seedImportedProject("phase3-public", "Public project", "A public preview", "public", "active", 930003)
+	if _, err := pool.Exec(ctx, `
+		WITH example AS (
+			INSERT INTO contributions(college_id,repository_id,kind,canonical_id,title)
+			SELECT college_id,id,'issue','github:930003:issue:19','Example observed issue' FROM repositories WHERE project_id=$1
+			RETURNING id,repository_id,college_id
+		)
+		INSERT INTO contribution_observations(college_id,repository_id,binding_id,contribution_id,observation_hash,data)
+		SELECT e.college_id,e.repository_id,b.id,e.id,decode(repeat('00',32),'hex'),'{"number":19,"state":"open"}'::jsonb
+		FROM example e JOIN repository_bindings b ON b.repository_id=e.repository_id AND b.college_id=e.college_id AND b.is_current`, publicProjectID); err != nil {
+		t.Fatal(err)
+	}
+	repositoryPath := "/api/v1/projects/" + publicProjectID + "/repository"
+	repositoryView := call("lead", http.MethodGet, repositoryPath, "", http.StatusOK)
+	if !strings.Contains(repositoryView.Body.String(), `"number":19`) || !strings.Contains(repositoryView.Body.String(), `"source_access":true`) {
+		t.Fatalf("authorized repository projection omitted the observed issue or access status: %s", repositoryView.Body.String())
+	}
+	call("applicant", http.MethodGet, repositoryPath, "", http.StatusNotFound)
+	var snapshotID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO repository_snapshots(college_id,project_id,repository_id,binding_id,requested_by,idempotency_key,request_hash,requested_ref,commit_sha,membership_snapshot,state,object_key,archive_bytes,archive_sha256,verified_at)
+		SELECT r.college_id,r.project_id,r.id,b.id,$2,'sample-download',decode(repeat('00',32),'hex'),'main',repeat('a',40),'[]','verified','example.tar.gz',21,repeat('b',64),now()
+		FROM repositories r JOIN repository_bindings b ON b.repository_id=r.id AND b.college_id=r.college_id AND b.is_current
+		WHERE r.project_id=$1 RETURNING id::text`, publicProjectID, users["lead"]).Scan(&snapshotID); err != nil {
+		t.Fatal(err)
+	}
+	downloadPath := repositoryPath + "/snapshots/" + snapshotID + "/download"
+	download := call("lead", http.MethodGet, downloadPath, "", http.StatusOK)
+	if download.Body.String() != "fixture archive bytes" || !strings.Contains(download.Header().Get("Content-Disposition"), "peergit-aaaaaaaaaaaa.tar.gz") {
+		t.Fatalf("unexpected snapshot download: %s", download.Body.String())
+	}
+	call("applicant", http.MethodGet, downloadPath, "", http.StatusNotFound)
+	if _, err := pool.Exec(ctx, `UPDATE repository_bindings SET access_state='permission_lost' WHERE external_repository_id=930003 AND college_id=$1`, college); err != nil {
+		t.Fatal(err)
+	}
+	call("lead", http.MethodGet, downloadPath, "", http.StatusNotFound)
+	deniedSource := call("lead", http.MethodGet, repositoryPath, "", http.StatusOK)
+	if strings.Contains(deniedSource.Body.String(), "Example observed issue") || !strings.Contains(deniedSource.Body.String(), `"source_access":false`) {
+		t.Fatalf("repository without source access exposed evidence: %s", deniedSource.Body.String())
+	}
 	guestList := httptest.NewRecorder()
 	router.ServeHTTP(guestList, httptest.NewRequest(http.MethodGet, "http://peergit.test/api/v1/projects", nil))
 	if guestList.Code != http.StatusOK {
@@ -225,6 +275,15 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 	}
 	if publicPreview.Data.Description != "" || publicPreview.Data.Members == nil || len(publicPreview.Data.Members) != 0 || publicPreview.Data.ViewerRole != "" {
 		t.Fatalf("guest public project response disclosed member-only fields: %+v", publicPreview.Data)
+	}
+	scoped := call("lead", http.MethodGet, "/api/v1/projects?scope=public", "", http.StatusOK)
+	if !strings.Contains(scoped.Body.String(), publicProjectID) || strings.Contains(scoped.Body.String(), hiddenProjectID) || strings.Contains(scoped.Body.String(), projectID) {
+		t.Fatalf("signed-in public discovery mixed project audiences: %s", scoped.Body.String())
+	}
+	call("lead", http.MethodGet, "/api/v1/projects/"+hiddenProjectID+"?scope=public", "", http.StatusNotFound)
+	scopedDetail := call("lead", http.MethodGet, "/api/v1/projects/"+publicProjectID+"?scope=public", "", http.StatusOK)
+	if err := json.Unmarshal(scopedDetail.Body.Bytes(), &publicPreview); err != nil || publicPreview.Data.Description != "" || len(publicPreview.Data.Members) != 0 || publicPreview.Data.ViewerRole != "" {
+		t.Fatalf("signed-in public detail disclosed member-only fields: %s", scopedDetail.Body.String())
 	}
 	guestPrivate := httptest.NewRecorder()
 	router.ServeHTTP(guestPrivate, httptest.NewRequest(http.MethodGet, "http://peergit.test/api/v1/projects/"+projectID, nil))

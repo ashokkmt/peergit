@@ -110,8 +110,9 @@ func (in *createProjectRequest) Validate() error {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "private, no-store")
 	s, authenticated := identity.CurrentSession(r.Context())
-	campusAccess := authenticated && s.CollegeID != "" && s.TermsAccepted && s.PrivacyAccepted
+	campusAccess := r.URL.Query().Get("scope") != "public" && authenticated && s.CollegeID != "" && s.TermsAccepted && s.PrivacyAccepted
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if len(q) > 100 {
 		h.fail(w, r, 400, "query_invalid", "search query is too long", nil)
@@ -151,7 +152,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		COALESCE(array_agg(DISTINCT sk.name) FILTER(WHERE sk.name IS NOT NULL),'{}'::text[]),
 		EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id) AS has_repository
 		FROM projects p LEFT JOIN project_skills ps ON ps.project_id=p.id LEFT JOIN skills sk ON sk.id=ps.skill_id
-		WHERE p.visibility='public' AND p.lifecycle='active' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id) AND ($1='' OR p.title ILIKE '%'||$1||'%' OR p.summary ILIKE '%'||$1||'%')
+		WHERE p.github_revoke_deadline IS NULL AND p.visibility='public' AND p.lifecycle='active' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id) AND ($1='' OR p.title ILIKE '%'||$1||'%' OR p.summary ILIKE '%'||$1||'%' OR EXISTS(SELECT 1 FROM project_skills qs JOIN skills s ON s.id=qs.skill_id WHERE qs.project_id=p.id AND s.name ILIKE '%'||$1||'%'))
 		AND ($2::uuid IS NULL OR p.id<$2) GROUP BY p.id ORDER BY p.id DESC LIMIT 51`, q, nullUUID(cursorID))
 	}
 	if err != nil {
@@ -211,8 +212,9 @@ type projectView struct {
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "private, no-store")
 	s, authenticated := identity.CurrentSession(r.Context())
-	campusAccess := authenticated && s.CollegeID != "" && s.TermsAccepted && s.PrivacyAccepted
+	campusAccess := r.URL.Query().Get("scope") != "public" && authenticated && s.CollegeID != "" && s.TermsAccepted && s.PrivacyAccepted
 	id := chi.URLParam(r, "id")
 	var v projectView
 	var description, creator, projectCollegeID string
@@ -226,7 +228,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 		err = h.pool.QueryRow(r.Context(), `SELECT p.id::text,p.slug,p.title,p.summary,p.project_type,p.visibility,p.lifecycle,p.version,p.updated_at,
 		EXISTS(SELECT 1 FROM project_roles rr WHERE rr.project_id=p.id AND rr.status='open'),COALESCE(array_agg(DISTINCT sk.name) FILTER(WHERE sk.name IS NOT NULL),'{}'::text[]),EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)
 		FROM projects p LEFT JOIN project_skills ps ON ps.project_id=p.id LEFT JOIN skills sk ON sk.id=ps.skill_id
-		WHERE p.id=$1 AND p.visibility='public' AND p.lifecycle='active' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id) GROUP BY p.id`, id).Scan(&v.ID, &v.Slug, &v.Title, &v.Summary, &v.Type, &v.Visibility, &v.Lifecycle, &v.Version, &v.UpdatedAt, &v.Recruiting, &v.Skills, &v.HasRepository)
+		WHERE p.id=$1 AND p.github_revoke_deadline IS NULL AND p.visibility='public' AND p.lifecycle='active' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id) GROUP BY p.id`, id).Scan(&v.ID, &v.Slug, &v.Title, &v.Summary, &v.Type, &v.Visibility, &v.Lifecycle, &v.Version, &v.UpdatedAt, &v.Recruiting, &v.Skills, &v.HasRepository)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		h.fail(w, r, 404, "project_not_found", "project not found", nil)
