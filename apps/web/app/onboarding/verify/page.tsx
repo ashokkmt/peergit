@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { BrandLogo } from "@/components/layout/brand-logo";
 
 type Envelope<T> = { data?: T; error?: { message: string } };
 
@@ -10,7 +11,7 @@ export default function VerifyCampusPage() {
   async function confirm(event:FormEvent<HTMLFormElement>){event.preventDefault();setProblem("");try{const method=token?"link":"otp";const response=await fetch("/api/v1/me/campus-verification/confirm",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},body:JSON.stringify(method==="link"?{method,token}:{method,challenge_id:challengeID,otp})});const result=await response.json() as Envelope<{verified:boolean}>;if(!response.ok||result.error)throw new Error(result.error?.message??"Verification could not be completed.");setComplete(true);setToken("");}catch(e){setProblem(e instanceof Error?e.message:"Verification could not be completed.")}}
   return <main className="account-shell">
     <a className="skip-link" href="#verify-content">Skip to content</a>
-    <header className="topbar"><a className="brand" href="/">PeerGit</a><nav aria-label="Account"><a href="/onboarding">Back to onboarding</a></nav></header>
+    <header className="topbar"><BrandLogo /><nav aria-label="Account"><a href="/onboarding">Back to onboarding</a></nav></header>
     <section id="verify-content" className="account-card" aria-labelledby="verify-title">
       <p className="eyebrow">Campus verification</p><h1 id="verify-title">Check your campus email</h1>
       <p>Both verification methods expire ten minutes after they are issued. Opening this page does not complete verification; submit the form to confirm.</p>

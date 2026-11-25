@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { BrandLogo } from "./brand-logo";
 
 type Session = { authenticated: boolean; csrf_token?: string; user?: { display_name: string; account_type: string; campus_status: string; college_id: string } };
 
@@ -21,7 +22,7 @@ export function SiteHeader() {
   }
 
   return <header className="topbar">
-    <a className="brand" href="/" aria-label="PeerGit home"><span className="brand-mark" aria-hidden="true">P</span>PeerGit</a>
+    <BrandLogo />
     <nav aria-label="Main navigation"><a href="/">Discover</a>{session.user?.college_id && <a href="/projects">Projects</a>}</nav>
     {session.authenticated && session.user ? <details className="account-menu" ref={menu}>
       <summary aria-label={`Account menu for ${session.user.display_name}`}><span className="avatar" aria-hidden="true">{session.user.display_name.slice(0, 1).toUpperCase()}</span><span className="account-menu-name">{session.user.display_name}</span></summary>

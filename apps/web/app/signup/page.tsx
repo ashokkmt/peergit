@@ -1,7 +1,9 @@
+import { BrandLogo } from "@/components/layout/brand-logo";
+
 export default function SignupPage() {
   return <main className="account-shell">
     <a className="skip-link" href="#signup-content">Skip to content</a>
-    <header className="topbar"><a className="brand" href="/">PeerGit</a><nav aria-label="Account"><a href="/login">Log in</a></nav></header>
+    <header className="topbar"><BrandLogo /><nav aria-label="Account"><a href="/login">Log in</a></nav></header>
     <section id="signup-content" className="account-card" aria-labelledby="signup-title">
       <p className="eyebrow">Create your account</p><h1 id="signup-title">Start with GitHub</h1>
       <p>GitHub confirms your account and contact email. You can explore public pages before verifying a campus email.</p>
