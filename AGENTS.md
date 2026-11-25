@@ -8,6 +8,7 @@ These instructions apply to the entire repository. Follow the current repository
 
 - Always use Ponytail skill, Graphify skill and MCP. 
 - Inspect the relevant documentation and nearby code before editing. Preserve unrelated user changes.
+- Before designing, implementing, or reviewing any frontend work, read [PeerGit’s design specification](plans/DESIGN.md) and the owning phase in [the implementation roadmap](plans/implementation-phases.md). Use the design for screens and interaction states and the roadmap for feature availability and prerequisites. Locate the current local copies if the checkout omits them.
 - Keep changes small and focused. Update adjacent documentation when behavior, configuration, migrations, or operational steps change.
 - Follow established repository conventions. If none exist yet, use idiomatic code, clear ownership, and explicit error handling.
 - Do not declare work complete while known failures, skipped required checks, or unresolved scope questions remain hidden.
