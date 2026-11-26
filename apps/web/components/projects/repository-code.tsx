@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import styles from "./repository-code.module.css";
+import { readApiEnvelope } from "@/lib/http";
 
 type Entry = { path: string; type: string; size: number; mode?: string };
 type Branch = { name: string; commit: { sha: string } };
@@ -39,12 +39,12 @@ type BrowserData = {
   fileProblem: string;
 };
 
+const compactSecondaryBtn =
+  "inline-flex min-h-[38px] items-center justify-center gap-2 rounded-lg px-3.5 py-1.5 text-[13px] font-medium no-underline whitespace-nowrap border border-control bg-surface text-on-surface cursor-pointer hover:bg-raised disabled:opacity-55 disabled:cursor-not-allowed";
+
 async function read<T>(url: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(url, { cache: "no-store", signal });
-  const result = (await response.json()) as {
-    data?: T;
-    error?: { message?: string };
-  };
+  const result = await readApiEnvelope<T>(response, "Repository could not be loaded.");
   if (!response.ok || !result.data) {
     throw new RepositoryReadError(
       response.status === 429
@@ -84,17 +84,14 @@ export function RepositoryCode({
       setData(null);
       setProblem("");
       const [branchData, overview] = await Promise.all([
-        read<{ items: Branch[]; default_branch: string }>(
-          `${api}/branches`,
-          signal,
-        ),
+        read<{ items: Branch[]; default_branch: string }>(`${api}/branches`, signal),
         read<{ contributions: Commit[] }>(api, signal),
       ]);
       const current = params.get("ref") || branchData.default_branch || branch;
-      if (!current && !pinned)
-        throw new Error("This repository has no branches yet.");
-      if (pinned && !/^[a-f0-9]{40}$/.test(pinned))
+      if (!current && !pinned) throw new Error("This repository has no branches yet.");
+      if (pinned && !/^[a-f0-9]{40}$/.test(pinned)) {
         throw new Error("This link does not contain a valid commit SHA.");
+      }
       const tree = await read<{
         sha: string;
         tree: Entry[];
@@ -104,20 +101,17 @@ export function RepositoryCode({
         signal,
       );
       const entry = tree.tree.find((item) => item.path === path);
-      if (path && !entry)
+      if (path && !entry) {
         throw new Error(
           tree.truncated
             ? "This path was outside the returned tree."
             : "This path is unavailable at the selected revision.",
         );
+      }
       const file = entry?.type === "tree" ? undefined : entry;
       let content = null;
       let fileProblem = "";
-      if (
-        file?.type === "blob" &&
-        file.mode !== "120000" &&
-        file.size <= 1048576
-      ) {
+      if (file?.type === "blob" && file.mode !== "120000" && file.size <= 1048576) {
         try {
           content = (
             await read<{ content: string }>(
@@ -126,15 +120,10 @@ export function RepositoryCode({
             )
           ).content;
         } catch (error) {
-          if (
-            error instanceof RepositoryReadError &&
-            [401, 403, 404].includes(error.status)
-          )
+          if (error instanceof RepositoryReadError && [401, 403, 404].includes(error.status)) {
             throw error;
-          fileProblem =
-            error instanceof Error
-              ? error.message
-              : "File could not be loaded.";
+          }
+          fileProblem = error instanceof Error ? error.message : "File could not be loaded.";
         }
       }
       const readmeEntry =
@@ -198,12 +187,9 @@ export function RepositoryCode({
     }
 
     void load().catch((error) => {
-      if (!signal.aborted)
-        setProblem(
-          error instanceof Error
-            ? error.message
-            : "Repository could not be loaded.",
-        );
+      if (!signal.aborted) {
+        setProblem(error instanceof Error ? error.message : "Repository could not be loaded.");
+      }
     });
     return () => controller.abort();
   }, [api, branch, retry]);
@@ -225,31 +211,33 @@ export function RepositoryCode({
     }
   }
 
-  if (problem)
+  if (problem) {
     return (
-      <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-        <h2 className="t-title-md">Code</h2>
-        <p className="form-error" role="alert" style={{ margin: 0 }}>
+      <section className="min-w-0 max-w-full bg-surface border border-hairline rounded-2xl p-6 flex flex-col gap-3">
+        <h2 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">Code</h2>
+        <p
+          className="rounded-lg px-4 py-3 text-sm font-medium bg-danger/12 border border-danger/35 text-danger m-0"
+          role="alert"
+        >
           {problem}
         </p>
-        <div className="button-row">
+        <div className="flex flex-wrap gap-2.5 items-center">
           <button
-            className="secondary-button pg-btn-compact"
+            className={compactSecondaryBtn}
             onClick={() => setRetry((value) => value + 1)}
           >
             Retry
           </button>
-          <a className="t-label-md" href={base}>
+          <a className="text-[13px] font-medium leading-[18px]" href={base}>
             Repository root
           </a>
         </div>
       </section>
     );
+  }
   if (!data) return <p role="status">Loading repository…</p>;
 
-  const folder = data.file
-    ? data.path.split("/").slice(0, -1).join("/")
-    : data.path;
+  const folder = data.file ? data.path.split("/").slice(0, -1).join("/") : data.path;
   const prefix = folder ? folder + "/" : "";
   const folderRows = data.entries
     .filter(
@@ -260,8 +248,7 @@ export function RepositoryCode({
     )
     .sort(
       (a, b) =>
-        Number(b.type === "tree") - Number(a.type === "tree") ||
-        a.path.localeCompare(b.path),
+        Number(b.type === "tree") - Number(a.type === "tree") || a.path.localeCompare(b.path),
     );
   const matchingEntries = fileQuery.trim()
     ? data.entries.filter((entry) =>
@@ -270,19 +257,16 @@ export function RepositoryCode({
     : folderRows;
 
   return (
-    <section
-      className="repository-code"
-      aria-labelledby="code-title"
-      style={{ display: "flex", flexDirection: "column", gap: "18px", margin: 0 }}
-    >
+    <section className="flex flex-col gap-[18px] m-0" aria-labelledby="code-title">
       <h2 id="code-title" className="sr-only">
         Code
       </h2>
 
       {/* Code Toolbar */}
-      <div className="code-toolbar">
-        <div className="code-toolbar-left">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <form
+            className="flex items-center gap-2"
             onSubmit={(event) => {
               event.preventDefault();
               window.location.assign(
@@ -297,6 +281,7 @@ export function RepositoryCode({
               id="repository-ref"
               value={selectedBranch}
               onChange={(event) => setSelectedBranch(event.target.value)}
+              className="min-h-10 py-1.5 px-3 border border-control rounded-lg bg-surface text-on-surface font-mono text-[13px]"
             >
               {!data.branches.some((item) => item.name === data.branch) && (
                 <option value={data.branch}>{data.branch}</option>
@@ -305,33 +290,35 @@ export function RepositoryCode({
                 <option key={item.name}>{item.name}</option>
               ))}
             </select>
-            <button className="secondary-button pg-btn-compact" disabled={!selectedBranch}>
+            <button className={compactSecondaryBtn} disabled={!selectedBranch}>
               Go
             </button>
           </form>
 
-          <span className="pg-pill pg-pill-raised t-mono-sm tabular-nums" title={data.sha}>
+          <span
+            className="inline-flex items-center px-2.5 py-1 rounded-full bg-raised border border-hairline font-mono text-[13px] leading-[19px] tabular-nums"
+            title={data.sha}
+          >
             {data.pinned ? "Pinned revision" : "Branch revision"}: {data.sha.slice(0, 8)}
           </span>
           <span className="sr-only">{data.sha}</span>
         </div>
 
-        <div className="code-toolbar-right">
+        <div className="flex flex-wrap items-center gap-2">
           <label className="sr-only" htmlFor="find-file-input">
             Find a file
           </label>
           <input
             id="find-file-input"
             type="search"
-            className="pg-input"
             value={fileQuery}
             onChange={(e) => setFileQuery(e.target.value)}
             placeholder="Find a file…"
-            style={{ width: "auto", flex: "1 1 200px", minWidth: "160px", minHeight: "38px", padding: "6px 10px" }}
+            className="flex-[1_1_200px] min-w-[160px] min-h-[38px] px-2.5 py-1.5 border border-control rounded-lg bg-surface text-on-surface text-sm leading-5"
           />
           <button
             type="button"
-            className="secondary-button pg-btn-compact"
+            className={compactSecondaryBtn}
             onClick={() =>
               void copy(
                 new URL(codeURL(data.path, true), window.location.origin).href,
@@ -345,39 +332,49 @@ export function RepositoryCode({
       </div>
 
       {data.truncated && (
-        <p className="pg-callout" role="status">
+        <p
+          className="flex items-start gap-3 p-4 border border-hairline rounded-xl bg-raised text-muted text-[13px] leading-[19px] m-0"
+          role="status"
+        >
           Only part of this tree is available here.
         </p>
       )}
 
       {copied && (
-        <p className="t-body-sm" role="status" style={{ color: "var(--success)", margin: 0 }}>
+        <p className="text-[13px] leading-[19px] text-success m-0" role="status">
           {copied}
         </p>
       )}
 
-      <div className="code-browser">
-        <nav aria-label="Repository files">
-          <a href={codeURL("")} style={{ fontWeight: 600 }}>
+      <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] gap-5 items-start">
+        <nav
+          aria-label="Repository files"
+          className="bg-surface border border-hairline rounded-xl p-3.5 max-h-[70vh] overflow-y-auto"
+        >
+          <a
+            href={codeURL("")}
+            className="block py-1.5 px-2 rounded text-[13px] font-semibold font-mono text-link no-underline hover:bg-raised hover:text-on-surface"
+          >
             Repository root
           </a>
           {folder && (
-            <a href={codeURL(folder.split("/").slice(0, -1).join("/"))}>
+            <a
+              href={codeURL(folder.split("/").slice(0, -1).join("/"))}
+              className="block py-1.5 px-2 rounded text-[13px] font-mono text-on-surface no-underline hover:bg-raised"
+            >
               ↑ Parent directory
             </a>
           )}
-          <ul>
+          <ul className="list-none m-0 p-0 grid gap-0.5">
             {matchingEntries.slice(0, 80).map((entry) => (
               <li key={entry.path}>
                 <button
                   type="button"
-                  className="text-button"
+                  className="border-0 py-1.5 px-2 w-full flex items-center gap-1.5 text-left rounded bg-transparent text-on-surface cursor-pointer font-mono text-[13px] hover:bg-raised"
                   onClick={() => window.location.assign(codeURL(entry.path))}
                 >
-                  <span aria-hidden="true">
-                    {entry.type === "tree" ? "▸" : "▤"}
-                  </span>
-                  <span style={{ overflowWrap: "anywhere" }}>
+                  <span aria-hidden="true">{entry.type === "tree" ? "▸" : "▤"}</span>
+                  <span className="[overflow-wrap:anywhere]">
                     {fileQuery.trim() ? entry.path : entry.path.split("/").at(-1)}
                   </span>
                 </button>
@@ -385,26 +382,30 @@ export function RepositoryCode({
             ))}
           </ul>
           {!matchingEntries.length && (
-            <p className="t-body-sm muted" style={{ margin: "6px 0 0" }}>
+            <p className="text-[13px] leading-[19px] text-muted mt-1.5 mb-0">
               No files match this filter.
             </p>
           )}
         </nav>
 
-        <article className="code-reading-pane" aria-label={data.path || "Repository directory"}>
+        <article className="min-w-0 flex flex-col gap-4" aria-label={data.path || "Repository directory"}>
           {/* Latest Commit Strip */}
-          <div className="commit-strip">
+          <div className="bg-surface border border-hairline rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <strong className="t-body-md">{data.commit?.title || "Branch tip"}</strong>
+              <strong className="text-sm leading-[21px]">
+                {data.commit?.title || "Branch tip"}
+              </strong>
               {data.tip && (
-                <p className="t-body-sm muted" style={{ margin: "2px 0 0" }}>
-                  <code className="t-mono-sm">{data.tip.slice(0, 7)}</code>{" "}
+                <p className="text-[13px] leading-[19px] text-muted mt-0.5 mb-0">
+                  <code className="font-mono text-[13px] leading-[19px]">
+                    {data.tip.slice(0, 7)}
+                  </code>{" "}
                   {data.commit?.author_name}
                 </p>
               )}
             </div>
             <a
-              className="t-label-md"
+              className="text-[13px] font-medium leading-[18px]"
               href={`${base}?${new URLSearchParams({
                 tab: "activity",
                 ...(data.branch && { ref: data.branch }),
@@ -415,19 +416,19 @@ export function RepositoryCode({
           </div>
 
           {data.file ? (
-            <div className="code-file-box">
-              <div className="code-file-header">
-                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px" }}>
-                  <a className="t-label-md" href={codeURL(folder)}>
+            <div className="bg-surface border border-hairline rounded-xl overflow-hidden">
+              <div className="bg-raised border-b border-hairline px-4 py-2.5 flex flex-wrap items-center justify-between gap-2.5">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <a className="text-[13px] font-medium leading-[18px]" href={codeURL(folder)}>
                     ← Back to files
                   </a>
-                  <h3 className={`t-mono-sm ${styles.sha}`} style={{ fontWeight: 600 }}>
+                  <h3 className="font-mono text-[13px] leading-[19px] font-semibold [overflow-wrap:anywhere] m-0">
                     {data.path}
                   </h3>
                 </div>
-                <div className="button-row">
+                <div className="flex flex-wrap gap-2.5 items-center">
                   <button
-                    className="secondary-button pg-btn-compact"
+                    className={compactSecondaryBtn}
                     type="button"
                     onClick={() =>
                       void copy(
@@ -441,14 +442,14 @@ export function RepositoryCode({
                   {data.content !== null && (
                     <>
                       <button
-                        className="secondary-button pg-btn-compact"
+                        className={compactSecondaryBtn}
                         type="button"
                         onClick={() => void copy(data.content ?? "", "File copied.")}
                       >
                         Copy file
                       </button>
                       <button
-                        className="secondary-button pg-btn-compact"
+                        className={compactSecondaryBtn}
                         type="button"
                         aria-pressed={wrap}
                         onClick={() => setWrap(!wrap)}
@@ -462,33 +463,40 @@ export function RepositoryCode({
               {data.content !== null ? (
                 <pre
                   tabIndex={0}
-                  className={wrap ? `code-pre ${styles.wrapped}` : "code-pre"}
+                  className={`m-0 max-h-[65vh] overflow-auto [tab-size:2] p-4 bg-surface text-on-surface font-mono text-[13px] leading-[1.55] ${
+                    wrap ? "whitespace-pre-wrap [overflow-wrap:anywhere]" : "whitespace-pre"
+                  }`}
                 >
                   {data.content}
                 </pre>
               ) : (
-                <p className="t-body-md muted" style={{ padding: "16px", margin: 0 }}>
+                <p className="text-sm leading-[21px] text-muted p-4 m-0">
                   {data.fileProblem || "This file type or size cannot be previewed."}
                 </p>
               )}
             </div>
           ) : (
             <>
-              <div className="dir-table">
-                <div
-                  className="dir-row"
-                  style={{ background: "var(--raised)", fontWeight: 600 }}
-                >
-                  <span className={styles.sha}>{folder || "Repository root"}</span>
-                  <span className="t-label-sm muted">{folderRows.length} entries</span>
+              <div className="bg-surface border border-hairline rounded-xl overflow-hidden">
+                <div className="bg-raised px-4 py-2.5 border-b border-hairline flex items-center justify-between gap-3 font-mono text-[13px] font-semibold">
+                  <span className="[overflow-wrap:anywhere]">{folder || "Repository root"}</span>
+                  <span className="text-xs font-medium leading-4 text-muted">
+                    {folderRows.length} entries
+                  </span>
                 </div>
                 {folderRows.map((entry) => (
-                  <div className="dir-row" key={entry.path}>
-                    <a href={codeURL(entry.path)}>
+                  <div
+                    className="px-4 py-2.5 border-b border-hairline last:border-b-0 flex items-center justify-between gap-3 font-mono text-[13px]"
+                    key={entry.path}
+                  >
+                    <a
+                      href={codeURL(entry.path)}
+                      className="no-underline font-medium hover:underline"
+                    >
                       {entry.type === "tree" ? "📁 " : "📄 "}
                       {entry.path.split("/").at(-1)}
                     </a>
-                    <span className="t-body-sm muted tabular-nums">
+                    <span className="text-[13px] leading-[19px] text-muted tabular-nums">
                       {entry.type === "blob" ? `${entry.size} bytes` : "Directory"}
                     </span>
                   </div>
@@ -496,14 +504,18 @@ export function RepositoryCode({
               </div>
 
               {data.readme !== null && (
-                <section className="code-file-box">
-                  <div className="code-file-header">
-                    <h4 className="t-mono-sm" style={{ margin: 0, fontWeight: 600 }}>
+                <section className="bg-surface border border-hairline rounded-xl overflow-hidden">
+                  <div className="bg-raised border-b border-hairline px-4 py-2.5 flex flex-wrap items-center justify-between gap-2.5">
+                    <h4 className="font-mono text-[13px] leading-[19px] m-0 font-semibold">
                       README at this revision
                     </h4>
-                    <span className="t-label-sm muted">Sanitized preview</span>
+                    <span className="text-xs font-medium leading-4 text-muted">
+                      Sanitized preview
+                    </span>
                   </div>
-                  <pre className={`readme-text ${styles.wrapped}`}>{data.readme}</pre>
+                  <pre className="m-0 max-h-[65vh] overflow-auto [tab-size:2] p-4 bg-surface text-on-surface font-mono text-[13px] leading-[1.55] whitespace-pre-wrap [overflow-wrap:anywhere]">
+                    {data.readme}
+                  </pre>
                 </section>
               )}
             </>

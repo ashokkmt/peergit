@@ -6,8 +6,8 @@ import { RepositoryCode } from "./repository-code";
 import { LegacyRepositoryLink } from "./legacy-repository-link";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
+import { readApiEnvelope } from "@/lib/http";
 
-type Envelope<T> = { data?: T; error?: { message?: string } };
 type Project = {
   id: string;
   title: string;
@@ -52,6 +52,19 @@ type RepositoryAccess = {
   access_state: string;
   sync_health: string;
 };
+
+const cardClass = "min-w-0 max-w-full bg-surface border border-hairline rounded-2xl p-6 flex flex-col";
+const fieldClass = "grid gap-1.5 text-[13px] font-medium text-on-surface";
+const inputClass =
+  "w-full min-h-11 px-3.5 py-2.5 border border-control rounded-lg bg-surface text-on-surface text-sm leading-5";
+const primaryBtn =
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-[18px] py-2 text-sm font-medium border border-primary bg-primary text-on-primary cursor-pointer hover:opacity-90";
+const compactPrimaryBtn =
+  "inline-flex min-h-[38px] items-center justify-center gap-2 rounded-lg px-3.5 py-1.5 text-[13px] font-medium no-underline whitespace-nowrap border border-primary bg-primary text-on-primary cursor-pointer hover:opacity-90";
+const compactSecondaryBtn =
+  "inline-flex min-h-[38px] items-center justify-center gap-2 rounded-lg px-3.5 py-1.5 text-[13px] font-medium no-underline whitespace-nowrap border border-control bg-surface text-on-surface cursor-pointer hover:bg-raised";
+const tabLinkClass =
+  "relative text-muted no-underline whitespace-nowrap px-3.5 py-2.5 text-[13px] font-medium border-b-2 border-transparent hover:text-on-surface aria-[current=page]:text-on-surface aria-[current=page]:font-semibold aria-[current=page]:border-b-link";
 
 export function ProjectDetail({ projectID }: { projectID: string }) {
   const [details, setDetails] = useState<Details | null>(null);
@@ -109,7 +122,7 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
       cache: "no-store",
     });
     if (!response.ok) return;
-    const result = (await response.json()) as Envelope<{ items: Role[] }>;
+    const result = await readApiEnvelope<{ items: Role[] }>(response, "");
     setRoles(result.data?.items ?? []);
   }
 
@@ -118,35 +131,31 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
       cache: "no-store",
     });
     if (!response.ok) return;
-    const result = (await response.json()) as Envelope<{ items: Application[] }>;
+    const result = await readApiEnvelope<{ items: Application[] }>(response, "");
     setApplications(result.data?.items ?? []);
   }
 
   useEffect(() => {
     let active = true;
     void Promise.all([
-      fetch(`/api/v1/projects/${projectID}`, { cache: "no-store" }).then(
-        async (response) => {
-          const result = (await response.json()) as Envelope<Details>;
-          if (!response.ok || !result.data)
-            throw new Error(result.error?.message ?? "Project could not be loaded.");
-          return result.data;
-        },
-      ),
-      fetch("/api/v1/session", { cache: "no-store" })
-        .then((response) => response.json())
-        .then(
-          (result: {
-            data?: {
-              csrf_token?: string;
-              user?: {
-                college_id?: string;
-                terms_accepted?: boolean;
-                privacy_accepted?: boolean;
-              };
-            };
-          }) => result.data,
-        ),
+      fetch(`/api/v1/projects/${projectID}`, { cache: "no-store" }).then(async (response) => {
+        const result = await readApiEnvelope<Details>(response, "Project could not be loaded.");
+        if (!response.ok || !result.data) {
+          throw new Error(result.error?.message ?? "Project could not be loaded.");
+        }
+        return result.data;
+      }),
+      fetch("/api/v1/session", { cache: "no-store" }).then(async (response) => {
+        const result = await readApiEnvelope<{
+          csrf_token?: string;
+          user?: {
+            college_id?: string;
+            terms_accepted?: boolean;
+            privacy_accepted?: boolean;
+          };
+        }>(response, "");
+        return result.data;
+      }),
     ])
       .then(async ([project, session]) => {
         if (!active) return;
@@ -161,14 +170,13 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
         );
         setCampusAccess(ready);
         if (project.viewer_role) {
-          const response = await fetch(
-            `/api/v1/projects/${projectID}/repository`,
-            { cache: "no-store" },
-          );
+          const response = await fetch(`/api/v1/projects/${projectID}/repository`, {
+            cache: "no-store",
+          });
           if (response.ok) {
-            const result = (await response.json()) as Envelope<{
+            const result = await readApiEnvelope<{
               repository: RepositoryAccess | null;
-            }>;
+            }>(response, "");
             if (active && result.data) {
               setRepository(result.data.repository);
               setRepositoryChecked(true);
@@ -178,15 +186,14 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
           }
         }
         if (ready) await loadRoles();
-        if (["owner", "maintainer"].includes(project.viewer_role))
+        if (["owner", "maintainer"].includes(project.viewer_role)) {
           await loadApplications();
+        }
       })
       .catch(
         (error) =>
           active &&
-          setProblem(
-            error instanceof Error ? error.message : "Project could not be loaded.",
-          ),
+          setProblem(error instanceof Error ? error.message : "Project could not be loaded."),
       );
     return () => {
       active = false;
@@ -207,9 +214,13 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
       headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
       body: JSON.stringify(body),
     });
-    const result = (await response.json()) as Envelope<{ version?: number }>;
-    if (!response.ok)
+    const result = await readApiEnvelope<{ version?: number }>(
+      response,
+      "The change could not be saved.",
+    );
+    if (!response.ok) {
       throw new Error(result.error?.message ?? "The change could not be saved.");
+    }
     setMessage(success);
     return result.data;
   }
@@ -345,10 +356,6 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
     }
   }
 
-  const manager = Boolean(
-    details && ["owner", "maintainer"].includes(details.viewer_role),
-  );
-
   async function archiveProject() {
     if (!details) return;
     try {
@@ -382,6 +389,10 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
     }
   }
 
+  const manager = Boolean(
+    details && ["owner", "maintainer"].includes(details.viewer_role),
+  );
+
   const providerURL =
     repository?.html_url &&
     /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/.test(
@@ -392,34 +403,40 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
 
   return (
     <>
-      <a className="skip-link" href="#project-content">
+      <a
+        className="fixed z-100 left-4 -top-20 px-4 py-2.5 bg-primary text-on-primary rounded-lg font-semibold no-underline focus:top-3"
+        href="#project-content"
+      >
         Skip to content
       </a>
       <SiteHeader workspace />
 
       {details && (
-        <section className="workspace-header-band">
-          <div className="workspace-header-inner">
-            <div className="repo-title-row">
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <p className="t-label-sm muted" style={{ margin: 0 }}>
-                  Projects / {details.project.title} · {details.project.project_type.replaceAll("_", " ")}
+        <section className="bg-surface border-b border-hairline pt-6">
+          <div className="w-[min(1440px,calc(100%-32px))] md:w-[min(1440px,calc(100%-64px))] mx-auto flex flex-col gap-4">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="flex flex-col gap-1.5">
+                <p className="text-xs font-medium leading-4 text-muted m-0">
+                  Projects / {details.project.title} ·{" "}
+                  {details.project.project_type.replaceAll("_", " ")}
                 </p>
-                <h1 className="t-headline-md">{details.project.title}</h1>
-                <p className="t-body-md muted" style={{ margin: 0, maxWidth: "60ch" }}>
+                <h1 className="font-display text-[clamp(1.5rem,2.5vw,2rem)] font-semibold leading-[1.19] tracking-[-0.015em] m-0">
+                  {details.project.title}
+                </h1>
+                <p className="text-sm leading-[21px] text-muted m-0 max-w-[60ch]">
                   {details.project.summary}
                 </p>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", paddingTop: "6px" }}>
+                <div className="flex flex-wrap gap-2 pt-1.5">
                   {repository && (
-                    <span className="t-mono-sm" style={{ alignSelf: "center" }}>
+                    <span className="font-mono text-[13px] leading-[19px] self-center">
                       GitHub · {repository.full_name}
                     </span>
                   )}
-                  <span className="pg-pill pg-pill-raised">
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-raised border border-hairline text-xs font-medium leading-4">
                     Project visibility: {details.project.visibility}
                   </span>
                   {repository && (
-                    <span className="pg-pill pg-pill-raised">
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-raised border border-hairline text-xs font-medium leading-4">
                       Source access:{" "}
                       {repository.source_access === false
                         ? repository.access_state.replaceAll("_", " ")
@@ -429,14 +446,14 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                 </div>
               </div>
 
-              <div className="button-row">
-                <span className="pg-pill pg-pill-success">
+              <div className="flex flex-wrap gap-2.5 items-center">
+                <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-surface border border-success text-success text-xs font-medium leading-4">
                   {details.project.lifecycle}
                   {repository ? ` · ${repository.sync_health.replaceAll("_", " ")}` : ""}
                 </span>
                 {providerURL && (
                   <a
-                    className="primary-link pg-btn-compact"
+                    className={compactPrimaryBtn}
                     href={providerURL}
                     target="_blank"
                     rel="noreferrer"
@@ -447,8 +464,11 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
               </div>
             </div>
 
-            <nav className="project-tabs" aria-label="Project sections">
-              <div className="project-tabs-group">
+            <nav
+              className="flex items-center justify-between gap-4 overflow-x-auto [-webkit-overflow-scrolling:touch]"
+              aria-label="Project sections"
+            >
+              <div className="flex items-center gap-1">
                 {[
                   ["code", details.viewer_role ? "Code" : "Overview"],
                   ...(details.viewer_role && hasRepository
@@ -463,6 +483,7 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                 ].map(([value, label]) => (
                   <a
                     key={value}
+                    className={tabLinkClass}
                     href={`/projects/${projectID}?tab=${value}`}
                     aria-current={tab === value ? "page" : undefined}
                   >
@@ -470,8 +491,9 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                   </a>
                 ))}
               </div>
-              <div className="project-tabs-secondary">
+              <div className="flex items-center gap-1 border-l border-hairline pl-3">
                 <a
+                  className={tabLinkClass}
                   href={`/projects/${projectID}?tab=open-roles`}
                   aria-current={tab === "open-roles" ? "page" : undefined}
                 >
@@ -479,27 +501,39 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                 </a>
                 {details.viewer_role && hasRepository && (
                   <a
+                    className={tabLinkClass}
                     href={`/projects/${projectID}?tab=snapshots`}
                     aria-current={tab === "snapshots" ? "page" : undefined}
                   >
                     Snapshots
                   </a>
                 )}
-                <a href={`/projects/${projectID}/work`}>Project work</a>
+                <a className={tabLinkClass} href={`/projects/${projectID}/work`}>
+                  Project work
+                </a>
               </div>
             </nav>
           </div>
         </section>
       )}
 
-      <main id="project-content" className="project-detail-page" style={{ flex: 1 }}>
+      <main
+        id="project-content"
+        className="flex-1 w-[min(1440px,calc(100%-32px))] md:w-[min(1440px,calc(100%-64px))] mx-auto pt-6 pb-16 flex flex-col gap-6"
+      >
         {problem && (
-          <p className="form-error" role="alert" style={{ margin: 0 }}>
+          <p
+            className="rounded-lg px-4 py-3 text-sm font-medium bg-danger/12 border border-danger/35 text-danger m-0"
+            role="alert"
+          >
             {problem}
           </p>
         )}
         {message && (
-          <p className="form-success" role="status" style={{ margin: 0 }}>
+          <p
+            className="rounded-lg px-4 py-3 text-sm font-medium bg-success/12 border border-success/35 text-success m-0"
+            role="status"
+          >
             {message}
           </p>
         )}
@@ -511,12 +545,12 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
         ) : (
           <>
             {tab === "code" && !details.viewer_role && (
-              <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                <h2 className="t-title-lg">Project overview</h2>
-                <p className="t-body-md" style={{ margin: 0 }}>
-                  {details.project.summary}
-                </p>
-                <p className="t-body-sm muted" style={{ margin: 0 }}>
+              <section className={`${cardClass} gap-3`}>
+                <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] m-0">
+                  Project overview
+                </h2>
+                <p className="text-sm leading-[21px] m-0">{details.project.summary}</p>
+                <p className="text-[13px] leading-[19px] text-muted m-0">
                   Repository source is available to project members with access.
                 </p>
               </section>
@@ -531,7 +565,10 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
               "settings",
             ].includes(tab) &&
               (!details.viewer_role || (tab === "settings" && !manager)) && (
-                <p role="status" className="pg-callout">
+                <p
+                  role="status"
+                  className="flex items-start gap-3 p-4 border border-hairline rounded-xl bg-raised text-muted text-[13px] leading-[19px] m-0"
+                >
                   This section is unavailable to your account.
                 </p>
               )}
@@ -552,112 +589,80 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
               />
             )}
 
-            {tab === "activity" && details.viewer_role && hasRepository && (
-              <RepositoryOverview
-                projectID={projectID}
-                csrf={csrf}
-                tab="activity"
-                viewerRole={details.viewer_role}
-              />
-            )}
-
-            {tab === "issues" && details.viewer_role && hasRepository && (
-              <RepositoryOverview
-                projectID={projectID}
-                csrf={csrf}
-                tab="issues"
-                viewerRole={details.viewer_role}
-              />
-            )}
-
-            {tab === "pull-requests" && details.viewer_role && hasRepository && (
-              <RepositoryOverview
-                projectID={projectID}
-                csrf={csrf}
-                tab="pull-requests"
-                viewerRole={details.viewer_role}
-              />
-            )}
-
-            {tab === "security" && details.viewer_role && hasRepository && (
-              <RepositoryOverview
-                projectID={projectID}
-                csrf={csrf}
-                tab="security"
-                viewerRole={details.viewer_role}
-              />
-            )}
-
-            {tab === "snapshots" && details.viewer_role && hasRepository && (
-              <RepositoryOverview
-                projectID={projectID}
-                csrf={csrf}
-                tab="snapshots"
-                viewerRole={details.viewer_role}
-              />
-            )}
+            {["activity", "issues", "pull-requests", "security", "snapshots"].includes(tab) &&
+              details.viewer_role &&
+              hasRepository && (
+                <RepositoryOverview
+                  projectID={projectID}
+                  csrf={csrf}
+                  tab={tab}
+                  viewerRole={details.viewer_role}
+                />
+              )}
 
             {tab === "settings" && manager && (
-              <div className="pg-grid-2" style={{ alignItems: "start" }}>
-                <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-start">
+                <section className={`${cardClass} gap-4`}>
                   <div>
-                    <h2 className="t-title-lg">Project details</h2>
-                    <p className="t-body-sm muted" style={{ margin: "4px 0 0" }}>
+                    <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] m-0">
+                      Project details
+                    </h2>
+                    <p className="text-[13px] leading-[19px] text-muted mt-1 mb-0">
                       PeerGit visibility: <strong>{details.project.visibility}</strong> ·
                       lifecycle: {details.project.lifecycle}
                     </p>
                   </div>
-                  <form
-                    className="account-form"
-                    style={{ marginTop: 0, paddingTop: 0, borderTop: 0 }}
-                    onSubmit={(event) => void saveDetails(event)}
-                  >
-                    <label>
+                  <form className="grid gap-3.5" onSubmit={(event) => void saveDetails(event)}>
+                    <label className={fieldClass}>
                       Summary
                       <textarea
                         required
                         maxLength={500}
                         value={summary}
                         onChange={(event) => setSummary(event.target.value)}
+                        className={`${inputClass} min-h-24 resize-y leading-normal`}
                       />
                     </label>
-                    <label>
+                    <label className={fieldClass}>
                       Description
                       <textarea
                         maxLength={12000}
                         rows={6}
                         value={description}
                         onChange={(event) => setDescription(event.target.value)}
+                        className={`${inputClass} min-h-24 resize-y leading-normal`}
                       />
                     </label>
                     <div>
-                      <button className="primary-button" type="submit">
+                      <button className={primaryBtn} type="submit">
                         Save details
                       </button>
                     </div>
                   </form>
                 </section>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                  <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                    <h3 className="t-title-lg">Project publication &amp; visibility</h3>
-                    <p className="t-body-sm muted" style={{ margin: 0 }}>
+                <div className="flex flex-col gap-5">
+                  <section className={`${cardClass} gap-3.5`}>
+                    <h3 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] m-0">
+                      Project publication &amp; visibility
+                    </h3>
+                    <p className="text-[13px] leading-[19px] text-muted m-0">
                       Project publication shares its PeerGit presentation. GitHub visibility does
                       not change, and private source, evidence, and snapshots remain restricted to
                       project members.
                     </p>
-                    <div className="button-row">
+                    <div className="flex flex-wrap gap-2.5 items-center">
                       {hasRepository && details.project.lifecycle !== "archived" && (
                         <>
                           <button
-                            className="secondary-button pg-btn-compact"
+                            className={compactSecondaryBtn}
                             type="button"
                             onClick={() => void publish("campus")}
                           >
                             Publish to campus
                           </button>
                           <button
-                            className="secondary-button pg-btn-compact"
+                            className={compactSecondaryBtn}
                             type="button"
                             onClick={() => void publish("public")}
                           >
@@ -667,7 +672,7 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                       )}
                       {details.project.visibility !== "private" && (
                         <button
-                          className="secondary-button pg-btn-compact"
+                          className={compactSecondaryBtn}
                           type="button"
                           onClick={() => void publish("private")}
                         >
@@ -677,9 +682,11 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                     </div>
                   </section>
 
-                  <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    <h3 className="t-title-md">GitHub connection</h3>
-                    <p className="t-body-sm muted" style={{ margin: 0 }}>
+                  <section className={`${cardClass} gap-2.5`}>
+                    <h3 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
+                      GitHub connection
+                    </h3>
+                    <p className="text-[13px] leading-[19px] text-muted m-0">
                       Repository access follows the connected GitHub App installation. Manage or
                       revoke your account connection from{" "}
                       <a href="/account/github">GitHub connections</a>.
@@ -687,27 +694,17 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                   </section>
 
                   {details.project.lifecycle !== "archived" && (
-                    <section
-                      className="pg-card"
-                      style={{
-                        borderColor: "var(--danger)",
-                        display: "flex",
-                        flexWrap: "wrap",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: "12px",
-                      }}
-                    >
+                    <section className="min-w-0 max-w-full bg-surface border border-danger rounded-2xl p-6 flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <h3 className="t-title-sm" style={{ color: "var(--danger)" }}>
+                        <h3 className="text-base font-semibold leading-[22px] text-danger m-0">
                           Archive project
                         </h3>
-                        <p className="t-body-sm muted" style={{ margin: "4px 0 0" }}>
+                        <p className="text-[13px] leading-[19px] text-muted mt-1 mb-0">
                           Makes this project read-only and removes it from discovery.
                         </p>
                       </div>
                       <button
-                        className="danger-button pg-btn-compact"
+                        className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium whitespace-nowrap border border-danger bg-danger text-on-primary cursor-pointer hover:opacity-90"
                         type="button"
                         onClick={() => void archiveProject()}
                       >
@@ -724,33 +721,40 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
             )}
 
             {tab === "open-roles" && (
-              <div className="pg-grid-2" style={{ alignItems: "start" }}>
-                <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-start">
+                <section className={`${cardClass} gap-[18px]`}>
                   <div>
-                    <h2 className="t-title-lg">Open roles</h2>
+                    <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] m-0">
+                      Open roles
+                    </h2>
                     {!campusAccess && (
-                      <p className="t-body-sm muted" style={{ margin: "6px 0 0" }}>
+                      <p className="text-[13px] leading-[19px] text-muted mt-1.5 mb-0">
                         <a href="/onboarding">Verify campus access</a> to view openings and apply.
                       </p>
                     )}
                   </div>
 
                   {roles.filter((role) => role.status === "open").length ? (
-                    <div style={{ display: "grid", gap: "14px" }}>
+                    <div className="grid gap-3.5">
                       {roles
                         .filter((role) => role.status === "open")
                         .map((role) => (
-                          <article className="pg-card-canvas" key={role.id} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-                              <h3 className="t-title-sm">{role.title}</h3>
-                              <span className="t-label-sm" style={{ color: "var(--success)" }}>
+                          <article
+                            className="min-w-0 max-w-full bg-canvas border border-hairline rounded-2xl p-5 flex flex-col gap-2.5"
+                            key={role.id}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <h3 className="text-base font-semibold leading-[22px] m-0">
+                                {role.title}
+                              </h3>
+                              <span className="text-xs font-medium leading-4 text-success">
                                 {role.openings} opening(s)
                               </span>
                             </div>
-                            <p className="t-body-sm muted" style={{ margin: 0 }}>
+                            <p className="text-[13px] leading-[19px] text-muted m-0">
                               {role.description}
                             </p>
-                            <p className="t-label-sm muted" style={{ margin: 0 }}>
+                            <p className="text-xs font-medium leading-4 text-muted m-0">
                               Difficulty: {role.difficulty}
                               {role.good_first_task ? " · beginner-friendly" : ""}
                             </p>
@@ -758,14 +762,13 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                               details.project.lifecycle === "active" &&
                               !manager && (
                                 <form
-                                  className="account-form"
-                                  style={{ marginTop: "6px", paddingTop: "12px" }}
+                                  className="grid gap-3.5 mt-1.5 pt-3 border-t border-hairline"
                                   onSubmit={(event) => {
                                     event.preventDefault();
                                     void apply(role);
                                   }}
                                 >
-                                  <label>
+                                  <label className={fieldClass}>
                                     Why are you interested?
                                     <textarea
                                       required
@@ -777,10 +780,11 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                                           [role.id]: event.target.value,
                                         }))
                                       }
+                                      className={`${inputClass} min-h-24 resize-y leading-normal`}
                                     />
                                   </label>
                                   <div>
-                                    <button className="primary-button pg-btn-compact" type="submit">
+                                    <button className={compactPrimaryBtn} type="submit">
                                       Apply
                                     </button>
                                   </div>
@@ -790,7 +794,7 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                         ))}
                     </div>
                   ) : (
-                    <p className="t-body-md muted" style={{ margin: 0 }}>
+                    <p className="text-sm leading-[21px] text-muted m-0">
                       This project has no open roles.
                     </p>
                   )}
@@ -799,11 +803,13 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                     hasRepository &&
                     details.project.lifecycle === "active" && (
                       <form
-                        className="account-form project-role-form"
+                        className="grid gap-3.5 mt-5 pt-5 border-t border-hairline"
                         onSubmit={(event) => void createRole(event)}
                       >
-                        <h3 className="t-title-md">Open a team role</h3>
-                        <label>
+                        <h3 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
+                          Open a team role
+                        </h3>
+                        <label className={fieldClass}>
                           Role title
                           <input
                             required
@@ -811,18 +817,20 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                             maxLength={100}
                             value={roleTitle}
                             onChange={(event) => setRoleTitle(event.target.value)}
+                            className={inputClass}
                           />
                         </label>
-                        <label>
+                        <label className={fieldClass}>
                           What will the member work on?
                           <textarea
                             required
                             maxLength={3000}
                             value={roleDescription}
                             onChange={(event) => setRoleDescription(event.target.value)}
+                            className={`${inputClass} min-h-24 resize-y leading-normal`}
                           />
                         </label>
-                        <label>
+                        <label className={fieldClass}>
                           Number of openings
                           <input
                             required
@@ -831,10 +839,11 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                             max={20}
                             value={roleOpenings}
                             onChange={(event) => setRoleOpenings(event.target.value)}
+                            className={inputClass}
                           />
                         </label>
                         <div>
-                          <button className="primary-button" type="submit">
+                          <button className={primaryBtn} type="submit">
                             Create opening
                           </button>
                         </div>
@@ -842,54 +851,56 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                     )}
                 </section>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                  <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                    <h3 className="t-title-md">Team</h3>
+                <div className="flex flex-col gap-5">
+                  <section className={`${cardClass} gap-3`}>
+                    <h3 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
+                      Team
+                    </h3>
                     {details.members.length ? (
-                      <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "8px" }}>
+                      <ul className="list-none p-0 m-0 grid gap-2">
                         {details.members.map((member) => (
                           <li
                             key={member.user_id}
-                            className="pg-card-canvas"
-                            style={{ padding: "10px 14px" }}
+                            className="min-w-0 max-w-full bg-canvas border border-hairline rounded-2xl px-3.5 py-2.5"
                           >
                             {member.display_name} · {member.role}
                           </li>
                         ))}
                       </ul>
                     ) : (
-                      <p className="t-body-md muted" style={{ margin: 0 }}>
+                      <p className="text-sm leading-[21px] text-muted m-0">
                         No team members are listed.
                       </p>
                     )}
                   </section>
 
                   {manager && applications.length > 0 && (
-                    <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                      <h2 className="t-title-md">Applications ({applications.length})</h2>
+                    <section className={`${cardClass} gap-3`}>
+                      <h2 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
+                        Applications ({applications.length})
+                      </h2>
                       {applications.map((application) => (
                         <article
-                          className="pg-card-canvas"
+                          className="min-w-0 max-w-full bg-canvas border border-hairline rounded-2xl p-5 flex flex-col gap-2.5"
                           key={application.id}
-                          style={{ display: "flex", flexDirection: "column", gap: "10px" }}
                         >
-                          <h3 className="t-title-sm">
+                          <h3 className="text-base font-semibold leading-[22px] m-0">
                             {application.applicant_name} · {application.status}
                           </h3>
-                          <p className="t-body-sm muted" style={{ margin: 0 }}>
+                          <p className="text-[13px] leading-[19px] text-muted m-0">
                             {application.message}
                           </p>
                           {application.status === "pending" && (
-                            <div className="button-row">
+                            <div className="flex flex-wrap gap-2.5 items-center">
                               <button
-                                className="primary-button pg-btn-compact"
+                                className={compactPrimaryBtn}
                                 type="button"
                                 onClick={() => void decide(application, "accepted")}
                               >
                                 Accept
                               </button>
                               <button
-                                className="secondary-button pg-btn-compact"
+                                className={compactSecondaryBtn}
                                 type="button"
                                 onClick={() => void decide(application, "rejected")}
                               >

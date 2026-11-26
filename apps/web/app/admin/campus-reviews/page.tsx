@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CampusConsoleShell } from "@/components/campus/campus-console-shell";
+import { readApiEnvelope } from "@/lib/http";
 
 type Review = {
   id: string;
@@ -10,7 +11,6 @@ type Review = {
   reason: string;
   created_at: string;
 };
-type Envelope<T> = { data?: T; error?: { message: string } };
 
 export default function CampusReviewsPage() {
   const [csrf, setCSRF] = useState("");
@@ -21,13 +21,12 @@ export default function CampusReviewsPage() {
 
   async function load() {
     try {
-      const session = (await fetch("/api/v1/session", { cache: "no-store" }).then((r) =>
-        r.json(),
-      )) as Envelope<{
+      const sessionRes = await fetch("/api/v1/session", { cache: "no-store" });
+      const session = await readApiEnvelope<{
         authenticated: boolean;
         user?: { campus_admin: boolean; mfa_verified: boolean };
         csrf_token?: string;
-      }>;
+      }>(sessionRes, "Campus review queue could not load.");
       if (!session.data?.authenticated) {
         location.assign("/login");
         return;
@@ -37,15 +36,17 @@ export default function CampusReviewsPage() {
         setProblem("A campus administrator session with fresh MFA is required.");
         return;
       }
-      const result = (await fetch("/api/v1/admin/campus-review-requests", {
+      const listRes = await fetch("/api/v1/admin/campus-review-requests", {
         cache: "no-store",
-      }).then((r) => r.json())) as Envelope<{ items: Review[] }>;
+      });
+      const result = await readApiEnvelope<{ items: Review[] }>(
+        listRes,
+        "Campus review queue could not load.",
+      );
       if (result.error) throw new Error(result.error.message);
       setItems(result.data?.items ?? []);
     } catch (e) {
-      setProblem(
-        e instanceof Error ? e.message : "Campus review queue could not load.",
-      );
+      setProblem(e instanceof Error ? e.message : "Campus review queue could not load.");
     }
   }
 
@@ -62,9 +63,13 @@ export default function CampusReviewsPage() {
         headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
         body: JSON.stringify({ decision, reason }),
       });
-      const result = (await response.json()) as Envelope<{ state: string }>;
-      if (!response.ok || result.error)
+      const result = await readApiEnvelope<{ state: string }>(
+        response,
+        "Review decision failed.",
+      );
+      if (!response.ok || result.error) {
         throw new Error(result.error?.message ?? "Review decision failed.");
+      }
       setItems((value) => value.filter((item) => item.id !== id));
       setReason("");
       setMessage(
@@ -77,29 +82,40 @@ export default function CampusReviewsPage() {
 
   return (
     <CampusConsoleShell title="Campus administration" subtitle="Fresh MFA required">
-      <section id="reviews" aria-labelledby="review-title" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
+      <section id="reviews" aria-labelledby="review-title" className="flex flex-col gap-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="eyebrow">Campus administration</p>
-            <h1 id="review-title" className="t-headline-md">
+            <p className="mt-0 mb-1.5 text-link text-xs font-semibold tracking-[0.02em]">
+              Campus administration
+            </p>
+            <h1
+              id="review-title"
+              className="font-display text-[clamp(1.5rem,2.5vw,2rem)] font-semibold leading-[1.19] tracking-[-0.015em] m-0"
+            >
               Campus verification reviews
             </h1>
-            <p className="t-body-md muted" style={{ margin: "6px 0 0", maxWidth: "60ch" }}>
+            <p className="text-sm leading-[21px] text-muted mt-1.5 mb-0 max-w-[60ch]">
               Review campus affiliation requests for your campus. Your decision needs fresh MFA and
               a reason. Approval grants student access but does not verify a mailbox.
             </p>
           </div>
-          <a className="secondary-button pg-btn-compact" href="/home">
+          <a
+            className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium no-underline whitespace-nowrap border border-control bg-surface text-on-surface hover:bg-raised"
+            href="/home"
+          >
             Workspace
           </a>
         </div>
 
-        <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <label className="pg-field" htmlFor="review-reason">
+        <section className="min-w-0 max-w-full bg-surface border border-hairline rounded-2xl p-6 flex flex-col gap-4">
+          <label
+            className="grid gap-1.5 text-[13px] font-medium text-on-surface"
+            htmlFor="review-reason"
+          >
             Decision reason
             <textarea
               id="review-reason"
-              className="pg-textarea"
+              className="w-full min-h-24 px-3.5 py-2.5 border border-control rounded-lg bg-surface text-on-surface text-sm resize-y leading-normal"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               minLength={8}
@@ -110,39 +126,46 @@ export default function CampusReviewsPage() {
           </label>
 
           {problem && (
-            <p className="form-error" role="alert" style={{ margin: 0 }}>
+            <p
+              className="rounded-lg px-4 py-3 text-sm font-medium bg-danger/12 border border-danger/35 text-danger m-0"
+              role="alert"
+            >
               {problem}
             </p>
           )}
           {message && (
-            <p className="form-success" role="status" style={{ margin: 0 }}>
+            <p
+              className="rounded-lg px-4 py-3 text-sm font-medium bg-success/12 border border-success/35 text-success m-0"
+              role="status"
+            >
               {message}
             </p>
           )}
 
           {items.length > 0 ? (
-            <ul className="campus-users">
+            <ul className="list-none m-0 p-0 border-t border-hairline">
               {items.map((item) => (
-                <li key={item.id}>
+                <li
+                  key={item.id}
+                  className="flex flex-wrap justify-between items-center gap-3 py-3.5 border-b border-hairline [overflow-wrap:anywhere]"
+                >
                   <div>
                     <strong>{item.email}</strong>
-                    <p className="t-body-sm muted" style={{ margin: "4px 0" }}>
-                      {item.reason}
-                    </p>
-                    <small className="muted">
+                    <p className="text-[13px] leading-[19px] text-muted my-1">{item.reason}</p>
+                    <small className="text-muted">
                       {new Date(item.created_at).toLocaleString()}
                     </small>
                   </div>
-                  <span className="member-actions">
+                  <span className="flex flex-wrap gap-2">
                     <button
-                      className="primary-button pg-btn-compact"
+                      className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium border border-primary bg-primary text-on-primary cursor-pointer hover:opacity-90 disabled:opacity-55 disabled:cursor-not-allowed"
                       disabled={reason.trim().length < 8}
                       onClick={() => void decide(item.id, "approved")}
                     >
                       Approve student access
                     </button>
                     <button
-                      className="secondary-button pg-btn-compact"
+                      className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium border border-control bg-surface text-on-surface cursor-pointer hover:bg-raised disabled:opacity-55 disabled:cursor-not-allowed"
                       disabled={reason.trim().length < 8}
                       onClick={() => void decide(item.id, "rejected")}
                     >
@@ -154,7 +177,7 @@ export default function CampusReviewsPage() {
             </ul>
           ) : (
             !problem && (
-              <p role="status" className="t-body-md muted" style={{ margin: 0 }}>
+              <p role="status" className="text-sm leading-[21px] text-muted m-0">
                 No pending requests.
               </p>
             )

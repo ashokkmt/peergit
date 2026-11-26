@@ -87,8 +87,8 @@ export function Inbox() {
       } catch (e) {
         const message =
           e instanceof Error &&
-            !e.message.includes("<!DOCTYPE") &&
-            !e.message.includes("not valid JSON")
+          !e.message.includes("<!DOCTYPE") &&
+          !e.message.includes("not valid JSON")
             ? e.message
             : inboxLoadError;
         setError(message);
@@ -148,14 +148,19 @@ export function Inbox() {
 
   if (needsSignIn) {
     return (
-      <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "12px", maxWidth: "38rem" }}>
-        <h2 className="t-title-lg">Sign in to view your inbox</h2>
-        <p className="t-body-md muted" style={{ margin: 0 }}>
+      <section className="min-w-0 max-w-[38rem] bg-surface border border-hairline rounded-2xl p-6 flex flex-col gap-3">
+        <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] m-0">
+          Sign in to view your inbox
+        </h2>
+        <p className="text-sm leading-[21px] text-muted m-0">
           Project updates, application alerts, and notification preferences are linked to your
           verified PeerGit account.
         </p>
         <div>
-          <a className="primary-link" href="/login">
+          <a
+            className="inline-flex min-h-11 items-center justify-center rounded-lg px-[18px] py-2 text-sm font-medium no-underline border border-primary bg-primary text-on-primary hover:opacity-90"
+            href="/login"
+          >
             Sign in with GitHub
           </a>
         </div>
@@ -167,23 +172,18 @@ export function Inbox() {
   const selected = items.find((item) => item.id === selectedId) ?? items[0] ?? null;
 
   const filterBar = (
-    <div
-      style={{
-        padding: "14px 16px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: "12px",
-        borderBottom: "1px solid var(--hairline)",
-        flexWrap: "wrap",
-      }}
-    >
-      <div className="inbox-tabs" role="tablist" aria-label="Notification filter">
+    <div className="px-4 py-3.5 flex items-center justify-between gap-3 border-b border-hairline flex-wrap">
+      <div
+        className="inline-flex p-[3px] rounded-lg bg-raised border border-hairline gap-[3px]"
+        role="tablist"
+        aria-label="Notification filter"
+      >
         <button
           type="button"
           role="tab"
           aria-selected={filter === "all"}
           onClick={() => setFilter("all")}
+          className="min-h-[34px] px-3 py-1 border-0 rounded-[6px] bg-transparent text-muted text-[13px] font-medium cursor-pointer aria-selected:bg-surface aria-selected:text-on-surface aria-selected:shadow-xs"
         >
           All
         </button>
@@ -192,25 +192,25 @@ export function Inbox() {
           role="tab"
           aria-selected={filter === "unread"}
           onClick={() => setFilter("unread")}
+          className="min-h-[34px] px-3 py-1 border-0 rounded-[6px] bg-transparent text-muted text-[13px] font-medium cursor-pointer aria-selected:bg-surface aria-selected:text-on-surface aria-selected:shadow-xs"
         >
           Unread ({data?.unread_count ?? 0})
         </button>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-        <span
-          className={`service-status ${connected ? "ready" : ""}`}
-          role="status"
-          style={{ marginTop: 0 }}
-        >
-          <span className="status-dot" aria-hidden="true" />
+      <div className="flex items-center gap-2.5 flex-wrap">
+        <span className="inline-flex flex-wrap items-center gap-2 text-muted text-xs" role="status">
+          <span
+            className={`w-2 h-2 rounded-full ${connected ? "bg-success" : "bg-warning"}`}
+            aria-hidden="true"
+          />
           {connected
             ? "Live updates connected"
             : "Live updates reconnecting · inbox is saved"}
         </span>
         <button
           type="button"
-          className="secondary-button pg-btn-compact"
+          className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium whitespace-nowrap border border-control bg-surface text-on-surface cursor-pointer hover:bg-raised disabled:opacity-55 disabled:cursor-not-allowed"
           onClick={() => void markAll()}
           disabled={!data?.unread_count}
         >
@@ -222,9 +222,12 @@ export function Inbox() {
 
   if (loading && !data) {
     return (
-      <section aria-labelledby="inbox-title" className="split-list-panel">
+      <section
+        aria-labelledby="inbox-title"
+        className="bg-surface border border-hairline rounded-xl overflow-hidden"
+      >
         {filterBar}
-        <p className="t-body-md muted" style={{ padding: "24px", margin: 0 }} role="status">
+        <p className="text-sm leading-[21px] text-muted p-6 m-0" role="status">
           Loading your inbox…
         </p>
       </section>
@@ -233,34 +236,31 @@ export function Inbox() {
 
   if (items.length === 0) {
     return (
-      <section aria-labelledby="inbox-title" className="split-list-panel">
+      <section
+        aria-labelledby="inbox-title"
+        className="bg-surface border border-hairline rounded-xl overflow-hidden"
+      >
         {filterBar}
         {error && (
           <div
-            className="form-error"
+            className="rounded-lg px-4 py-3 text-sm font-medium bg-danger/12 border border-danger/35 text-danger m-4 flex items-center justify-between gap-3 flex-wrap"
             role="alert"
-            style={{
-              margin: "16px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "12px",
-              flexWrap: "wrap",
-            }}
           >
             <span>{error}</span>
             <button
               type="button"
-              className="secondary-button pg-btn-compact"
+              className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium border border-control bg-surface text-on-surface cursor-pointer hover:bg-raised"
               onClick={() => void load(false)}
             >
               Retry
             </button>
           </div>
         )}
-        <div className="empty-state" style={{ border: 0, borderRadius: 0, minHeight: "260px" }}>
-          <h2 className="t-title-md">You’re all caught up</h2>
-          <p className="t-body-md muted">
+        <div className="grid justify-items-center content-center gap-2.5 min-h-[260px] p-8 text-center bg-surface">
+          <h2 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
+            You’re all caught up
+          </h2>
+          <p className="text-sm leading-[21px] text-muted max-w-[500px] m-0">
             New application and project updates will appear here.
           </p>
         </div>
@@ -269,24 +269,16 @@ export function Inbox() {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+    <div className="flex flex-col gap-4">
       {error && (
         <div
-          className="form-error"
+          className="rounded-lg px-4 py-3 text-sm font-medium bg-danger/12 border border-danger/35 text-danger flex items-center justify-between gap-3 flex-wrap"
           role="alert"
-          style={{
-            margin: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "12px",
-            flexWrap: "wrap",
-          }}
         >
           <span>{error}</span>
           <button
             type="button"
-            className="secondary-button pg-btn-compact"
+            className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium border border-control bg-surface text-on-surface cursor-pointer hover:bg-raised"
             onClick={() => void load(false)}
           >
             Retry
@@ -294,66 +286,53 @@ export function Inbox() {
         </div>
       )}
 
-      <div className="split-layout inbox-split">
-        <section className="split-list-panel" aria-label="Notifications">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(360px,5fr)_minmax(0,7fr)] gap-5 items-start">
+        <section
+          className="bg-surface border border-hairline rounded-xl overflow-hidden"
+          aria-label="Notifications"
+        >
           {filterBar}
 
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          <ul className="list-none p-0 m-0">
             {items.map((item) => {
               const isSelected = selected?.id === item.id;
               return (
-                <li
-                  key={item.id}
-                  style={{ borderBottom: "1px solid var(--hairline)" }}
-                >
+                <li key={item.id} className="border-b border-hairline last:border-b-0">
                   <button
                     type="button"
-                    className="list-item"
                     aria-current={isSelected ? "true" : undefined}
                     onClick={() => setSelectedId(item.id)}
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "6px",
-                      borderBottom: 0,
-                    }}
+                    className="w-full py-3.5 px-4 border-0 border-l-[3px] border-l-transparent bg-surface text-on-surface text-left cursor-pointer flex flex-col gap-1.5 hover:bg-raised aria-[current=true]:bg-raised aria-[current=true]:border-l-link"
                   >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: "8px",
-                        width: "100%",
-                      }}
-                    >
+                    <div className="flex items-center justify-between gap-2 w-full">
                       <span
-                        className="t-label-sm"
-                        style={{
-                          color: item.category === "applications" ? "var(--link)" : "var(--muted)",
-                        }}
+                        className={`text-xs font-medium leading-4 ${
+                          item.category === "applications" ? "text-link" : "text-muted"
+                        }`}
                       >
                         {formatCategory(item.category)}
                       </span>
                       {!item.read_at ? (
-                        <span className="brand-dot" aria-label="Unread" />
+                        <span
+                          className="inline-block w-2 h-2 rounded-full bg-brand shrink-0"
+                          aria-label="Unread"
+                        />
                       ) : (
-                        <span className="t-label-sm muted">Read</span>
+                        <span className="text-xs font-medium leading-4 text-muted">Read</span>
                       )}
                     </div>
 
-                    <h2 className="t-title-sm" style={{ margin: 0, overflowWrap: "anywhere" }}>
+                    <h2 className="text-base font-semibold leading-[22px] m-0 [overflow-wrap:anywhere]">
                       {item.title}
                     </h2>
 
-                    <p
-                      className="t-body-sm muted"
-                      style={{ margin: 0, overflowWrap: "anywhere" }}
-                    >
+                    <p className="text-[13px] leading-[19px] text-muted m-0 [overflow-wrap:anywhere]">
                       {item.body}
                     </p>
 
-                    <small style={{ marginTop: "2px" }}>{formatTimestamp(item.created_at)}</small>
+                    <small className="block mt-0.5 text-muted text-xs">
+                      {formatTimestamp(item.created_at)}
+                    </small>
                   </button>
                 </li>
               );
@@ -361,16 +340,10 @@ export function Inbox() {
           </ul>
 
           {data && data.next_cursor > 0 && (
-            <div
-              style={{
-                padding: "14px 16px",
-                borderTop: "1px solid var(--hairline)",
-                textAlign: "center",
-              }}
-            >
+            <div className="px-4 py-3.5 border-t border-hairline text-center">
               <button
                 type="button"
-                className="secondary-button pg-btn-compact"
+                className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium border border-control bg-surface text-on-surface cursor-pointer hover:bg-raised"
                 onClick={() => void load(true)}
               >
                 Load older notifications
@@ -381,75 +354,48 @@ export function Inbox() {
 
         {selected && (
           <section
-            className="pg-card"
+            className="min-w-0 max-w-full bg-surface border border-hairline rounded-2xl overflow-hidden flex flex-col"
             aria-label="Notification details"
-            style={{
-              padding: 0,
-              overflow: "hidden",
-              display: "flex",
-              flexDirection: "column",
-            }}
           >
-            <div
-              style={{
-                padding: "20px 24px",
-                borderBottom: "1px solid var(--hairline)",
-                display: "flex",
-                flexWrap: "wrap",
-                alignItems: "flex-start",
-                justifyContent: "space-between",
-                gap: "12px",
-              }}
-            >
-              <div style={{ minWidth: 0, flex: "1 1 220px" }}>
-                <p className="t-label-sm muted" style={{ margin: 0 }}>
+            <div className="px-6 py-5 border-b border-hairline flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-[1_1_220px]">
+                <p className="text-xs font-medium leading-4 text-muted m-0">
                   {formatCategory(selected.category)} · {formatTimestamp(selected.created_at)}
                 </p>
-                <p
-                  className="t-title-md"
-                  style={{ margin: "4px 0 0", overflowWrap: "anywhere" }}
-                >
+                <p className="text-[18px] font-semibold leading-6 tracking-[-0.005em] mt-1 mb-0 [overflow-wrap:anywhere]">
                   {selected.title}
                 </p>
               </div>
 
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              <div className="flex items-center gap-2 flex-wrap">
                 {!selected.read_at ? (
                   <button
                     type="button"
-                    className="secondary-button pg-btn-compact"
+                    className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium border border-control bg-surface text-on-surface cursor-pointer hover:bg-raised"
                     onClick={() => void markRead(selected.id)}
                   >
                     Mark read
                   </button>
                 ) : (
-                  <span className="pg-pill pg-pill-raised">Read</span>
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-raised border border-hairline text-xs font-medium leading-4">
+                    Read
+                  </span>
                 )}
               </div>
             </div>
 
-            <div
-              style={{
-                padding: "24px",
-                display: "flex",
-                flexDirection: "column",
-                gap: "16px",
-              }}
-            >
-              <div className="pg-card-canvas">
-                <p
-                  className="t-body-md"
-                  style={{ margin: 0, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}
-                >
+            <div className="p-6 flex flex-col gap-4">
+              <div className="min-w-0 max-w-full bg-canvas border border-hairline rounded-2xl p-5">
+                <p className="text-sm leading-[21px] m-0 [overflow-wrap:anywhere] whitespace-pre-wrap">
                   {selected.body}
                 </p>
               </div>
 
               {(selected.project_id || selected.application_id) && (
-                <div className="button-row">
+                <div className="flex flex-wrap gap-2.5 items-center">
                   {selected.project_id && (
                     <a
-                      className="primary-link pg-btn-compact"
+                      className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium no-underline whitespace-nowrap border border-primary bg-primary text-on-primary hover:opacity-90"
                       href={`/projects/${encodeURIComponent(selected.project_id)}?tab=work`}
                     >
                       Open project updates
@@ -457,7 +403,7 @@ export function Inbox() {
                   )}
                   {selected.application_id && (
                     <a
-                      className="secondary-button pg-btn-compact"
+                      className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium no-underline whitespace-nowrap border border-control bg-surface text-on-surface hover:bg-raised"
                       href={
                         selected.project_id
                           ? `/projects/${encodeURIComponent(selected.project_id)}?tab=roles`
@@ -470,7 +416,7 @@ export function Inbox() {
                 </div>
               )}
 
-              <div className="pg-callout" style={{ alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+              <div className="flex items-center justify-between flex-wrap gap-3 p-4 border border-hairline rounded-xl bg-raised text-muted text-[13px] leading-[19px]">
                 <span>
                   Contextual direct replies for project and application threads ship separately from
                   notifications.
@@ -479,26 +425,21 @@ export function Inbox() {
               </div>
             </div>
 
-            <form
-              style={{
-                padding: "16px 24px",
-                borderTop: "1px solid var(--hairline)",
-                display: "flex",
-                flexWrap: "wrap",
-                gap: "10px",
-              }}
-            >
+            <form className="px-6 py-4 border-t border-hairline flex flex-wrap gap-2.5">
               <label className="sr-only" htmlFor="reply-box">
                 Contextual messaging preview
               </label>
               <input
                 id="reply-box"
-                className="pg-input"
-                style={{ flex: "1 1 200px" }}
+                className="flex-[1_1_200px] min-h-11 px-3.5 py-2.5 border border-control rounded-lg bg-surface text-on-surface text-sm leading-5 disabled:opacity-60"
                 disabled
                 placeholder="Direct replies will get implemented in a later phase"
               />
-              <button className="primary-button pg-btn-compact" disabled type="button">
+              <button
+                className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium whitespace-nowrap border border-primary bg-primary text-on-primary disabled:opacity-55 disabled:cursor-not-allowed"
+                disabled
+                type="button"
+              >
                 Send
               </button>
             </form>

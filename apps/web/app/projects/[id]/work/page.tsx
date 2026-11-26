@@ -10,9 +10,17 @@ export default async function ProjectWorkPage({
   const { id } = await params;
   return (
     <>
-      <a className="skip-link" href="#main-content">Skip to content</a>
+      <a
+        className="fixed z-100 left-4 -top-20 px-4 py-2.5 bg-primary text-on-primary rounded-lg font-semibold no-underline focus:top-3"
+        href="#main-content"
+      >
+        Skip to content
+      </a>
       <SiteHeader workspace />
-      <main id="main-content" className="page-container" style={{ flex: 1 }}>
+      <main
+        id="main-content"
+        className="flex-1 w-[min(1240px,calc(100%-32px))] md:w-[min(1240px,calc(100%-64px))] mx-auto pt-8 pb-16"
+      >
         <ProjectWork projectID={id} />
       </main>
       <SiteFooter />

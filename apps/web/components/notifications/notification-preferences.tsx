@@ -102,52 +102,50 @@ export function NotificationPreferences() {
   return (
     <section
       id="notifications"
-      className="pg-card"
-      style={{ display: "flex", flexDirection: "column", gap: "16px" }}
+      className="min-w-0 max-w-full bg-surface border border-hairline rounded-2xl p-6 flex flex-col gap-4"
     >
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "12px",
-        }}
-      >
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="t-title-lg">Notifications</h2>
-          <p className="t-body-md muted" style={{ margin: "6px 0 0" }}>
+          <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] m-0">
+            Notifications
+          </h2>
+          <p className="text-sm leading-[21px] text-muted mt-1.5 mb-0">
             In-app notifications stay saved in your inbox. Choose which project activity can also
             reach your campus email.
           </p>
         </div>
-        <a className="secondary-button pg-btn-compact" href="/inbox">
+        <a
+          className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium no-underline whitespace-nowrap border border-control bg-surface text-on-surface hover:bg-raised"
+          href="/inbox"
+        >
           Open inbox
         </a>
       </div>
 
       {signedIn === false ? (
-        <p className="t-body-sm muted" style={{ margin: 0 }}>
+        <p className="text-[13px] leading-[19px] text-muted m-0">
           Sign in to manage email notification preferences for your campus account.
         </p>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          <div className="pg-card-canvas" style={{ padding: "14px 16px" }}>
+        <div className="flex flex-col gap-3">
+          <div className="min-w-0 max-w-full bg-canvas border border-hairline rounded-2xl px-4 py-3.5">
             <label
-              className="check-row"
-              style={{ margin: 0, cursor: loading ? "wait" : "pointer" }}
+              className={`flex items-start gap-2.5 text-sm leading-5 ${
+                loading ? "cursor-wait" : "cursor-pointer"
+              }`}
             >
               <input
                 type="checkbox"
                 checked={enabled}
                 disabled={loading || saving}
                 onChange={(e) => void save(e.currentTarget.checked)}
+                className="w-4 h-4 mt-0.5 accent-primary shrink-0"
               />
-              <span style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                <strong className="t-label-md" style={{ color: "var(--text)" }}>
+              <span className="flex flex-col gap-0.5">
+                <strong className="text-[13px] font-medium leading-[18px] text-on-surface">
                   Project activity email
                 </strong>
-                <span className="t-body-sm muted">
+                <span className="text-[13px] leading-[19px] text-muted">
                   Updates, discussions, tasks, milestones, and comments from projects you can
                   currently access.
                 </span>
@@ -155,63 +153,50 @@ export function NotificationPreferences() {
             </label>
           </div>
 
-          <div
-            className="pg-card-canvas"
-            style={{
-              padding: "14px 16px",
-              display: "flex",
-              flexWrap: "wrap",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "12px",
-            }}
-          >
-            <div style={{ flex: "1 1 240px", minWidth: 0 }}>
-              <p className="t-label-md" style={{ margin: 0 }}>
+          <div className="min-w-0 max-w-full bg-canvas border border-hairline rounded-2xl px-4 py-3.5 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex-[1_1_240px] min-w-0">
+              <p className="text-[13px] font-medium leading-[18px] m-0">
                 Application decisions &amp; account security
               </p>
-              <p className="t-body-sm muted" style={{ margin: "2px 0 0" }}>
+              <p className="text-[13px] leading-[19px] text-muted mt-0.5 mb-0">
                 Important application decisions and campus verification or security notices remain
                 enabled separately.
               </p>
             </div>
-            <span className="pg-pill pg-pill-success">Always enabled</span>
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-surface border border-success text-success text-xs font-medium leading-4">
+              Always enabled
+            </span>
           </div>
         </div>
       )}
 
       {loading && (
-        <p className="t-label-sm muted" style={{ margin: 0 }} role="status">
+        <p className="text-xs font-medium leading-4 text-muted m-0" role="status">
           Loading preferences…
         </p>
       )}
       {saving && (
-        <p className="t-label-sm muted" style={{ margin: 0 }} role="status">
+        <p className="text-xs font-medium leading-4 text-muted m-0" role="status">
           Saving…
         </p>
       )}
       {message && (
-        <p className="form-success" style={{ margin: 0 }} role="status">
+        <p
+          className="rounded-lg px-4 py-3 text-sm font-medium bg-success/12 border border-success/35 text-success m-0"
+          role="status"
+        >
           {message}
         </p>
       )}
       {error && (
         <div
-          className="form-error"
-          style={{
-            margin: 0,
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "12px",
-          }}
+          className="rounded-lg px-4 py-3 text-sm font-medium bg-danger/12 border border-danger/35 text-danger m-0 flex flex-wrap items-center justify-between gap-3"
           role="alert"
         >
           <span>{error}</span>
           <button
             type="button"
-            className="secondary-button pg-btn-compact"
+            className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium border border-control bg-surface text-on-surface cursor-pointer hover:bg-raised"
             onClick={() => void load()}
           >
             Retry

@@ -10,11 +10,10 @@ export default function SettingsPage() {
 
       <section
         id="appearance"
-        className="pg-card"
-        style={{ display: "flex", flexDirection: "column", gap: "12px" }}
+        className="min-w-0 max-w-full bg-surface border border-hairline rounded-2xl p-6 flex flex-col gap-3"
       >
-        <h2 className="t-title-lg">Appearance</h2>
-        <p className="t-body-md muted" style={{ margin: 0 }}>
+        <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] m-0">Appearance</h2>
+        <p className="text-sm leading-[21px] text-muted m-0">
           Choose the theme for this device. System default follows your operating system
           preference.
         </p>
@@ -25,39 +24,27 @@ export default function SettingsPage() {
 
       <NotificationPreferences />
 
-      <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "8px",
-          }}
-        >
-          <h2 className="t-title-lg">Scoped HTTPS Git credentials</h2>
+      <section className="min-w-0 max-w-full bg-surface border border-hairline rounded-2xl p-6 flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] m-0">
+            Scoped HTTPS Git credentials
+          </h2>
           <PreviewBadge phase="Stage B1" />
         </div>
-        <p className="t-body-md muted" style={{ margin: 0 }}>
+        <p className="text-sm leading-[21px] text-muted m-0">
           Personal Git credentials for PeerGit-hosted repositories will include one-time reveal,
           expiry, last use, and immediate revocation.
         </p>
       </section>
 
-      <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "8px",
-          }}
-        >
-          <h2 className="t-title-lg">Data export</h2>
+      <section className="min-w-0 max-w-full bg-surface border border-hairline rounded-2xl p-6 flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] m-0">
+            Data export
+          </h2>
           <PreviewBadge phase="Phase 8" />
         </div>
-        <p className="t-body-md muted" style={{ margin: 0 }}>
+        <p className="text-sm leading-[21px] text-muted m-0">
           Self-service data export and deletion workflows will get implemented in a later phase.
         </p>
       </section>

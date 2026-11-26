@@ -2,8 +2,8 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { PreviewBadge } from "@/components/layout/preview-banner";
+import { readApiEnvelope } from "@/lib/http";
 
-type Envelope<T> = { data?: T; error?: { message?: string } };
 type Binding = {
   id: string;
   full_name: string;
@@ -51,30 +51,38 @@ type Data = {
   snapshots: Snapshot[];
 };
 
+const cardClass = "min-w-0 max-w-full bg-surface border border-hairline rounded-2xl p-6 flex flex-col";
+const compactSecondaryBtn =
+  "inline-flex min-h-[38px] items-center justify-center gap-2 rounded-lg px-3.5 py-1.5 text-[13px] font-medium no-underline whitespace-nowrap border border-control bg-surface text-on-surface cursor-pointer hover:bg-raised disabled:opacity-55 disabled:cursor-not-allowed";
+
 function renderDiffLines(patch: string) {
   return patch.split("\n").map((line, index) => {
     if (line.startsWith("+") && !line.startsWith("+++")) {
       return (
-        <span key={index} className="diff-line-add" aria-label="Added line">
+        <span key={index} className="block px-2 bg-success/14 text-success" aria-label="Added line">
           {line}
         </span>
       );
     }
     if (line.startsWith("-") && !line.startsWith("---")) {
       return (
-        <span key={index} className="diff-line-del" aria-label="Removed line">
+        <span key={index} className="block px-2 bg-danger/14 text-danger" aria-label="Removed line">
           {line}
         </span>
       );
     }
     if (line.startsWith("@@")) {
       return (
-        <span key={index} className="diff-line-hunk">
+        <span key={index} className="block px-2 text-muted">
           {line}
         </span>
       );
     }
-    return <span key={index} style={{ display: "block" }}>{line}</span>;
+    return (
+      <span key={index} className="block px-2">
+        {line}
+      </span>
+    );
   });
 }
 
@@ -115,10 +123,8 @@ export function RepositoryOverview({
         cache: "no-store",
         credentials: "same-origin",
       });
-      const v =
-        r.status === 204
-          ? { data: undefined }
-          : ((await r.json()) as Envelope<T>);
+      if (r.status === 204) return undefined as T;
+      const v = await readApiEnvelope<T>(r, "Repository request failed.");
       if (!r.ok) throw new Error(v.error?.message ?? "Repository request failed.");
       return v.data as T;
     },
@@ -176,22 +182,20 @@ export function RepositoryOverview({
         );
       })
       .catch(() => {
-        if (!controller.signal.aborted)
+        if (!controller.signal.aborted) {
           setHistoryProblem(
             "Live branch history is unavailable. Showing synchronized commit evidence.",
           );
+        }
       });
     return () => controller.abort();
   }, [api, projectID, tab]);
 
-  const commits =
-    history ?? data.contributions.filter((item) => item.kind === "commit");
+  const commits = history ?? data.contributions.filter((item) => item.kind === "commit");
   const [selection, setSelection] = useState("");
   useEffect(() => {
     setSelection(
-      new URLSearchParams(location.search).get(
-        tab === "activity" ? "commit" : "item",
-      ) ?? "",
+      new URLSearchParams(location.search).get(tab === "activity" ? "commit" : "item") ?? "",
     );
   }, [tab]);
 
@@ -218,10 +222,10 @@ export function RepositoryOverview({
   async function retry(id: string) {
     setBusy(true);
     try {
-      await api(
-        `/api/v1/projects/${projectID}/repository/snapshots/${id}/retry`,
-        { method: "POST", body: "{}" },
-      );
+      await api(`/api/v1/projects/${projectID}/repository/snapshots/${id}/retry`, {
+        method: "POST",
+        body: "{}",
+      });
       setMessage("Snapshot retry queued for the same commit.");
       await refresh();
     } catch (e) {
@@ -232,8 +236,7 @@ export function RepositoryOverview({
   }
 
   useEffect(() => {
-    if (tab !== "activity" || !selection || !/^[a-f0-9]{40}$/.test(selection))
-      return;
+    if (tab !== "activity" || !selection || !/^[a-f0-9]{40}$/.test(selection)) return;
     const controller = new AbortController();
     void api<NonNullable<typeof diff>>(
       `/api/v1/projects/${projectID}/repository/commit?sha=${selection}`,
@@ -243,10 +246,9 @@ export function RepositoryOverview({
         if (!controller.signal.aborted) setDiff(value);
       })
       .catch((e) => {
-        if (!controller.signal.aborted)
-          setProblem(
-            e instanceof Error ? e.message : "Commit diff could not be loaded.",
-          );
+        if (!controller.signal.aborted) {
+          setProblem(e instanceof Error ? e.message : "Commit diff could not be loaded.");
+        }
       });
     return () => controller.abort();
   }, [api, projectID, selection, tab]);
@@ -260,47 +262,45 @@ export function RepositoryOverview({
       : undefined;
 
   return (
-    <section
-      className="repository-panel"
-      aria-label="Repository evidence"
-      style={{ display: "flex", flexDirection: "column", gap: "20px" }}
-    >
+    <section className="flex flex-col gap-5" aria-label="Repository evidence">
       {problem && (
-        <p className="form-error" role="alert" style={{ margin: 0 }}>
+        <p
+          className="rounded-lg px-4 py-3 text-sm font-medium bg-danger/12 border border-danger/35 text-danger m-0"
+          role="alert"
+        >
           {problem}
         </p>
       )}
       {message && (
-        <p className="form-success" role="status" style={{ margin: 0 }}>
+        <p
+          className="rounded-lg px-4 py-3 text-sm font-medium bg-success/12 border border-success/35 text-success m-0"
+          role="status"
+        >
           {message}
         </p>
       )}
 
       {loading ? (
-        <p role="status">Loading repository…</p>
+        <p role="status" className="m-0">
+          Loading repository…
+        </p>
       ) : !data.repository ? (
-        <div className="repository-empty">
-          <p>This older project has no connected repository yet.</p>
-          <a className="primary-link" href="/account/github">
+        <div className="grid justify-items-center content-center gap-2.5 min-h-[220px] p-8 border border-dashed border-control rounded-2xl text-center bg-surface">
+          <p className="m-0 text-muted">This older project has no connected repository yet.</p>
+          <a
+            className="inline-flex min-h-11 items-center justify-center rounded-lg px-[18px] py-2 text-sm font-medium no-underline border border-primary bg-primary text-on-primary hover:opacity-90"
+            href="/account/github"
+          >
             Connect GitHub and import a repository
           </a>
         </div>
       ) : (
         <>
           {tab === "code" && (
-            <div
-              className="pg-card"
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "16px",
-              }}
-            >
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px" }}>
-                  <strong className="t-title-sm">
+            <div className={`${cardClass} flex-row flex-wrap items-center justify-between gap-4`}>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <strong className="text-base font-semibold leading-[22px]">
                     {providerURL ? (
                       <a href={providerURL} target="_blank" rel="noreferrer">
                         {data.repository.full_name} ↗
@@ -309,7 +309,7 @@ export function RepositoryOverview({
                       data.repository.full_name
                     )}
                   </strong>
-                  <span className="t-body-sm muted">
+                  <span className="text-[13px] leading-[19px] text-muted">
                     {data.repository.access_state.replaceAll("_", " ")} · sync{" "}
                     {data.repository.sync_health.replaceAll("_", " ")}
                     {data.repository.last_synced_at
@@ -317,21 +317,23 @@ export function RepositoryOverview({
                       : ""}
                   </span>
                 </div>
-                <p className="t-body-sm muted" style={{ margin: 0 }}>
+                <p className="text-[13px] leading-[19px] text-muted m-0">
                   {data.repository.description || "No repository description."} · Default branch:{" "}
-                  <code className="t-mono-sm">{data.repository.default_branch || "not set"}</code>
+                  <code className="font-mono text-[13px] leading-[19px]">
+                    {data.repository.default_branch || "not set"}
+                  </code>
                   {Object.keys(data.repository.languages).length > 0
                     ? ` · Languages: ${Object.keys(data.repository.languages).join(", ")}`
                     : ""}
                 </p>
                 {data.repository.limitations && (
-                  <p className="t-body-sm muted" style={{ margin: 0 }}>
+                  <p className="text-[13px] leading-[19px] text-muted m-0">
                     {data.repository.limitations}
                   </p>
                 )}
               </div>
               <button
-                className="secondary-button pg-btn-compact"
+                className={compactSecondaryBtn}
                 type="button"
                 disabled={loading || busy}
                 onClick={() => void refresh()}
@@ -342,65 +344,52 @@ export function RepositoryOverview({
           )}
 
           {tab === "activity" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: "12px",
-                }}
-              >
+            <div className="flex flex-col gap-[18px]">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="t-title-lg">Commit activity</h2>
-                  <p className="t-body-sm muted" style={{ margin: "4px 0 0" }}>
+                  <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] m-0">
+                    Commit activity
+                  </h2>
+                  <p className="text-[13px] leading-[19px] text-muted mt-1 mb-0">
                     Commit records are observations from the connected GitHub repository. Unmatched
                     authors stay unlinked.
                   </p>
                 </div>
-                <div className="button-row">
-                  <a className="secondary-button pg-btn-compact" href={`${base}?tab=issues`}>
+                <div className="flex flex-wrap gap-2.5 items-center">
+                  <a className={compactSecondaryBtn} href={`${base}?tab=issues`}>
                     Observed issues
                   </a>
-                  <a
-                    className="secondary-button pg-btn-compact"
-                    href={`${base}?tab=pull-requests`}
-                  >
+                  <a className={compactSecondaryBtn} href={`${base}?tab=pull-requests`}>
                     Observed pull requests
                   </a>
                 </div>
               </div>
 
               {historyProblem && (
-                <p className="pg-callout" role="status">
+                <p
+                  className="flex items-start gap-3 p-4 border border-hairline rounded-xl bg-raised text-muted text-[13px] leading-[19px] m-0"
+                  role="status"
+                >
                   {historyProblem}
                 </p>
               )}
 
-              <div className="split-layout">
-                <div className="split-list-panel">
-                  <div
-                    style={{
-                      padding: "12px 16px",
-                      borderBottom: "1px solid var(--hairline)",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <span className="t-title-sm">Commits</span>
-                    <span className="t-label-sm muted">{commits.length} observed</span>
+              <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5 items-start">
+                <div className="bg-surface border border-hairline rounded-xl overflow-hidden">
+                  <div className="px-4 py-3 border-b border-hairline flex justify-between items-center">
+                    <span className="text-base font-semibold leading-[22px]">Commits</span>
+                    <span className="text-xs font-medium leading-4 text-muted">
+                      {commits.length} observed
+                    </span>
                   </div>
                   {commits.length ? (
-                    <div className="list-rail">
+                    <div className="flex flex-col">
                       {commits.map((c) => {
                         const sha = c.canonical_id.replace(/^git:sha1:/, "");
                         return (
                           <button
                             key={c.id}
                             type="button"
-                            className="list-item"
                             aria-current={selection === sha ? "true" : undefined}
                             onClick={() =>
                               location.assign(
@@ -413,14 +402,17 @@ export function RepositoryOverview({
                                 })}`,
                               )
                             }
-                            style={{ cursor: "pointer", borderRight: 0, borderTop: 0 }}
+                            className="block w-full py-3.5 px-4 border-0 border-b border-hairline last:border-b-0 border-l-[3px] border-l-transparent bg-surface text-on-surface text-left cursor-pointer hover:bg-raised aria-[current=true]:bg-raised aria-[current=true]:border-l-link"
                           >
-                            <strong className="t-body-md" style={{ display: "block" }}>
+                            <strong className="block text-sm leading-[21px] [overflow-wrap:anywhere]">
                               {c.title || c.canonical_id}
                             </strong>
-                            <small>
+                            <small className="block mt-1 text-muted text-xs">
                               {c.author_name || c.author_login || "Unlinked GitHub account"} ·{" "}
-                              <code className="t-mono-sm">{sha.slice(0, 7)}</code> ·{" "}
+                              <code className="font-mono text-[13px] leading-[19px]">
+                                {sha.slice(0, 7)}
+                              </code>{" "}
+                              ·{" "}
                               {c.occurred_at
                                 ? new Date(c.occurred_at).toLocaleDateString()
                                 : "Date unavailable"}
@@ -430,33 +422,26 @@ export function RepositoryOverview({
                       })}
                     </div>
                   ) : (
-                    <p className="t-body-md muted" style={{ padding: "16px", margin: 0 }}>
+                    <p className="text-sm leading-[21px] text-muted p-4 m-0">
                       Commit evidence has not synced yet.
                     </p>
                   )}
                 </div>
 
-                <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "16px" }}>
+                <div className="min-w-0 flex flex-col gap-4">
                   {diff ? (
                     <>
-                      <div
-                        className="pg-card"
-                        style={{
-                          display: "flex",
-                          flexWrap: "wrap",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: "12px",
-                        }}
-                      >
+                      <div className={`${cardClass} flex-row flex-wrap items-center justify-between gap-3`}>
                         <div>
-                          <h3 className="t-title-md">Commit {diff.sha.slice(0, 12)}</h3>
-                          <p className="t-body-sm muted" style={{ margin: "4px 0 0" }}>
+                          <h3 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
+                            Commit {diff.sha.slice(0, 12)}
+                          </h3>
+                          <p className="text-[13px] leading-[19px] text-muted mt-1 mb-0">
                             {diff.files.length} {diff.files.length === 1 ? "file" : "files"} changed
                           </p>
                         </div>
                         <a
-                          className="secondary-button pg-btn-compact"
+                          className={compactSecondaryBtn}
                           href={`${base}?tab=code&sha=${diff.sha}`}
                         >
                           Browse tree at SHA
@@ -464,14 +449,19 @@ export function RepositoryOverview({
                       </div>
 
                       {diff.files.map((file) => (
-                        <article key={file.filename} className="code-file-box">
-                          <div className="code-file-header">
-                            <code className="t-mono-sm" style={{ fontWeight: 600 }}>
+                        <article
+                          key={file.filename}
+                          className="bg-surface border border-hairline rounded-xl overflow-hidden"
+                        >
+                          <div className="bg-raised border-b border-hairline px-4 py-2.5 flex flex-wrap items-center justify-between gap-2.5">
+                            <code className="font-mono text-[13px] leading-[19px] font-semibold [overflow-wrap:anywhere]">
                               {file.filename}
                             </code>
-                            <span className="t-label-sm muted">{file.status} · Unified diff</span>
+                            <span className="text-xs font-medium leading-4 text-muted">
+                              {file.status} · Unified diff
+                            </span>
                           </div>
-                          <pre className="code-pre">
+                          <pre className="m-0 max-h-[65vh] overflow-auto whitespace-pre [tab-size:2] p-4 bg-surface text-on-surface font-mono text-[13px] leading-[1.55]">
                             {file.patch
                               ? renderDiffLines(file.patch)
                               : "Diff omitted by GitHub for a binary or large file."}
@@ -480,8 +470,8 @@ export function RepositoryOverview({
                       ))}
                     </>
                   ) : (
-                    <div className="pg-card">
-                      <p className="t-body-md muted" style={{ margin: 0 }}>
+                    <div className={cardClass}>
+                      <p className="text-sm leading-[21px] text-muted m-0">
                         Select a commit from the history list to inspect changed files and diffs.
                       </p>
                     </div>
@@ -500,18 +490,20 @@ export function RepositoryOverview({
               const selected = records.find((item) => item.id === selection);
               const label = isIssue ? "Issues" : "Pull requests";
               return (
-                <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
-                  <div className="section-heading" style={{ marginBottom: 0 }}>
+                <div className="flex flex-col gap-[18px]">
+                  <div className="flex flex-wrap items-end justify-between gap-4">
                     <div>
-                      <h2 className="t-title-lg">{label}</h2>
-                      <p className="t-body-sm muted" style={{ margin: "4px 0 0" }}>
+                      <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] m-0">
+                        {label}
+                      </h2>
+                      <p className="text-[13px] leading-[19px] text-muted mt-1 mb-0">
                         PeerGit displays synchronized summaries. Open GitHub for the complete record
                         and to make changes.
                       </p>
                     </div>
                     {providerURL && (
                       <a
-                        className="secondary-button pg-btn-compact"
+                        className={compactSecondaryBtn}
                         href={providerURL + (isIssue ? "/issues" : "/pulls")}
                       >
                         Open on GitHub ↗
@@ -520,74 +512,70 @@ export function RepositoryOverview({
                   </div>
 
                   {selection && !selected && (
-                    <p className="pg-callout" role="status">
+                    <p
+                      className="flex items-start gap-3 p-4 border border-hairline rounded-xl bg-raised text-muted text-[13px] leading-[19px] m-0"
+                      role="status"
+                    >
                       This record is unavailable in the current observations.
                     </p>
                   )}
 
-                  <div className="split-layout">
-                    <nav className="split-list-panel list-rail" aria-label={label}>
+                  <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5 items-start">
+                    <nav
+                      className="bg-surface border border-hairline rounded-xl overflow-hidden flex flex-col"
+                      aria-label={label}
+                    >
                       {records.map((item) => (
                         <a
                           key={item.id}
-                          className="list-item"
                           aria-current={selected?.id === item.id ? "true" : undefined}
                           href={base + "?" + new URLSearchParams({ tab, item: item.id })}
+                          className="block py-3.5 px-4 border-b border-hairline last:border-b-0 border-l-[3px] border-l-transparent bg-surface text-on-surface no-underline text-left hover:bg-raised aria-[current=true]:bg-raised aria-[current=true]:border-l-link"
                         >
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", marginBottom: "4px" }}>
-                            <span className="t-mono-sm muted">
+                          <div className="flex justify-between gap-2 mb-1">
+                            <span className="font-mono text-[13px] leading-[19px] text-muted">
                               {item.number ? `#${item.number}` : ""}
                             </span>
-                            <span className="pg-pill pg-pill-success">
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-surface border border-success text-success text-xs font-medium leading-4">
                               {item.state || "State unavailable"}
                             </span>
                           </div>
-                          <strong className="t-title-sm" style={{ display: "block" }}>
+                          <strong className="block text-base font-semibold leading-[22px]">
                             {item.title || "Title unavailable"}
                           </strong>
                         </a>
                       ))}
                       {!records.length && (
-                        <p className="t-body-md muted" style={{ padding: "16px", margin: 0 }}>
+                        <p className="text-sm leading-[21px] text-muted p-4 m-0">
                           No synchronized summaries available.
                         </p>
                       )}
                     </nav>
 
-                    <div style={{ minWidth: 0 }}>
+                    <div className="min-w-0">
                       {selected ? (
-                        <article className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                          <div
-                            style={{
-                              display: "flex",
-                              flexWrap: "wrap",
-                              alignItems: "flex-start",
-                              justifyContent: "space-between",
-                              gap: "12px",
-                              paddingBottom: "14px",
-                              borderBottom: "1px solid var(--hairline)",
-                            }}
-                          >
+                        <article className={`${cardClass} gap-4`}>
+                          <div className="flex flex-wrap items-start justify-between gap-3 pb-3.5 border-b border-hairline">
                             <div>
-                              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px" }}>
-                                <span className="pg-pill pg-pill-success">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-surface border border-success text-success text-xs font-medium leading-4">
                                   {selected.state || "State unavailable"} · GitHub{" "}
                                   {isIssue ? "Issue" : "PR"}
                                   {selected.number ? ` #${selected.number}` : ""}
                                 </span>
-                                <span className="t-label-sm muted">
+                                <span className="text-xs font-medium leading-4 text-muted">
                                   {isIssue
                                     ? "Repository issue (distinct from Project tasks)"
                                     : "Synchronized pull request observation"}
                                 </span>
                               </div>
-                              <h3 className="t-title-lg" style={{ marginTop: "8px" }}>
+                              <h3 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] mt-2 mb-0">
                                 {selected.title || "Title unavailable"}
                               </h3>
                             </div>
                             {providerURL && selected.number && (
                               <a
-                                className="secondary-button pg-btn-compact"
+                                className={compactSecondaryBtn}
                                 href={
                                   providerURL +
                                   (isIssue ? "/issues/" : "/pull/") +
@@ -599,10 +587,10 @@ export function RepositoryOverview({
                             )}
                           </div>
 
-                          <p className="t-body-md record-summary" style={{ margin: 0 }}>
+                          <p className="text-sm leading-[21px] [overflow-wrap:anywhere] whitespace-pre-wrap m-0">
                             {selected.summary || "Summary unavailable."}
                           </p>
-                          <p className="t-body-sm muted" style={{ margin: 0 }}>
+                          <p className="text-[13px] leading-[19px] text-muted m-0">
                             Observed{" "}
                             {selected.observed_at
                               ? new Date(selected.observed_at).toLocaleString()
@@ -610,9 +598,9 @@ export function RepositoryOverview({
                             .
                           </p>
 
-                          <div className="pg-callout" style={{ flexDirection: "column", gap: "6px" }}>
-                            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "8px", width: "100%" }}>
-                              <strong className="t-label-md" style={{ color: "var(--link)" }}>
+                          <div className="flex flex-col gap-1.5 p-4 border border-hairline rounded-xl bg-raised text-muted text-[13px] leading-[19px]">
+                            <div className="flex flex-wrap items-center justify-between gap-2 w-full">
+                              <strong className="text-[13px] font-medium leading-[18px] text-link">
                                 {isIssue
                                   ? "Qualified Pilot Preview (Native Issue Composer)"
                                   : "Qualified Pilot Preview (Native PR Review & Merge)"}
@@ -627,8 +615,8 @@ export function RepositoryOverview({
                           </div>
                         </article>
                       ) : (
-                        <div className="pg-card">
-                          <p className="t-body-md muted" style={{ margin: 0 }}>
+                        <div className={cardClass}>
+                          <p className="text-sm leading-[21px] text-muted m-0">
                             Select an item from the list to inspect its synchronized summary and
                             upstream GitHub link.
                           </p>
@@ -641,16 +629,22 @@ export function RepositoryOverview({
             })()}
 
           {tab === "security" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            <div className="flex flex-col gap-5">
               <div>
-                <p className="eyebrow">Access and source protection</p>
-                <h2 className="t-title-lg">Security</h2>
+                <p className="mt-0 mb-1.5 text-link text-xs font-semibold tracking-[0.02em]">
+                  Access and source protection
+                </p>
+                <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] m-0">
+                  Security
+                </h2>
               </div>
 
-              <div className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-                  <h3 className="t-title-md">Repository access</h3>
-                  <span className="t-label-sm muted">
+              <div className={`${cardClass} gap-4`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
+                    Repository access
+                  </h3>
+                  <span className="text-xs font-medium leading-4 text-muted">
                     Last observed{" "}
                     {data.repository.last_synced_at
                       ? new Date(data.repository.last_synced_at).toLocaleString()
@@ -658,22 +652,24 @@ export function RepositoryOverview({
                   </span>
                 </div>
 
-                <div className="pg-grid-3">
-                  <div className="pg-card-canvas">
-                    <span className="t-label-sm muted">Provider authority</span>
-                    <strong className="t-title-sm" style={{ display: "block", marginTop: "4px", color: "var(--success)" }}>
+                <div className="grid grid-cols-1 min-[900px]:grid-cols-3 gap-6">
+                  <div className="min-w-0 max-w-full bg-canvas border border-hairline rounded-2xl p-5">
+                    <span className="text-xs font-medium leading-4 text-muted">
+                      Provider authority
+                    </span>
+                    <strong className="block text-base font-semibold leading-[22px] mt-1 text-success">
                       {data.repository.full_name} · {data.repository.sync_health.replaceAll("_", " ")}
                     </strong>
                   </div>
-                  <div className="pg-card-canvas">
-                    <span className="t-label-sm muted">Effective role</span>
-                    <strong className="t-title-sm" style={{ display: "block", marginTop: "4px" }}>
+                  <div className="min-w-0 max-w-full bg-canvas border border-hairline rounded-2xl p-5">
+                    <span className="text-xs font-medium leading-4 text-muted">Effective role</span>
+                    <strong className="block text-base font-semibold leading-[22px] mt-1">
                       {viewerRole || "Project member"}
                     </strong>
                   </div>
-                  <div className="pg-card-canvas">
-                    <span className="t-label-sm muted">Source access</span>
-                    <strong className="t-title-sm" style={{ display: "block", marginTop: "4px" }}>
+                  <div className="min-w-0 max-w-full bg-canvas border border-hairline rounded-2xl p-5">
+                    <span className="text-xs font-medium leading-4 text-muted">Source access</span>
+                    <strong className="block text-base font-semibold leading-[22px] mt-1">
                       {data.repository.source_access === false
                         ? "Unavailable"
                         : "Authorized members"}
@@ -681,24 +677,24 @@ export function RepositoryOverview({
                   </div>
                 </div>
 
-                <p className="t-body-sm muted" style={{ margin: 0 }}>
+                <p className="text-[13px] leading-[19px] text-muted m-0">
                   Default branch protection and repository credentials are managed with GitHub and
                   your account connection. Project publication never changes repository visibility.
                 </p>
 
-                <div className="button-row">
-                  <a className="t-label-md" href="/account/github">
+                <div className="flex flex-wrap gap-2.5 items-center">
+                  <a className="text-[13px] font-medium leading-[18px]" href="/account/github">
                     Review GitHub connection →
                   </a>
                   {providerURL && (
-                    <a className="t-label-md" href={`${providerURL}/settings`}>
+                    <a className="text-[13px] font-medium leading-[18px]" href={`${providerURL}/settings`}>
                       Open GitHub repository settings ↗
                     </a>
                   )}
                 </div>
               </div>
 
-              <div className="pg-callout">
+              <div className="flex items-start gap-3 p-4 border border-hairline rounded-xl bg-raised text-muted text-[13px] leading-[19px]">
                 <span>
                   PeerGit does not run hosted Actions, source scans or dependency alerts. Source
                   remains governed by GitHub access.
@@ -708,30 +704,33 @@ export function RepositoryOverview({
           )}
 
           {tab === "snapshots" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-              <div className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div className="flex flex-col gap-5">
+              <div className={`${cardClass} gap-4`}>
                 <div>
-                  <h2 className="t-title-lg">Immutable snapshots</h2>
-                  <p className="t-body-sm muted" style={{ margin: "4px 0 0" }}>
+                  <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] m-0">
+                    Immutable snapshots
+                  </h2>
+                  <p className="text-[13px] leading-[19px] text-muted mt-1 mb-0">
                     Snapshots pin an exact 40-character SHA. Timing (receipt) and integrity (archive
                     verified) are tracked separately.
                   </p>
                 </div>
 
-                <form className="repository-capture" onSubmit={capture}>
-                  <label htmlFor="snapshot-ref">
+                <form className="grid gap-2 max-w-[520px]" onSubmit={capture}>
+                  <label htmlFor="snapshot-ref" className="text-[13px] font-medium text-on-surface">
                     Record a snapshot of a branch, tag, or commit
                   </label>
-                  <div>
+                  <div className="flex flex-wrap gap-2.5">
                     <input
                       id="snapshot-ref"
                       value={ref}
                       onChange={(e) => setRef(e.target.value)}
                       maxLength={255}
                       required
+                      className="flex-[1_1_200px] min-h-11 px-3 py-2 border border-control rounded-lg bg-surface text-on-surface"
                     />
                     <button
-                      className="primary-button"
+                      className="inline-flex min-h-11 items-center justify-center rounded-lg px-[18px] py-2 text-sm font-medium border border-primary bg-primary text-on-primary cursor-pointer hover:opacity-90 disabled:opacity-55 disabled:cursor-not-allowed"
                       disabled={busy || data.repository.access_state !== "active"}
                     >
                       Capture
@@ -740,17 +739,22 @@ export function RepositoryOverview({
                 </form>
 
                 {data.snapshots.length ? (
-                  <ul className="repository-snapshots">
+                  <ul className="list-none m-0 p-0 grid gap-3">
                     {data.snapshots.map((s) => (
-                      <li key={s.id}>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px" }}>
-                            <strong className="t-title-sm">
+                      <li
+                        key={s.id}
+                        className="flex flex-wrap items-center justify-between gap-3.5 p-4 bg-canvas border border-hairline rounded-xl"
+                      >
+                        <div className="flex flex-col gap-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <strong className="text-base font-semibold leading-[22px]">
                               {s.state.replaceAll("_", " ")}
                             </strong>
                             <span
-                              className={`pg-pill ${
-                                s.state === "verified" ? "pg-pill-success" : "pg-pill-warning"
+                              className={`inline-flex items-center px-2.5 py-1 rounded-full bg-surface border text-xs font-medium leading-4 ${
+                                s.state === "verified"
+                                  ? "border-success text-success"
+                                  : "border-warning text-warning"
                               }`}
                             >
                               {s.state === "verified"
@@ -758,23 +762,28 @@ export function RepositoryOverview({
                                 : s.state.replaceAll("_", " ")}
                             </span>
                           </div>
-                          <p className="t-body-sm muted" style={{ margin: 0 }}>
-                            {s.ref} → <code className="t-mono-sm">{s.commit_sha}</code> ·{" "}
-                            {new Date(s.receipt_at).toLocaleString()}
+                          <p className="text-[13px] leading-[19px] text-muted m-0">
+                            {s.ref} →{" "}
+                            <code className="font-mono text-[13px] leading-[19px]">
+                              {s.commit_sha}
+                            </code>{" "}
+                            · {new Date(s.receipt_at).toLocaleString()}
                             {s.failure_code ? ` · ${s.failure_code}` : ""}
                           </p>
                           {s.archive_sha256 && (
-                            <p className="t-body-sm muted record-summary" style={{ margin: 0 }}>
+                            <p className="text-[13px] leading-[19px] text-muted [overflow-wrap:anywhere] whitespace-pre-wrap m-0">
                               Archive SHA-256{" "}
-                              <code className="t-mono-sm">{s.archive_sha256}</code>
+                              <code className="font-mono text-[13px] leading-[19px]">
+                                {s.archive_sha256}
+                              </code>
                             </p>
                           )}
                         </div>
-                        <div className="snapshot-actions">
+                        <div className="flex flex-wrap gap-2">
                           {s.state === "verified" &&
                             data.repository?.source_access !== false && (
                               <a
-                                className="secondary-button pg-btn-compact"
+                                className={compactSecondaryBtn}
                                 href={`/api/v1/projects/${projectID}/repository/snapshots/${s.id}/download`}
                               >
                                 Download
@@ -782,7 +791,7 @@ export function RepositoryOverview({
                             )}
                           {s.retry_available && (
                             <button
-                              className="secondary-button pg-btn-compact"
+                              className={compactSecondaryBtn}
                               type="button"
                               onClick={() => void retry(s.id)}
                               disabled={busy}
@@ -795,9 +804,7 @@ export function RepositoryOverview({
                     ))}
                   </ul>
                 ) : (
-                  <p className="t-body-md muted" style={{ margin: 0 }}>
-                    No snapshots yet.
-                  </p>
+                  <p className="text-sm leading-[21px] text-muted m-0">No snapshots yet.</p>
                 )}
               </div>
             </div>
