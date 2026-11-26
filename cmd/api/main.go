@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -75,7 +76,12 @@ func run() error {
 	mediaHandler := media.NewHandler(pool, objectStore, identityHandler, errorManager)
 	projectHandler := project.NewHandler(pool, identityHandler, logger, errorManager)
 	recruitmentHandler := recruitment.NewHandler(pool, identityHandler, logger, errorManager)
-	collaborationHandler := collaboration.NewHandler(pool, identityHandler, logger, errorManager)
+	cursorKey := cfg.CursorKey
+	if len(cursorKey) < 32 {
+		derived := sha256.Sum256([]byte("peergit-discovery-cursor:" + cfg.SessionHashKey))
+		cursorKey = fmt.Sprintf("%x", derived[:])
+	}
+	collaborationHandler := collaboration.NewHandler(pool, identityHandler, logger, errorManager, []byte(cursorKey))
 	notificationHandler := notification.NewHandler(pool, identityHandler)
 	githubClient := github.New()
 	if cfg.GitHubAPIURL != "" {

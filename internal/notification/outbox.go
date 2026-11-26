@@ -15,10 +15,11 @@ import (
 )
 
 type eventPayload struct {
-	ProjectID     string `json:"project_id"`
-	ApplicationID string `json:"application_id"`
-	UserID        string `json:"user_id"`
-	ActorID       string `json:"actor_id"`
+	ProjectID      string `json:"project_id"`
+	ApplicationID  string `json:"application_id"`
+	UserID         string `json:"user_id"`
+	ActorID        string `json:"actor_id"`
+	ConversationID string `json:"conversation_id"`
 }
 type recipient struct{ userID, category, title, body, projectID, applicationID string }
 
@@ -60,11 +61,16 @@ func OutboxHandler(pool *pgxpool.Pool, mail Mail) outbox.Handler {
 			}
 			if item.category == "applications" {
 				_, err = tx.Exec(ctx, `INSERT INTO notification_preferences(college_id,user_id,category,email_enabled) VALUES($1,$2,'applications',true) ON CONFLICT DO NOTHING`, d.TenantID, item.userID)
+			} else if item.category == "messages" {
+				_, err = tx.Exec(ctx, `INSERT INTO notification_preferences(college_id,user_id,category,email_enabled) VALUES($1,$2,'messages',false) ON CONFLICT DO NOTHING`, d.TenantID, item.userID)
 			} else {
 				_, err = tx.Exec(ctx, `INSERT INTO notification_preferences(college_id,user_id,category,email_enabled) VALUES($1,$2,'project_activity',false) ON CONFLICT DO NOTHING`, d.TenantID, item.userID)
 			}
 			if err != nil {
 				return err
+			}
+			if item.category == "messages" {
+				continue
 			}
 			var enabled bool
 			if err = tx.QueryRow(ctx, `SELECT email_enabled FROM notification_preferences WHERE college_id=$1 AND user_id=$2 AND category=$3`, d.TenantID, item.userID, item.category).Scan(&enabled); err != nil {
@@ -100,6 +106,38 @@ func notificationRecipients(ctx context.Context, pool *pgxpool.Pool, d outbox.De
 		return nil, errors.New("notification event payload is invalid")
 	}
 	switch d.EventType {
+	case "conversation.message.created":
+		if p.ConversationID == "" || p.ActorID == "" {
+			return nil, errors.New("conversation message notification is missing its context")
+		}
+		rows, err := pool.Query(ctx, `SELECT cp.user_id::text FROM conversations c
+			JOIN conversation_participants cp ON cp.conversation_id=c.id AND cp.college_id=c.college_id
+			JOIN users u ON u.id=cp.user_id AND u.college_id=c.college_id AND u.status='active'
+			JOIN campus_verifications cv ON cv.college_id=u.college_id AND cv.user_id=u.id AND cv.revoked_at IS NULL
+			WHERE c.id=$1 AND c.college_id=$2 AND c.state='open' AND cp.user_id<>$3
+			AND EXISTS(SELECT 1 FROM consent_records cr WHERE cr.user_id=cp.user_id AND cr.purpose='terms' AND cr.revoked_at IS NULL)
+			AND EXISTS(SELECT 1 FROM consent_records cr WHERE cr.user_id=cp.user_id AND cr.purpose='privacy' AND cr.revoked_at IS NULL)
+			AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE b.college_id=c.college_id AND ((b.blocker_id=cp.user_id AND b.blocked_id=$3) OR (b.blocker_id=$3 AND b.blocked_id=cp.user_id)))
+			AND CASE c.context_type
+				WHEN 'project' THEN EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=c.project_id AND pm.college_id=c.college_id AND pm.user_id=cp.user_id)
+				WHEN 'application' THEN EXISTS(SELECT 1 FROM applications a JOIN project_roles rr ON rr.id=a.project_role_id AND rr.college_id=a.college_id
+					WHERE a.id=c.application_id AND a.college_id=c.college_id AND a.status='accepted'
+					AND (a.applicant_user_id=cp.user_id OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=rr.project_id AND pm.college_id=rr.college_id AND pm.user_id=cp.user_id AND pm.role IN ('owner','maintainer'))))
+				ELSE false
+			END`, p.ConversationID, d.TenantID, p.ActorID)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		items := []recipient{}
+		for rows.Next() {
+			var user string
+			if err = rows.Scan(&user); err != nil {
+				return nil, err
+			}
+			items = append(items, recipient{userID: user, category: "messages", title: "New message", body: "A participant sent a message in a conversation you can access.", projectID: p.ProjectID, applicationID: p.ApplicationID})
+		}
+		return items, rows.Err()
 	case "application.created":
 		var applicant, project string
 		err := pool.QueryRow(ctx, `SELECT a.applicant_user_id::text,r.project_id::text FROM applications a JOIN project_roles r ON r.id=a.project_role_id AND r.college_id=a.college_id WHERE a.id=$1 AND a.college_id=$2`, d.AggregateID, d.TenantID).Scan(&applicant, &project)

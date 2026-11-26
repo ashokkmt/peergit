@@ -1,4 +1,5 @@
 import { PreviewBadge } from "@/components/layout/preview-banner";
+import { WACPSummary } from "@/components/campus/wacp-summary";
 
 const cohortMetrics = [
   ["Verified participation", "72 / 76", "Enrolled students in sample cohort", ""],
@@ -46,6 +47,8 @@ export default function CampusOverviewPage() {
           grades.
         </span>
       </div>
+
+      <WACPSummary />
 
       <section
         aria-label="Cohort metrics"

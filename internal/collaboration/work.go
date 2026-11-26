@@ -395,7 +395,7 @@ func (h *Handler) updateMilestone(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	var version int
-	err = tx.QueryRow(r.Context(), `UPDATE project_milestones SET title=$5,description=$6,status=$7,due_at=$8,version=version+1,updated_at=now() WHERE id=$1 AND project_id=$2 AND college_id=$3 AND version=$4 RETURNING version`, chi.URLParam(r, "milestoneID"), projectID(r), p.collegeID, in.Version, in.Title, in.Description, in.Status, in.DueAt).Scan(&version)
+	err = tx.QueryRow(r.Context(), `UPDATE project_milestones SET title=$5,description=$6,status=$7,due_at=$8,updated_by=$9,version=version+1,updated_at=now() WHERE id=$1 AND project_id=$2 AND college_id=$3 AND version=$4 RETURNING version`, chi.URLParam(r, "milestoneID"), projectID(r), p.collegeID, in.Version, in.Title, in.Description, in.Status, in.DueAt, s.UserID).Scan(&version)
 	if errors.Is(err, pgx.ErrNoRows) {
 		fail(w, 409, "milestone_changed", "milestone changed; reload it before saving")
 		return

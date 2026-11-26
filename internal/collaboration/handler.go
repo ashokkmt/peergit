@@ -22,14 +22,16 @@ import (
 )
 
 type Handler struct {
-	pool *pgxpool.Pool
-	auth *identity.Handler
-	log  *slog.Logger
-	err  *errormanager.Manager
+	pool      *pgxpool.Pool
+	auth      *identity.Handler
+	log       *slog.Logger
+	err       *errormanager.Manager
+	cursorKey []byte
 }
 
-func NewHandler(pool *pgxpool.Pool, auth *identity.Handler, logger *slog.Logger, errors *errormanager.Manager) *Handler {
-	return &Handler{pool: pool, auth: auth, log: logger, err: errors}
+func NewHandler(pool *pgxpool.Pool, auth *identity.Handler, logger *slog.Logger, errors *errormanager.Manager, cursorKey []byte) *Handler {
+	key := append([]byte(nil), cursorKey...)
+	return &Handler{pool: pool, auth: auth, log: logger, err: errors, cursorKey: key}
 }
 
 func (h *Handler) Register(r chi.Router) {
@@ -58,6 +60,18 @@ func (h *Handler) Register(r chi.Router) {
 		api.With(h.auth.RequireCSRF).Delete("/projects/{id}/bookmark", h.deleteBookmark)
 		api.Get("/me/saved-projects", h.savedProjects)
 		api.With(h.auth.RequireCSRF).Post("/projects/{id}/reports", h.createReport)
+		api.Get("/feed", h.feed)
+		api.Get("/search", h.search)
+		api.Get("/campus/insights/wacp", h.wacp)
+		api.Get("/me/conversations", h.listConversations)
+		api.With(h.auth.RequireCSRF).Post("/projects/{id}/conversation", h.projectConversation)
+		api.With(h.auth.RequireCSRF).Post("/applications/{id}/conversation", h.applicationConversation)
+		api.Get("/conversations/{id}/messages", h.listMessages)
+		api.With(h.auth.RequireCSRF).Post("/conversations/{id}/messages", h.createMessage)
+		api.With(h.auth.RequireCSRF).Post("/conversations/{id}/reports", h.reportMessage)
+		api.With(h.auth.RequireCSRF).Put("/blocks/{userID}", h.blockUser)
+		api.With(h.auth.RequireCSRF).Delete("/blocks/{userID}", h.unblockUser)
+		api.Get("/me/blocks", h.listBlocks)
 	})
 }
 
