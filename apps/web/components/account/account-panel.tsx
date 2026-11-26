@@ -1,8 +1,8 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { readApiEnvelope } from "@/lib/http";
 
-type Envelope<T> = { data?: T; error?: { code: string; message: string } };
 type Me = {
   id: string;
   college_id: string;
@@ -28,6 +28,16 @@ type CampusUser = {
   status: string;
   roles: string[];
 };
+
+const fieldClass = "grid gap-1.5 text-[13px] font-medium text-on-surface";
+const inputClass =
+  "w-full min-h-11 px-3.5 py-2.5 border border-control rounded-lg bg-surface text-on-surface text-sm leading-5";
+const primaryBtn =
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-[18px] py-2 text-sm font-medium leading-5 no-underline whitespace-nowrap border border-primary bg-primary text-on-primary cursor-pointer hover:opacity-90 transition-opacity duration-100";
+const secondaryBtn =
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-[18px] py-2 text-sm font-medium leading-5 no-underline whitespace-nowrap border border-control bg-surface text-on-surface cursor-pointer hover:bg-raised transition-colors duration-100";
+const compactSecondaryBtn =
+  "inline-flex min-h-[38px] items-center justify-center gap-2 rounded-lg px-3.5 py-1.5 text-[13px] font-medium leading-5 no-underline whitespace-nowrap border border-control bg-surface text-on-surface cursor-pointer hover:bg-raised disabled:opacity-55 disabled:cursor-not-allowed";
 
 export function AccountPanel({ section = "profile" }: { section?: "profile" | "settings" }) {
   const [csrf, setCSRF] = useState("");
@@ -68,9 +78,10 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
       },
     });
     if (response.status === 204) return undefined as T;
-    const result = (await response.json()) as Envelope<T>;
-    if (!response.ok || result.error)
+    const result = await readApiEnvelope<T>(response, `Request failed (${response.status}).`);
+    if (!response.ok || result.error) {
       throw new Error(result.error?.message ?? `Request failed (${response.status}).`);
+    }
     return result.data as T;
   }
 
@@ -128,12 +139,13 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
       );
       for (const purpose of ["terms", "privacy", "profile_discovery"]) {
         const granted = consents.includes(purpose);
-        if (purpose === "profile_discovery" || granted)
+        if (purpose === "profile_discovery" || granted) {
           await post(
             "/api/v1/me/consent",
             "PUT",
             JSON.stringify({ purpose, policy_version: "draft-1", granted }),
           );
+        }
       }
       setMessage("Your profile and consent choices are saved.");
       await load();
@@ -289,58 +301,90 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
     }
   }
 
-  if (loading)
+  if (loading) {
     return (
-      <section className="account-panel" aria-live="polite">
-        <p>Checking your PeerGit account…</p>
+      <section
+        className="account-panel bg-surface border border-hairline rounded-2xl p-[clamp(20px,3vw,28px)]"
+        aria-live="polite"
+      >
+        <p className="m-0">Checking your PeerGit account…</p>
       </section>
     );
-  if (!me)
+  }
+
+  if (!me) {
     return (
-      <section className="account-panel" aria-labelledby="account-title" style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-        <p className="eyebrow" style={{ margin: 0 }}>Campus access</p>
-        <h1 id="account-title" className="t-headline-md">Sign in to continue</h1>
-        <p className="t-body-md muted" style={{ margin: 0 }}>
+      <section
+        className="account-panel bg-surface border border-hairline rounded-2xl p-[clamp(20px,3vw,28px)] flex flex-col gap-3.5"
+        aria-labelledby="account-title"
+      >
+        <p className="m-0 text-link text-xs font-semibold tracking-[0.02em]">Campus access</p>
+        <h1
+          id="account-title"
+          className="font-display text-[clamp(1.5rem,2.5vw,2rem)] font-semibold leading-[1.19] tracking-[-0.015em] m-0"
+        >
+          Sign in to continue
+        </h1>
+        <p className="text-sm leading-[21px] text-muted m-0">
           Start with GitHub, then verify a campus email to use campus features.
         </p>
         <div>
-          <a className="primary-link" href="/api/v1/auth/github">
+          <a className={primaryBtn} href="/api/v1/auth/github">
             Continue with GitHub <span aria-hidden="true">→</span>
           </a>
         </div>
         {problem && (
-          <p className="form-error" role="alert">
+          <p
+            className="rounded-lg px-4 py-3 text-sm font-medium bg-danger/12 border border-danger/35 text-danger m-0"
+            role="alert"
+          >
             {problem}
           </p>
         )}
       </section>
     );
+  }
+
+  const statusPillClass = me.college_id
+    ? "border-success text-success"
+    : "border-warning text-warning";
 
   return (
-    <section className="account-panel" aria-labelledby="account-title">
-      <div className="account-heading">
-        <div style={{ display: "flex", gap: "16px", alignItems: "flex-start" }}>
+    <section
+      className="account-panel bg-surface border border-hairline rounded-2xl p-[clamp(20px,3vw,28px)]"
+      aria-labelledby="account-title"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex gap-4 items-start">
           {section === "profile" &&
             (me.profile?.avatar_media_id ? (
               <img
-                className="profile-avatar"
+                className="w-[72px] h-[72px] rounded-full border border-hairline object-cover shrink-0"
                 src={`/api/v1/media/${encodeURIComponent(me.profile.avatar_media_id)}`}
                 alt=""
               />
             ) : (
-              <span className="avatar-lg" aria-hidden="true">
+              <span
+                className="w-[72px] h-[72px] rounded-full border border-hairline bg-raised text-on-surface grid place-items-center font-display text-[28px] font-semibold shrink-0"
+                aria-hidden="true"
+              >
                 {me.display_name.slice(0, 1).toUpperCase()}
               </span>
             ))}
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            <p className="eyebrow" style={{ margin: 0 }}>
+          <div className="flex flex-col gap-1.5">
+            <p className="m-0 text-link text-xs font-semibold tracking-[0.02em]">
               Your PeerGit account
             </p>
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px" }}>
-              <h1 id="account-title" className="t-headline-md">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1
+                id="account-title"
+                className="font-display text-[clamp(1.5rem,2.5vw,2rem)] font-semibold leading-[1.19] tracking-[-0.015em] m-0"
+              >
                 {section === "profile" ? me.display_name : "Account settings"}
               </h1>
-              <span className={`pg-pill ${me.college_id ? "pg-pill-success" : "pg-pill-warning"}`}>
+              <span
+                className={`inline-flex items-center px-2.5 py-1 rounded-full bg-surface border text-xs font-medium leading-4 max-w-full [overflow-wrap:anywhere] ${statusPillClass}`}
+              >
                 {me.college_id
                   ? "Campus verified"
                   : me.campus_status === "inactive"
@@ -350,23 +394,24 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
                       : "External account"}
               </span>
             </div>
-            <p className="t-body-sm muted" style={{ margin: 0 }}>
-              {me.email}
-            </p>
+            <p className="text-[13px] leading-[19px] text-muted m-0">{me.email}</p>
             {section === "profile" && me.profile?.headline && (
-              <p className="t-body-md" style={{ margin: 0 }}>
-                {me.profile.headline}
-              </p>
+              <p className="text-sm leading-[21px] m-0">{me.profile.headline}</p>
             )}
             {section === "profile" && me.skills.length > 0 && (
-              <ul className="skill-list" aria-label="Skills" style={{ marginTop: "4px" }}>
+              <ul className="flex flex-wrap gap-1.5 list-none m-0 p-0 mt-1" aria-label="Skills">
                 {me.skills.map((skill) => (
-                  <li key={skill}>{skill}</li>
+                  <li
+                    key={skill}
+                    className="inline-flex items-center px-2.5 py-1 rounded bg-raised text-on-surface text-xs font-medium leading-4"
+                  >
+                    {skill}
+                  </li>
                 ))}
               </ul>
             )}
             {me.campus_status === "unverified" && (
-              <a className="t-label-md" href="/onboarding">
+              <a className="text-[13px] font-medium leading-[18px]" href="/onboarding">
                 Continue campus onboarding
               </a>
             )}
@@ -375,71 +420,84 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
       </div>
 
       {problem && (
-        <p className="form-error" role="alert">
+        <p
+          className="rounded-lg px-4 py-3 my-3 text-sm font-medium bg-danger/12 border border-danger/35 text-danger"
+          role="alert"
+        >
           {problem}
         </p>
       )}
       {message && (
-        <p className="form-success" role="status">
+        <p
+          className="rounded-lg px-4 py-3 my-3 text-sm font-medium bg-success/12 border border-success/35 text-success"
+          role="status"
+        >
           {message}
         </p>
       )}
 
       {section === "profile" && (
-        <form className="account-form" onSubmit={saveProfile}>
-          <h3 className="t-title-md">Profile and privacy</h3>
-          <label>
+        <form className="grid gap-3.5 mt-5 pt-5 border-t border-hairline" onSubmit={saveProfile}>
+          <h3 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
+            Profile and privacy
+          </h3>
+          <label className={fieldClass}>
             Display name
             <input
               required
               maxLength={120}
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
+              className={inputClass}
             />
           </label>
-          <label>
+          <label className={fieldClass}>
             Headline
             <input
               maxLength={160}
               value={headline}
               onChange={(e) => setHeadline(e.target.value)}
               placeholder="What are you interested in building?"
+              className={inputClass}
             />
           </label>
-          <label>
+          <label className={fieldClass}>
             About you
             <textarea
               maxLength={2000}
               rows={4}
               value={bio}
               onChange={(e) => setBio(e.target.value)}
+              className={`${inputClass} min-h-24 resize-y leading-normal`}
             />
           </label>
-          <label>
+          <label className={fieldClass}>
             Skills, separated by commas
             <input
               value={skills}
               onChange={(e) => setSkills(e.target.value)}
               placeholder="Go, hardware, product design"
+              className={inputClass}
             />
           </label>
-          <label>
+          <label className={fieldClass}>
             Profile image (PNG/JPEG, up to 5 MiB)
             <input
               type="file"
               accept="image/png,image/jpeg"
               onChange={(e) => void uploadImage(e.target.files?.[0])}
+              className={inputClass}
             />
           </label>
           {avatarID && (
-            <p className="t-body-sm">
+            <p className="text-[13px] leading-[19px] m-0">
               Image attached:{" "}
               <a href={`/api/v1/media/${avatarID}`}>View your uploaded image</a>
             </p>
           )}
-          <fieldset>
-            <legend>Required policy choices</legend>
-            <label className="check-row">
+          <fieldset className="border border-hairline rounded-xl px-4 py-3.5 m-0">
+            <legend className="font-semibold text-[13px] px-1.5">Required policy choices</legend>
+            <label className="flex items-start gap-2.5 my-1.5 text-sm leading-5">
               <input
                 type="checkbox"
                 checked={consents.includes("terms")}
@@ -450,12 +508,13 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
                       : old.filter((v) => v !== "terms"),
                   )
                 }
+                className="w-4 h-4 mt-0.5 accent-primary shrink-0"
               />
               <span>
                 I accept the <a href="/terms">Terms</a>.
               </span>
             </label>
-            <label className="check-row">
+            <label className="flex items-start gap-2.5 my-1.5 text-sm leading-5">
               <input
                 type="checkbox"
                 checked={consents.includes("privacy")}
@@ -466,15 +525,16 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
                       : old.filter((v) => v !== "privacy"),
                   )
                 }
+                className="w-4 h-4 mt-0.5 accent-primary shrink-0"
               />
               <span>
                 I acknowledge the <a href="/privacy">Privacy Notice</a>.
               </span>
             </label>
           </fieldset>
-          <fieldset>
-            <legend>Optional visibility</legend>
-            <label className="check-row">
+          <fieldset className="border border-hairline rounded-xl px-4 py-3.5 m-0">
+            <legend className="font-semibold text-[13px] px-1.5">Optional visibility</legend>
+            <label className="flex items-start gap-2.5 my-1.5 text-sm leading-5">
               <input
                 type="checkbox"
                 checked={consents.includes("profile_discovery")}
@@ -485,6 +545,7 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
                       : old.filter((v) => v !== "profile_discovery"),
                   )
                 }
+                className="w-4 h-4 mt-0.5 accent-primary shrink-0"
               />
               <span>
                 Allow my profile and image to be discoverable by signed-in people at my campus.
@@ -492,7 +553,7 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
             </label>
           </fieldset>
           <div>
-            <button className="primary-button" type="submit">
+            <button className={primaryBtn} type="submit">
               Save profile
             </button>
           </div>
@@ -500,50 +561,50 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
       )}
 
       {section === "settings" && (
-        <section className="account-form" aria-labelledby="mfa-title">
-          <h3 id="mfa-title" className="t-title-md">
+        <section
+          className="grid gap-4 mt-5 pt-5 border-t border-hairline"
+          aria-labelledby="mfa-title"
+        >
+          <h3 id="mfa-title" className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
             Multi-factor authentication
           </h3>
-          <p className="t-body-md muted" style={{ margin: 0 }}>
+          <p className="text-sm leading-[21px] text-muted m-0">
             {me.mfa_enabled
               ? "Authenticator protection is enabled."
               : "Set up an authenticator before using campus administration."}
           </p>
           {!mfaSecret && !me.mfa_enabled && (
             <div>
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={() => void enrollMFA()}
-              >
+              <button className={secondaryBtn} type="button" onClick={() => void enrollMFA()}>
                 Set up authenticator
               </button>
             </div>
           )}
           {me.mfa_enabled && (
-            <form onSubmit={submitMFA}>
-              <label>
+            <form className="grid gap-3.5" onSubmit={submitMFA}>
+              <label className={fieldClass}>
                 Authenticator or unused recovery code
                 <input
                   required
                   autoComplete="one-time-code"
                   value={mfaCode}
                   onChange={(e) => setMFACode(e.target.value)}
+                  className={inputClass}
                 />
               </label>
               <div>
-                <button className="secondary-button" type="submit">
+                <button className={secondaryBtn} type="submit">
                   Verify for 10 minutes
                 </button>
               </div>
             </form>
           )}
           {mfaSecret && (
-            <form onSubmit={submitMFA}>
-              <p className="t-body-sm">
+            <form className="grid gap-3.5" onSubmit={submitMFA}>
+              <p className="text-[13px] leading-[19px] m-0">
                 Setup secret: <code>{mfaSecret}</code>
               </p>
-              <label>
+              <label className={fieldClass}>
                 6-digit authenticator code
                 <input
                   required
@@ -551,21 +612,22 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
                   autoComplete="one-time-code"
                   value={mfaCode}
                   onChange={(e) => setMFACode(e.target.value)}
+                  className={inputClass}
                 />
               </label>
               <div>
-                <button className="primary-button" type="submit">
+                <button className={primaryBtn} type="submit">
                   Confirm MFA
                 </button>
               </div>
             </form>
           )}
           {recoveryCodes.length > 0 && (
-            <div className="recovery-codes">
-              <p className="t-body-sm">
+            <div className="[overflow-wrap:anywhere] bg-raised border border-hairline rounded-lg p-3.5">
+              <p className="text-[13px] leading-[19px] m-0 mb-2">
                 Save these one-time codes now; they will not be shown again.
               </p>
-              <ul>
+              <ul className="columns-1 sm:columns-2 m-0 pl-5">
                 {recoveryCodes.map((code) => (
                   <li key={code}>
                     <code>{code}</code>
@@ -578,25 +640,29 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
       )}
 
       {section === "settings" && me.campus_admin && (
-        <section className="account-form" aria-labelledby="admin-title">
-          <h3 id="admin-title" className="t-title-md">
+        <section
+          className="grid gap-4 mt-5 pt-5 border-t border-hairline"
+          aria-labelledby="admin-title"
+        >
+          <h3 id="admin-title" className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
             Campus administration
           </h3>
-          <p className="t-body-md muted" style={{ margin: 0 }}>
+          <p className="text-sm leading-[21px] text-muted m-0">
             Administrative actions require a recent MFA verification.{" "}
             <a href="/admin/campus-reviews">Review campus verification requests</a>.
           </p>
-          <form onSubmit={invite}>
-            <label>
+          <form className="grid gap-3.5" onSubmit={invite}>
+            <label className={fieldClass}>
               Email
               <input
                 type="email"
                 required
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
+                className={inputClass}
               />
             </label>
-            <label>
+            <label className={fieldClass}>
               Account type
               <select
                 value={inviteAccount}
@@ -604,14 +670,19 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
                   setInviteAccount(e.target.value);
                   setInviteRole(e.target.value === "campus" ? "student" : "mentor");
                 }}
+                className={inputClass}
               >
                 <option value="campus">Campus member</option>
                 <option value="external">Invited external</option>
               </select>
             </label>
-            <label>
+            <label className={fieldClass}>
               {inviteAccount === "campus" ? "Campus role" : "Scoped external access"}
-              <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
+              <select
+                value={inviteRole}
+                onChange={(e) => setInviteRole(e.target.value)}
+                className={inputClass}
+              >
                 {inviteAccount === "campus" ? (
                   <>
                     <option value="student">Student</option>
@@ -629,38 +700,44 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
               </select>
             </label>
             <div>
-              <button className="secondary-button" type="submit">
+              <button className={secondaryBtn} type="submit">
                 Create invitation link
               </button>
             </div>
           </form>
           {inviteURL && (
-            <p className="invite-link">
+            <p className="[overflow-wrap:anywhere] bg-raised border border-hairline rounded-lg p-3.5 m-0">
               Share this one-time link with the invited person:{" "}
               <a href={inviteURL}>{inviteURL}</a>
             </p>
           )}
-          <form onSubmit={createOrganization}>
-            <label>
+          <form className="grid gap-3.5" onSubmit={createOrganization}>
+            <label className={fieldClass}>
               Organization name
               <input
                 required
                 value={orgName}
                 onChange={(e) => setOrgName(e.target.value)}
+                className={inputClass}
               />
             </label>
-            <label>
+            <label className={fieldClass}>
               Slug
               <input
                 required
                 pattern="[a-z0-9]+(-[a-z0-9]+)*"
                 value={orgSlug}
                 onChange={(e) => setOrgSlug(e.target.value)}
+                className={inputClass}
               />
             </label>
-            <label>
+            <label className={fieldClass}>
               Organization type
-              <select value={orgKind} onChange={(e) => setOrgKind(e.target.value)}>
+              <select
+                value={orgKind}
+                onChange={(e) => setOrgKind(e.target.value)}
+                className={inputClass}
+              >
                 <option value="club">Club</option>
                 <option value="department">Department</option>
                 <option value="innovation_cell">Innovation cell</option>
@@ -669,40 +746,44 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
               </select>
             </label>
             <div>
-              <button className="secondary-button" type="submit">
+              <button className={secondaryBtn} type="submit">
                 Create organization
               </button>
             </div>
           </form>
-          <form onSubmit={searchUsers}>
-            <label>
+          <form className="grid gap-3.5" onSubmit={searchUsers}>
+            <label className={fieldClass}>
               Find campus accounts
               <input
                 value={userQuery}
                 onChange={(e) => setUserQuery(e.target.value)}
                 placeholder="Name or email"
+                className={inputClass}
               />
             </label>
             <div>
-              <button className="secondary-button" type="submit">
+              <button className={secondaryBtn} type="submit">
                 Search users
               </button>
             </div>
           </form>
           {campusUsers.length > 0 && (
-            <ul className="campus-users">
+            <ul className="list-none m-0 p-0 border-t border-hairline">
               {campusUsers.map((user) => (
-                <li key={user.id}>
+                <li
+                  key={user.id}
+                  className="flex flex-wrap justify-between items-center gap-3 py-3.5 border-b border-hairline [overflow-wrap:anywhere]"
+                >
                   <span>
                     <strong>{user.display_name}</strong>
                     <br />
                     {user.email} · {user.status} · {user.roles.join(", ") || "no roles"}
                   </span>
-                  <form onSubmit={grantRole} className="button-row">
+                  <form onSubmit={grantRole} className="flex flex-wrap gap-2.5 items-center">
                     <input type="hidden" name="user_id" value={user.id} />
-                    <label>
+                    <label className={fieldClass}>
                       Grant role
-                      <select name="role">
+                      <select name="role" className={inputClass}>
                         {["student", "faculty", "alumni_mentor", "moderator"]
                           .filter((role) => !user.roles.includes(role))
                           .map((role) => (
@@ -713,7 +794,7 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
                       </select>
                     </label>
                     <button
-                      className="secondary-button pg-btn-compact"
+                      className={compactSecondaryBtn}
                       type="submit"
                       disabled={["student", "faculty", "alumni_mentor", "moderator"].every((role) =>
                         user.roles.includes(role),
@@ -723,7 +804,7 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
                     </button>
                   </form>
                   <button
-                    className="secondary-button pg-btn-compact"
+                    className={compactSecondaryBtn}
                     type="button"
                     disabled={user.roles.includes("campus_admin")}
                     onClick={() => void setSuspended(user)}

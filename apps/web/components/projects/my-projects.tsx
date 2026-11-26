@@ -42,74 +42,85 @@ export function MyProjects() {
   }, []);
 
   return (
-    <section
-      className="content account-content"
-      aria-labelledby="my-projects-title"
-      style={{ display: "flex", flexDirection: "column", gap: "18px" }}
-    >
-      <div className="section-heading" style={{ marginBottom: 0 }}>
+    <section className="w-full flex flex-col gap-4" aria-labelledby="my-projects-title">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="eyebrow">Your work</p>
-          <h1 id="my-projects-title" className="t-headline-md">
+          <p className="mt-0 mb-1.5 text-link text-xs font-semibold tracking-[0.02em]">Your work</p>
+          <h1
+            id="my-projects-title"
+            className="font-display text-[clamp(1.5rem,2.5vw,2rem)] font-semibold leading-[1.19] tracking-[-0.015em] m-0"
+          >
             My projects
           </h1>
-          <p className="t-body-md muted" style={{ margin: "4px 0 0" }}>
+          <p className="text-sm leading-[21px] text-muted mt-1 mb-0">
             Projects start by importing a GitHub repository you administer.
           </p>
         </div>
-        <a className="primary-link pg-btn-compact" href="/projects/import">
+        <a
+          className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium no-underline whitespace-nowrap border border-primary bg-primary text-on-primary hover:opacity-90"
+          href="/projects/import"
+        >
           Import a GitHub repository
         </a>
       </div>
 
       {problem && (
-        <p className="form-error" role="alert">
+        <p
+          className="rounded-lg px-4 py-3 text-sm font-medium bg-danger/12 border border-danger/35 text-danger m-0"
+          role="alert"
+        >
           {problem}
         </p>
       )}
 
       {loading ? (
-        <p role="status">Loading your projects…</p>
+        <p role="status" className="m-0">
+          Loading your projects…
+        </p>
       ) : items.length ? (
-        <div style={{ display: "grid", gap: "14px" }}>
+        <div className="grid gap-3.5">
           {items.map((item) => (
             <a
               key={item.id}
-              className="pg-card-interactive"
+              className="bg-surface border border-hairline rounded-2xl p-6 no-underline text-on-surface flex flex-row flex-wrap items-center justify-between gap-4 hover:border-link transition-colors duration-100"
               href={`/projects/${item.id}`}
-              style={{
-                flexDirection: "row",
-                flexWrap: "wrap",
-                alignItems: "center",
-                gap: "16px",
-              }}
             >
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px", flex: "1 1 260px" }}>
-                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "8px" }}>
-                  <h2 className="t-title-md">{item.title}</h2>
-                  <span className="pg-pill pg-pill-raised">
+              <div className="flex flex-col gap-1.5 flex-[1_1_260px]">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
+                    {item.title}
+                  </h2>
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-raised border border-hairline text-xs font-medium leading-4">
                     {item.visibility} · {item.lifecycle}
                   </span>
                 </div>
-                <p className="t-body-md muted" style={{ margin: 0 }}>
-                  {item.summary}
-                </p>
-                <p className="t-body-sm muted" style={{ margin: 0 }}>
+                <p className="text-sm leading-[21px] text-muted m-0">{item.summary}</p>
+                <p className="text-[13px] leading-[19px] text-muted m-0">
                   {item.repository
                     ? `GitHub · ${item.owner}/${item.repository} · ${item.sync_health ?? item.access_state}`
                     : "Legacy project without a repository connection"}
                 </p>
               </div>
-              <span className="secondary-button pg-btn-compact">Open project →</span>
+              <span className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium whitespace-nowrap border border-control bg-surface text-on-surface">
+                Open project →
+              </span>
             </a>
           ))}
         </div>
       ) : (
-        <div className="empty-state">
-          <h2 className="t-title-md">No projects yet</h2>
-          <p className="t-body-md muted">
-            Connect your GitHub App and import a repository to create your first PeerGit project.
+        <div className="grid justify-items-start gap-2.5 p-8 border border-dashed border-control rounded-2xl bg-surface">
+          <h2 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
+            No projects yet
+          </h2>
+          <p className="text-sm leading-[21px] text-muted max-w-[500px] m-0">
+            Connect GitHub and choose an administered repository to import it as a private project.
           </p>
+          <a
+            className="inline-flex min-h-11 items-center justify-center rounded-lg px-[18px] py-2 text-sm font-medium no-underline border border-primary bg-primary text-on-primary hover:opacity-90"
+            href="/account/github"
+          >
+            Connect GitHub repository
+          </a>
         </div>
       )}
     </section>

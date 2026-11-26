@@ -22,6 +22,7 @@
   function apply() {
     const dark = root.dataset.theme === "dark" || (!root.dataset.theme && system.matches);
     const theme = dark ? "dark" : "light";
+    root.dataset.resolvedTheme = theme;
     icon.href = "/icons/favicon-" + theme + ".ico";
     apple.href = "/icons/apple-icon-" + theme + ".png";
     manifest.href = "/manifest-" + theme + ".json";

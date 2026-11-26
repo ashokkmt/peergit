@@ -1,154 +1,46 @@
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
-import { PreviewBadge } from "@/components/layout/preview-banner";
+import { Inbox } from "@/components/notifications/inbox";
 
 export default function InboxPage() {
   return (
     <>
-      <a className="skip-link" href="#main-content">
+      <a
+        className="fixed z-100 left-4 -top-20 px-4 py-2.5 bg-primary text-on-primary rounded-lg font-semibold no-underline focus:top-3"
+        href="#main-content"
+      >
         Skip to content
       </a>
       <SiteHeader workspace />
       <main
         id="main-content"
-        className="pg-workspace-container"
-        style={{
-          flex: 1,
-          padding: "32px 0 64px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "24px",
-        }}
+        className="flex-1 w-[min(1440px,calc(100%-32px))] md:w-[min(1440px,calc(100%-64px))] mx-auto pt-8 pb-16 flex flex-col gap-6"
       >
-        <div className="section-heading" style={{ marginBottom: 0 }}>
+        <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="eyebrow">PeerGit messages</p>
-            <h1 className="t-headline-md">Inbox</h1>
+            <p className="mt-0 mb-1.5 text-link text-xs font-semibold tracking-[0.02em]">
+              PeerGit notifications
+            </p>
+            <h1
+              id="inbox-title"
+              className="font-display text-[clamp(1.5rem,2.5vw,2rem)] font-semibold leading-[1.19] tracking-[-0.015em] m-0"
+            >
+              Inbox
+            </h1>
+            <p className="text-sm leading-[21px] text-muted mt-1.5 mb-0 max-w-[60ch]">
+              A durable record of project and application activity, with live updates when
+              available.
+            </p>
           </div>
-          <PreviewBadge phase="Phase 5B–5C preview" />
-        </div>
-
-        <p className="t-body-md muted" style={{ margin: 0 }}>
-          Notifications and contextual messaging are planned for Phases 5B–5C. This preview shows
-          how project context and participant identity stay together.
-        </p>
-
-        <div className="split-layout">
-          <section className="split-list-panel" aria-label="Message threads">
-            <div
-              style={{
-                padding: "12px 16px",
-                borderBottom: "1px solid var(--hairline)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "8px",
-              }}
-            >
-              <div style={{ display: "flex", gap: "6px" }}>
-                <span className="pg-pill pg-pill-raised">All</span>
-                <span className="pg-pill">Unread (2)</span>
-              </div>
-              <span className="t-label-sm muted">Sample threads</span>
-            </div>
-
-            <div className="list-rail">
-              <a className="list-item" aria-current="true" href="#thread">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
-                  <span className="t-label-sm" style={{ color: "var(--link)" }}>
-                    Application · Campus Shuttle Tracker
-                  </span>
-                  <span className="brand-dot" aria-label="Unread" />
-                </div>
-                <strong className="t-title-sm" style={{ display: "block", marginTop: "4px" }}>
-                  Dev Patel sent a message about QA &amp; Field Tester
-                </strong>
-                <small>3 hours ago · Sample</small>
-              </a>
-
-              <a className="list-item" href="#thread">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
-                  <span className="t-label-sm muted">Project update · CS 340</span>
-                  <span className="brand-dot" aria-label="Unread" />
-                </div>
-                <strong className="t-title-sm" style={{ display: "block", marginTop: "4px" }}>
-                  Milestone 2 snapshot window opens Nov 26
-                </strong>
-                <small>Yesterday · Sample</small>
-              </a>
-            </div>
-          </section>
-
-          <section
-            className="pg-card"
-            id="thread"
-            style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}
+          <a
+            className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium no-underline whitespace-nowrap border border-control bg-surface text-on-surface hover:bg-raised"
+            href="/account/settings#notifications"
           >
-            <div
-              style={{
-                padding: "18px 22px",
-                borderBottom: "1px solid var(--hairline)",
-                display: "flex",
-                flexWrap: "wrap",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "12px",
-              }}
-            >
-              <div>
-                <p className="t-label-sm muted" style={{ margin: 0 }}>
-                  Context: Application for QA &amp; Field Tester · Campus Shuttle Tracker
-                </p>
-                <h2 className="t-title-md" style={{ marginTop: "4px" }}>
-                  Participants: Asha Nair (Maintainer), Dev Patel (Applicant)
-                </h2>
-              </div>
-              <span className="t-label-sm" style={{ color: "var(--danger)" }}>
-                Report or block
-              </span>
-            </div>
-
-            <div style={{ padding: "22px", display: "flex", flexDirection: "column", gap: "14px" }}>
-              <div className="pg-card-canvas" style={{ maxWidth: "36rem" }}>
-                <p className="t-label-sm muted" style={{ margin: 0 }}>
-                  Dev Patel · Sample message
-                </p>
-                <p className="t-body-md" style={{ margin: "6px 0 0" }}>
-                  Hi Asha, I ride the North Loop at 8:15 AM daily and have tested VoiceOver on iOS
-                  for our HCI lab. Happy to verify PR #14 tomorrow morning.
-                </p>
-              </div>
-              <div className="notice">
-                Messages will be available when Phase 5B notification and Phase 5C messaging
-                contracts ship.
-              </div>
-            </div>
-
-            <form
-              style={{
-                padding: "16px 22px",
-                borderTop: "1px solid var(--hairline)",
-                display: "flex",
-                flexWrap: "wrap",
-                gap: "10px",
-              }}
-            >
-              <label className="sr-only" htmlFor="reply-box">
-                Reply
-              </label>
-              <input
-                id="reply-box"
-                className="pg-input"
-                style={{ flex: "1 1 200px" }}
-                disabled
-                placeholder="Messaging is not available in this preview"
-              />
-              <button className="primary-button" disabled type="button">
-                Send
-              </button>
-            </form>
-          </section>
+            Notification preferences
+          </a>
         </div>
+
+        <Inbox />
       </main>
       <SiteFooter />
     </>

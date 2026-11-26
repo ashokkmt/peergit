@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { PreviewBadge } from "@/components/layout/preview-banner";
+import { readApiEnvelope } from "@/lib/http";
 
-type Envelope<T> = { data?: T; error?: { message?: string } };
 type Repository = {
   id: number;
   installation_id: string;
@@ -23,6 +23,16 @@ type Installation = {
   confirmed_at: string;
 };
 type RetainedProject = { id: string; title: string; delete_after: string };
+
+const cardClass = "min-w-0 max-w-full bg-surface border border-hairline rounded-2xl p-6 flex flex-col";
+const primaryBtn =
+  "inline-flex min-h-11 items-center justify-center rounded-lg px-[18px] py-2 text-sm font-medium border border-primary bg-primary text-on-primary cursor-pointer hover:opacity-90 disabled:opacity-55 disabled:cursor-not-allowed";
+const compactPrimaryBtn =
+  "inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium whitespace-nowrap border border-primary bg-primary text-on-primary cursor-pointer hover:opacity-90 disabled:opacity-55 disabled:cursor-not-allowed";
+const compactSecondaryBtn =
+  "inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium no-underline whitespace-nowrap border border-control bg-surface text-on-surface cursor-pointer hover:bg-raised disabled:opacity-55 disabled:cursor-not-allowed";
+const compactDangerBtn =
+  "inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium whitespace-nowrap border border-danger bg-danger text-on-primary cursor-pointer hover:opacity-90 disabled:opacity-55 disabled:cursor-not-allowed";
 
 export function GitHubImports({ csrf }: { csrf: string }) {
   const [repositories, setRepositories] = useState<Repository[]>([]);
@@ -45,10 +55,11 @@ export function GitHubImports({ csrf }: { csrf: string }) {
         credentials: "same-origin",
         cache: "no-store",
       });
-      const result =
-        response.status === 204 ? { data: undefined } : ((await response.json()) as Envelope<T>);
-      if (!response.ok)
+      if (response.status === 204) return undefined as T;
+      const result = await readApiEnvelope<T>(response, `Request failed (${response.status}).`);
+      if (!response.ok) {
         throw new Error(result.error?.message ?? `Request failed (${response.status}).`);
+      }
       return result.data as T;
     },
     [csrf],
@@ -184,66 +195,60 @@ export function GitHubImports({ csrf }: { csrf: string }) {
   }
 
   return (
-    <section
-      className="content account-content"
-      aria-labelledby="github-import-title"
-      style={{ display: "flex", flexDirection: "column", gap: "20px" }}
-    >
+    <section className="w-full flex flex-col gap-5" aria-labelledby="github-import-title">
       <div>
-        <p className="eyebrow">GitHub connection</p>
-        <h1 id="github-import-title" className="t-headline-md">
+        <p className="mt-0 mb-1.5 text-link text-xs font-semibold tracking-[0.02em]">
+          GitHub connection
+        </p>
+        <h1
+          id="github-import-title"
+          className="font-display text-[clamp(1.5rem,2.5vw,2rem)] font-semibold leading-[1.19] tracking-[-0.015em] m-0"
+        >
           Import a project from GitHub
         </h1>
-        <p className="t-body-md muted" style={{ margin: "6px 0 0" }}>
+        <p className="text-sm leading-[21px] text-muted mt-1.5 mb-0">
           Signed-in GitHub identity is separate from repository installations. PeerGit imports
           repositories where GitHub confirms you have administrator access.
         </p>
       </div>
 
       {problem && (
-        <p className="form-error" role="alert">
+        <p
+          className="rounded-lg px-4 py-3 text-sm font-medium bg-danger/12 border border-danger/35 text-danger m-0"
+          role="alert"
+        >
           {problem}
         </p>
       )}
       {message && (
-        <p className="form-success" role="status">
+        <p
+          className="rounded-lg px-4 py-3 text-sm font-medium bg-success/12 border border-success/35 text-success m-0"
+          role="status"
+        >
           {message}
         </p>
       )}
 
-      <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-        <h2 className="t-title-md">Connected installations</h2>
+      <section className={`${cardClass} gap-4`}>
+        <h2 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
+          Connected installations
+        </h2>
         {installations.length ? (
-          <ul
-            style={{
-              listStyle: "none",
-              padding: 0,
-              margin: 0,
-              display: "grid",
-              gap: "12px",
-            }}
-          >
+          <ul className="list-none p-0 m-0 grid gap-3">
             {installations.map((item) => (
               <li
                 key={item.id}
-                className="pg-card-canvas"
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: "12px",
-                }}
+                className="min-w-0 max-w-full bg-canvas border border-hairline rounded-2xl p-5 flex flex-wrap items-center justify-between gap-3"
               >
                 <div>
-                  <strong className="t-title-sm">{item.account}</strong>{" "}
-                  <span className="t-body-sm muted">
+                  <strong className="text-base font-semibold leading-[22px]">{item.account}</strong>{" "}
+                  <span className="text-[13px] leading-[19px] text-muted">
                     · {item.target_type} · {item.status}
                   </span>
                 </div>
-                <div className="button-row">
+                <div className="flex flex-wrap gap-2.5 items-center">
                   <a
-                    className="secondary-button pg-btn-compact"
+                    className={compactSecondaryBtn}
                     href={
                       item.target_type === "Organization"
                         ? `https://github.com/organizations/${encodeURIComponent(item.account)}/settings/installations/${item.installation_id}`
@@ -255,7 +260,7 @@ export function GitHubImports({ csrf }: { csrf: string }) {
                     Manage repository access on GitHub
                   </a>
                   <button
-                    className="secondary-button pg-btn-compact"
+                    className={compactSecondaryBtn}
                     type="button"
                     disabled={busy || item.status !== "active"}
                     onClick={() => void refreshInstallation(item)}
@@ -263,7 +268,7 @@ export function GitHubImports({ csrf }: { csrf: string }) {
                     Refresh repositories
                   </button>
                   <button
-                    className="danger-button pg-btn-compact"
+                    className={compactDangerBtn}
                     type="button"
                     disabled={busy}
                     onClick={() => void revokeInstallation(item)}
@@ -275,12 +280,12 @@ export function GitHubImports({ csrf }: { csrf: string }) {
             ))}
           </ul>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px", alignItems: "flex-start" }}>
-            <p className="t-body-md muted" style={{ margin: 0 }}>
+          <div className="flex flex-col gap-3 items-start">
+            <p className="text-sm leading-[21px] text-muted m-0">
               No verified GitHub installation is connected yet.
             </p>
             <button
-              className="primary-button"
+              className={primaryBtn}
               type="button"
               onClick={() => void connect()}
               disabled={busy}
@@ -290,41 +295,36 @@ export function GitHubImports({ csrf }: { csrf: string }) {
           </div>
         )}
 
-        <div className="pg-callout">
+        <div className="flex items-start gap-3 p-4 border border-hairline rounded-xl bg-raised text-muted text-[13px] leading-[19px]">
           <span>
-            <strong>Revocation policy:</strong> Revoking an installation hides affected owned
-            projects privately for a 30-day recovery window before purge. Fresh authorization
-            restores them privately.
+            <strong className="text-on-surface">Revocation policy:</strong> Revoking an installation
+            hides affected owned projects privately for a 30-day recovery window before purge. Fresh
+            authorization restores them privately.
           </span>
         </div>
       </section>
 
       {retained.length > 0 && (
-        <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          <h2 className="t-title-md">Recover recently revoked imports</h2>
-          <p className="t-body-sm muted" style={{ margin: 0 }}>
+        <section className={`${cardClass} gap-3`}>
+          <h2 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
+            Recover recently revoked imports
+          </h2>
+          <p className="text-[13px] leading-[19px] text-muted m-0">
             Restored projects are always private. Reconnect the GitHub App and refresh repository
             access before restoring.
           </p>
-          <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "10px" }}>
+          <ul className="list-none p-0 m-0 grid gap-2.5">
             {retained.map((item) => (
               <li
                 key={item.id}
-                className="pg-card-canvas"
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: "12px",
-                }}
+                className="min-w-0 max-w-full bg-canvas border border-hairline rounded-2xl p-5 flex flex-wrap items-center justify-between gap-3"
               >
-                <span className="t-body-md">
+                <span className="text-sm leading-[21px]">
                   <strong>{item.title}</strong> · recover until{" "}
                   {new Date(item.delete_after).toLocaleString()}
                 </span>
                 <button
-                  className="secondary-button pg-btn-compact"
+                  className={compactSecondaryBtn}
                   disabled={busy}
                   onClick={() => void restoreProject(item)}
                 >
@@ -336,20 +336,14 @@ export function GitHubImports({ csrf }: { csrf: string }) {
         </section>
       )}
 
-      <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "12px",
-          }}
-        >
-          <h2 className="t-title-md">Repositories you administer</h2>
+      <section className={`${cardClass} gap-3.5`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
+            Repositories you administer
+          </h2>
           {installations.length === 0 && (
             <button
-              className="primary-button"
+              className={primaryBtn}
               type="button"
               onClick={() => void connect()}
               disabled={busy}
@@ -360,25 +354,30 @@ export function GitHubImports({ csrf }: { csrf: string }) {
         </div>
 
         {loading ? (
-          <p role="status">Loading authorized repositories…</p>
+          <p role="status" className="m-0">
+            Loading authorized repositories…
+          </p>
         ) : repositories.length ? (
-          <ul className="github-repository-list">
+          <ul className="list-none m-0 p-0 grid gap-3">
             {repositories.map((repo) => (
-              <li key={`${repo.installation_id}:${repo.id}`}>
+              <li
+                key={`${repo.installation_id}:${repo.id}`}
+                className="flex flex-wrap items-center justify-between gap-3.5 p-4 bg-canvas border border-hairline rounded-xl"
+              >
                 <div>
-                  <h3 className="t-mono-sm" style={{ fontWeight: 600, marginBottom: "4px" }}>
+                  <h3 className="font-mono text-[13px] leading-[19px] font-semibold mt-0 mb-1">
                     {repo.full_name}
                   </h3>
-                  <p className="t-body-sm muted" style={{ margin: "0 0 4px" }}>
+                  <p className="text-[13px] leading-[19px] text-muted mt-0 mb-1">
                     {repo.description || "No description"}
                   </p>
-                  <p className="t-body-sm muted" style={{ margin: 0 }}>
+                  <p className="text-[13px] leading-[19px] text-muted m-0">
                     {repo.visibility} · default branch: {repo.default_branch || "not set"}
                     {repo.topics.length ? ` · ${repo.topics.join(", ")}` : ""}
                   </p>
                 </div>
                 <button
-                  className="primary-button pg-btn-compact"
+                  className={compactPrimaryBtn}
                   type="button"
                   disabled={busy}
                   onClick={() => void importRepository(repo)}
@@ -389,63 +388,49 @@ export function GitHubImports({ csrf }: { csrf: string }) {
             ))}
           </ul>
         ) : (
-          <p className="t-body-md muted" style={{ margin: 0 }}>
+          <p className="text-sm leading-[21px] text-muted m-0">
             No current repository candidates. Connect or refresh the GitHub App authorization to
             check access.
           </p>
         )}
 
         {expiredCount > 0 && (
-          <p role="status" className="pg-callout">
+          <p
+            role="status"
+            className="flex items-start gap-3 p-4 border border-hairline rounded-xl bg-raised text-muted text-[13px] leading-[19px] m-0"
+          >
             Your previous repository list expired. Refresh a connected installation above to check
             GitHub for current access.
           </p>
         )}
-        <p className="t-body-sm muted" style={{ margin: 0 }}>
+        <p className="text-[13px] leading-[19px] text-muted m-0">
           Repository administration and installation access are checked again by GitHub when the
           import completes.
         </p>
       </section>
 
-      <section className="pg-card" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "12px",
-          }}
-        >
+      <section className={`${cardClass} gap-3`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <span className="t-label-sm" style={{ color: "var(--link)" }}>
+            <span className="text-xs font-medium leading-4 text-link">
               Qualified Pilot (Stage B1)
             </span>
-            <h2 className="t-title-md" style={{ marginTop: "2px" }}>
+            <h2 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] mt-0.5 mb-0">
               Scoped HTTPS Git credentials
             </h2>
           </div>
           <PreviewBadge phase="Stage B1" />
         </div>
-        <div
-          className="pg-card-canvas"
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "12px",
-          }}
-        >
+        <div className="min-w-0 max-w-full bg-canvas border border-hairline rounded-2xl p-5 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="t-mono-sm" style={{ margin: 0 }}>
+            <p className="font-mono text-[13px] leading-[19px] m-0">
               pg_tok_northgate_9a4c••••••••
             </p>
-            <p className="t-body-sm muted" style={{ margin: "4px 0 0" }}>
+            <p className="text-[13px] leading-[19px] text-muted mt-1 mb-0">
               Sample credential preview · Expires 30 days after issue
             </p>
           </div>
-          <button type="button" className="secondary-button pg-btn-compact" disabled>
+          <button type="button" className={compactSecondaryBtn} disabled>
             Generate credential
           </button>
         </div>

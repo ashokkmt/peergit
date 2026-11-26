@@ -76,7 +76,7 @@ func (h *resendWebhookHandler) receive(w http.ResponseWriter, r *http.Request) {
 	processed := status == ""
 	if status != "" {
 		var known bool
-		if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM campus_email_deliveries WHERE provider='resend' AND provider_message_id=$1)`, event.Data.EmailID).Scan(&known); err != nil {
+		if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM campus_email_deliveries WHERE provider='resend' AND provider_message_id=$1) OR EXISTS(SELECT 1 FROM notification_email_deliveries WHERE provider='resend' AND provider_message_id=$1)`, event.Data.EmailID).Scan(&known); err != nil {
 			http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
 			return
 		}
@@ -90,6 +90,12 @@ func (h *resendWebhookHandler) receive(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		processed = tag.RowsAffected() > 0
+		notificationTag, notificationErr := tx.Exec(r.Context(), `UPDATE notification_email_deliveries SET status=$2,status_at=$3,last_error_code=NULL WHERE provider='resend' AND provider_message_id=$1 AND (status='accepted' OR status_at<$3)`, event.Data.EmailID, status, event.CreatedAt)
+		if notificationErr != nil {
+			http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		processed = processed || notificationTag.RowsAffected() > 0
 	}
 	if event.Type == "email.bounced" || event.Type == "email.complained" || event.Type == "email.suppressed" {
 		for _, address := range event.Data.To {
@@ -144,6 +150,9 @@ func recipientKey(key, address string) []byte {
 	_, _ = mac.Write([]byte(strings.ToLower(strings.TrimSpace(address))))
 	return mac.Sum(nil)
 }
+
+// RecipientKey returns the non-reversible key shared by account and activity mail suppression.
+func RecipientKey(key, address string) []byte { return recipientKey(key, address) }
 
 func suppressionReason(event string) string {
 	switch event {

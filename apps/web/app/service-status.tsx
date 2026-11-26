@@ -20,18 +20,25 @@ export function ServiceStatus() {
     };
   }, []);
 
+  const dotClass =
+    service === "ready"
+      ? "bg-success"
+      : service === "unavailable"
+        ? "bg-danger"
+        : "bg-warning";
+
   return (
     <div
-      className={`service-status ${service}`}
+      className={`service-status ${service} inline-flex flex-wrap items-center gap-2 mt-2 text-muted text-xs`}
       role="status"
       aria-live="polite"
     >
-      <span className="status-dot" aria-hidden="true" />
+      <span className={`w-2 h-2 rounded-full ${dotClass}`} aria-hidden="true" />
       {service === "checking" && "Checking service status…"}
       {service === "ready" && "Local API is ready"}
       {service === "unavailable" &&
         "The API is unavailable. You can still explore this preview."}
-      {requestID && <span className="request-id">Request ID: {requestID}</span>}
+      {requestID && <span className="font-mono text-xs">Request ID: {requestID}</span>}
     </div>
   );
 }

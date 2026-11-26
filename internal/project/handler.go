@@ -402,7 +402,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		h.err.Handle(w, r, err)
 		return
 	}
-	updatePayload, _ := json.Marshal(map[string]any{"lifecycle": in.Lifecycle, "visibility": in.Visibility, "version": next})
+	updatePayload, _ := json.Marshal(map[string]any{"lifecycle": in.Lifecycle, "visibility": in.Visibility, "version": next, "actor_id": s.UserID})
 	if err = outbox.Append(r.Context(), tx, outbox.Event{TenantID: s.CollegeID, AggregateType: "project", AggregateID: id, EventType: "project.updated", Version: int64(next), Payload: updatePayload}, []string{"project.activity"}); err != nil {
 		h.err.Handle(w, r, err)
 		return

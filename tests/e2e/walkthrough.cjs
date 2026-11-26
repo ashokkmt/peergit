@@ -125,8 +125,6 @@ const { chromium } = require('playwright');
     const previews = await browser.newPage({ viewport: { width: 390, height: 844 } });
     for (const [path, heading] of [
       ['/preview/native', 'PeerGit hosted repositories'],
-      ['/inbox', 'Inbox'],
-      ['/projects/sample/work', 'Tasks & milestones'],
       ['/u/example-student', 'Example Student'],
       ['/campus/overview', 'Campus overview'],
       ['/campus/reports', 'Cohorts, verification & reports'],
@@ -137,6 +135,89 @@ const { chromium } = require('playwright');
       assert(await previews.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `horizontal overflow on ${path}`);
     }
     await previews.close();
+
+    const collaboration = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    const workProjectID = 'sample-work';
+    const sampleTask = { id: 'task-1', title: 'Write onboarding guide', description: 'Keep this task small.', status: 'todo', priority: 'normal', milestone_id: null, milestone_title: null, assignee_ids: ['student-1'], assignee_names: ['Test Student'], version: 1, due_at: null, can_edit: true };
+    const sampleUpdate = { id: 'update-1', author_id: 'student-1', author_name: 'Test Student', body: '<script>window.__peerGitXSS = true</script>Progress is on track.', audience: 'members', version: 1, reaction_count: 0, comment_count: 0, created_at: '2026-11-26T10:00:00Z' };
+    await collaboration.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: true, csrf_token: 'work-csrf', user: { id: 'student-1', display_name: 'Test Student', college_id: 'campus-1', terms_accepted: true, privacy_accepted: true } } }) }));
+    await collaboration.route(`**/api/v1/projects/${workProjectID}`, route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { project: { id: workProjectID, title: 'Campus Transit Board', summary: 'A student team project', visibility: 'campus', lifecycle: 'active' }, viewer_role: 'owner' } }) }));
+    await collaboration.route('**/api/v1/me/saved-projects', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [] } }) }));
+    await collaboration.route(`**/api/v1/projects/${workProjectID}/updates`, async route => {
+      if (route.request().method() === 'POST') {
+        const body = route.request().postDataJSON();
+        sampleUpdate.body = body.body; sampleUpdate.audience = body.audience; sampleUpdate.version += 1;
+        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ data: { id: sampleUpdate.id } }) });
+      } else await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [sampleUpdate] } }) });
+    });
+    await collaboration.route(`**/api/v1/projects/${workProjectID}/tasks**`, async route => {
+      if (route.request().method() === 'PATCH') {
+        const body = route.request().postDataJSON(); assert.equal(body.version, sampleTask.version);
+        Object.assign(sampleTask, { status: body.status, version: sampleTask.version + 1 });
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { id: sampleTask.id, version: sampleTask.version, status: sampleTask.status } }) });
+      } else if (route.request().method() === 'POST') {
+        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ data: { id: 'new-task', version: 1 } }) });
+      } else await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [sampleTask] } }) });
+    });
+    for (const section of ['milestones', 'discussions']) await collaboration.route(`**/api/v1/projects/${workProjectID}/${section}`, route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [] } }) }));
+    await collaboration.goto(`${baseURL}/projects/${workProjectID}/work`);
+    await collaboration.getByRole('heading', { name: 'Team work' }).waitFor();
+    assert.equal(await collaboration.locator('script').filter({ hasText: '__peerGitXSS' }).count(), 0, 'update body must be text, never executable markup');
+    await collaboration.getByRole('tab', { name: /Tasks/ }).click();
+    const taskCard = collaboration.getByRole('article', { name: /Write onboarding guide/ });
+    await taskCard.focus();
+    await taskCard.press('ArrowRight');
+    await collaboration.waitForFunction(() => document.querySelector('select[aria-label="Status for Write onboarding guide"]')?.value === 'in_progress');
+    assert.equal(await collaboration.getByLabel('Status for Write onboarding guide').inputValue(), 'in_progress');
+    assert(await collaboration.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'collaboration task board overflowed on mobile');
+    await collaboration.getByRole('tab', { name: 'Updates' }).click();
+    await collaboration.getByText('Progress is on track.', { exact: false }).waitFor();
+    assert.equal(await collaboration.evaluate(() => (window).__peerGitXSS ?? false), false, 'script-like update text must not execute');
+    await collaboration.setViewportSize({ width: 320, height: 700 });
+    assert(await collaboration.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'collaboration page overflowed at 320 px');
+    await collaboration.close();
+    console.log('Phase 5A collaboration board, keyboard movement, and safe text rendering passed');
+    if (process.env.PHASE5A_ONLY) return;
+
+    const inbox = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    let inboxRead = false;
+    await inbox.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: true, csrf_token: 'notifications-csrf', user: { id: 'student-1', display_name: 'Test Student', college_id: 'campus-1', terms_accepted: true, privacy_accepted: true } } }) }));
+    await inbox.route('**/api/v1/notifications/stream*', route => route.abort());
+    await inbox.route('**/api/v1/notifications**', route => {
+      if (new URL(route.request().url()).pathname.endsWith('/stream')) return route.abort();
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: inboxRead ? [] : [{ id: 'notice-1', sequence: 1, category: 'project_activity', event_type: 'project.update.created', title: 'New project update', body: 'There is new activity in a project you can access.', project_id: 'project-1', created_at: '2026-11-26T10:00:00Z' }], next_cursor: 0, unread_count: inboxRead ? 0 : 1, last_sequence: 1 } }) });
+    });
+    await inbox.route('**/api/v1/notifications/read-all', async route => { inboxRead = true; await route.fulfill({ status: 204 }); });
+    await inbox.route('**/api/v1/notifications/*/read', async route => { inboxRead = true; await route.fulfill({ status: 204 }); });
+    const inboxNavigation = await inbox.goto(`${baseURL}/inbox`);
+    assert.equal(inboxNavigation?.status(), 200, 'notification inbox page should load');
+    await inbox.getByRole('heading', { level: 1, name: 'Inbox' }).waitFor();
+    await inbox.getByRole('heading', { name: 'New project update' }).waitFor();
+    await inbox.getByRole('status').getByText('Live updates reconnecting').waitFor();
+    await inbox.getByRole('tab', { name: /Unread/ }).click();
+    await inbox.getByRole('button', { name: 'Mark all read' }).click();
+    await inbox.getByRole('heading', { name: 'You’re all caught up' }).waitFor();
+    assert(await inbox.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'notification inbox overflowed on mobile');
+    await inbox.setViewportSize({ width: 320, height: 700 });
+    assert(await inbox.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'notification inbox overflowed at 320 px');
+    await inbox.close();
+
+    const notificationSettings = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    let projectEmail = false;
+    await notificationSettings.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: true, csrf_token: 'settings-csrf', user: { id: 'student-1', display_name: 'Test Student', college_id: 'campus-1', terms_accepted: true, privacy_accepted: true } } }) }));
+    await notificationSettings.route('**/api/v1/me', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { id: 'student-1', college_id: 'campus-1', email: 'student@example.test', display_name: 'Test Student', account_type: 'campus', profile: {}, skills: [], consents: [], campus_admin: false, mfa_enabled: false } }) }));
+    await notificationSettings.route('**/api/v1/notifications/preferences', async route => {
+      if (route.request().method() === 'PUT') { projectEmail = route.request().postDataJSON().email.project_activity; await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { email: { applications: true, project_activity: projectEmail }, in_app: true } }) }); }
+      else await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { email: { applications: true, project_activity: projectEmail }, in_app: true } }) });
+    });
+    await notificationSettings.goto(`${baseURL}/account/settings`);
+    const activityEmail = notificationSettings.locator('input[type="checkbox"]');
+    await activityEmail.waitFor();
+    await activityEmail.check();
+    await notificationSettings.getByRole('status').getByText('Preference saved.').waitFor();
+    await notificationSettings.close();
+    console.log('Phase 5B inbox, replay reconnect state, mobile reflow, and email preferences passed');
+    if (process.env.PHASE5B_ONLY) return;
 
     const signup = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await signup.goto(`${baseURL}/signup`);

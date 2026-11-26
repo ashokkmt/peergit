@@ -49,10 +49,10 @@ export function AppearanceControl({
 
   if (variant === "select") {
     return (
-      <label className="pg-field" style={{ maxWidth: "240px" }}>
+      <label className="grid gap-1.5 text-[13px] font-medium text-on-surface max-w-60">
         <span>Theme preference</span>
         <select
-          className="theme-select"
+          className="min-h-10 px-3 rounded-lg border border-control bg-surface text-on-surface text-sm font-medium cursor-pointer"
           aria-label="Appearance"
           value={storedTheme}
           onChange={(event) => applyTheme(event.target.value)}
@@ -68,7 +68,7 @@ export function AppearanceControl({
   return (
     <button
       type="button"
-      className="theme-toggle-btn"
+      className="inline-flex items-center justify-center w-9 h-9 min-[420px]:w-10 min-[420px]:h-10 md:w-11 md:h-11 p-0 border border-hairline rounded-lg bg-surface text-muted hover:bg-raised hover:text-on-surface cursor-pointer shrink-0 transition-colors duration-100"
       onClick={() => applyTheme(isDark ? "light" : "dark")}
       aria-label="Toggle color theme"
       aria-pressed={isDark}
