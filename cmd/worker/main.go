@@ -12,6 +12,7 @@ import (
 
 	"peergit/internal/campus"
 	"peergit/internal/github"
+	"peergit/internal/notification"
 	"peergit/internal/platform/config"
 	"peergit/internal/platform/database"
 	"peergit/internal/platform/idempotency"
@@ -58,7 +59,7 @@ func run() error {
 	workerName += "-" + strconv.Itoa(os.Getpid())
 	workerCtx, cancelWorker := context.WithCancel(ctx)
 	defer cancelWorker()
-	results := make(chan error, 5)
+	results := make(chan error, 7)
 	githubClient := github.New()
 	if cfg.GitHubAPIURL != "" {
 		githubClient.API = cfg.GitHubAPIURL
@@ -78,6 +79,8 @@ func run() error {
 	defer resendSender.CloseIdleConnections()
 	jobHandlers := repository.JobHandlers(pool, githubClient, cfg.GitHubAppID, githubKey, objectStore, logger)
 	jobHandlers["campus_verification_email"] = campus.DeliveryHandler(pool, cfg.VerificationEmailKey, campus.MailConfig{Host: cfg.SMTPHost, From: cfg.SMTPFrom, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword, TLSMode: cfg.SMTPTLSMode, Resend: resendSender, SuppressionKey: cfg.VerificationHashKey})
+	notificationMail := notification.Mail{Sender: resendSender, From: cfg.SMTPFrom, AppOrigin: cfg.AppOrigin, SuppressionKey: cfg.VerificationHashKey}
+	jobHandlers["notification_email"] = notification.EmailJobHandler(pool, notificationMail, campus.MailConfig{Host: cfg.SMTPHost, From: cfg.SMTPFrom, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword, TLSMode: cfg.SMTPTLSMode, SuppressionKey: cfg.VerificationHashKey})
 	go func() {
 		results <- (jobs.Queue{Pool: pool}).RunConcurrentTypes(workerCtx, workerName+"-email", jobHandlers, logger, 2, []string{"campus_verification_email"})
 	}()
@@ -85,13 +88,17 @@ func run() error {
 		results <- (jobs.Queue{Pool: pool}).RunConcurrentTypes(workerCtx, workerName+"-general", jobHandlers, logger, 8, []string{"github_webhook", "github_reconcile", "github_overview", "snapshot"})
 	}()
 	go func() {
-		results <- (outbox.Queue{Pool: pool}).Run(workerCtx, workerName, map[string]outbox.Handler{}, logger)
+		results <- (jobs.Queue{Pool: pool}).RunConcurrentTypes(workerCtx, workerName+"-notification-email", jobHandlers, logger, 1, []string{"notification_email"})
+	}()
+	go func() {
+		results <- (outbox.Queue{Pool: pool}).Run(workerCtx, workerName, map[string]outbox.Handler{"project.activity": notification.OutboxHandler(pool, notificationMail)}, logger)
 	}()
 	go func() { campus.RunDeliveryCleanup(workerCtx, pool, logger); results <- nil }()
 	go func() {
 		idempotency.RunCleanup(workerCtx, pool, logger)
 		results <- nil
 	}()
+	go func() { notification.RunCleanup(workerCtx, pool, logger); results <- nil }()
 	go func() {
 		ticker := time.NewTicker(10 * time.Minute)
 		defer ticker.Stop()
@@ -111,7 +118,7 @@ func run() error {
 		}
 		results <- nil
 	}()
-	for range 6 {
+	for range 8 {
 		if err := <-results; err != nil {
 			cancelWorker()
 			return err

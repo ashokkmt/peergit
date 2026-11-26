@@ -62,6 +62,108 @@ func (s *ResendSender) send(ctx context.Context, deliveryID string, data deliver
 	return sendResendWithClient(ctx, s.client, deliveryID, data)
 }
 
+// SendNotification sends non-auth activity mail with a stable provider key. The caller
+// owns suppression checks and persists the returned provider ID before completing its job.
+func (s *ResendSender) SendNotification(ctx context.Context, deliveryID, from, to, subject, text, html string) (string, error) {
+	if s == nil || s.client == nil || deliveryID == "" || from == "" || !validMail(mailbox(from)) || !validMail(to) {
+		return "", errors.New("notification email sender or recipient is unavailable")
+	}
+	request, err := s.client.Emails.SendWithOptions(ctx, &resend.SendEmailRequest{
+		From: from, To: []string{to}, Subject: subject,
+		ReplyTo: "support@peergit.com", Text: text, Html: html,
+	}, &resend.SendEmailOptions{IdempotencyKey: "peer-notification/" + deliveryID})
+	if err != nil {
+		var rateLimit *resend.RateLimitError
+		if errors.As(err, &rateLimit) {
+			seconds, parseErr := strconv.Atoi(rateLimit.RetryAfter)
+			if parseErr == nil && seconds > 0 {
+				return "", retryAfterError{err: err, delay: time.Duration(seconds) * time.Second}
+			}
+			return "", err
+		}
+		var apiError *resend.ResendError
+		if errors.As(err, &apiError) && apiError.StatusCode >= 400 && apiError.StatusCode < 500 && apiError.StatusCode != http.StatusConflict {
+			return "", &jobs.PermanentError{Code: "resend_rejected", Err: err}
+		}
+		return "", err
+	}
+	return request.Id, nil
+}
+
+// SendSMTPNotification reuses the local Mailpit/SMTP transport for activity mail.
+func SendSMTPNotification(ctx context.Context, cfg MailConfig, to, subject, text, html string) error {
+	if cfg.Host == "" || cfg.From == "" || !validMail(to) {
+		return errors.New("SMTP host, sender, and valid recipient are required")
+	}
+	hostname, _, err := net.SplitHostPort(cfg.Host)
+	if err != nil {
+		return errors.New("SMTP_HOST must be host:port")
+	}
+	dialer := net.Dialer{Timeout: 8 * time.Second}
+	var conn net.Conn
+	if cfg.TLSMode == "tls" {
+		conn, err = tls.DialWithDialer(&dialer, "tcp", cfg.Host, &tls.Config{ServerName: hostname, MinVersion: tls.VersionTLS12})
+	} else {
+		conn, err = dialer.DialContext(ctx, "tcp", cfg.Host)
+	}
+	if err != nil {
+		return err
+	}
+	closed := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-closed:
+		}
+	}()
+	defer close(closed)
+	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+	client, err := smtp.NewClient(conn, hostname)
+	if err != nil {
+		_ = conn.Close()
+		return err
+	}
+	defer client.Close()
+	if cfg.TLSMode == "starttls" {
+		if ok, _ := client.Extension("STARTTLS"); !ok {
+			return errors.New("SMTP server does not offer STARTTLS")
+		}
+		if err = client.StartTLS(&tls.Config{ServerName: hostname, MinVersion: tls.VersionTLS12}); err != nil {
+			return err
+		}
+	}
+	if cfg.Username != "" {
+		if err = client.Auth(smtp.PlainAuth("", cfg.Username, cfg.Password, hostname)); err != nil {
+			return err
+		}
+	}
+	if err = client.Mail(mailbox(cfg.From)); err != nil {
+		return err
+	}
+	if err = client.Rcpt(to); err != nil {
+		return err
+	}
+	writer, err := client.Data()
+	if err != nil {
+		return err
+	}
+	body := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"peergit-notice\"\r\n\r\n--peergit-notice\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s\r\n--peergit-notice\r\nContent-Type: text/html; charset=utf-8\r\n\r\n%s\r\n--peergit-notice--\r\n", cfg.From, to, strings.ReplaceAll(strings.ReplaceAll(subject, "\r", " "), "\n", " "), text, html)
+	if _, err = io.WriteString(writer, body); err != nil {
+		_ = writer.Close()
+		return err
+	}
+	if err = writer.Close(); err != nil {
+		return err
+	}
+	return client.Quit()
+}
+
+func validMail(address string) bool {
+	parsed, err := mail.ParseAddress(address)
+	return err == nil && parsed.Address == strings.TrimSpace(address)
+}
+
 func DeliveryHandler(pool *pgxpool.Pool, encryptionKey string, mail MailConfig) jobs.Handler {
 	return func(ctx context.Context, claim jobs.Claim) (string, error) {
 		var deliveryID string
