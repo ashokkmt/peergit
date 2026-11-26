@@ -7,6 +7,7 @@ import { LegacyRepositoryLink } from "./legacy-repository-link";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { readApiEnvelope } from "@/lib/http";
+import { ConversationLaunchButton } from "@/components/collaboration/conversation-launch-button";
 
 type Project = {
   id: string;
@@ -461,6 +462,9 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                     Open on GitHub ↗
                   </a>
                 )}
+                {details.viewer_role && (
+                  <ConversationLaunchButton contextType="project" resourceID={projectID} label="Message team" />
+                )}
               </div>
             </div>
 
@@ -907,6 +911,9 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                                 Decline
                               </button>
                             </div>
+                          )}
+                          {application.status === "accepted" && (
+                            <ConversationLaunchButton contextType="application" resourceID={application.id} />
                           )}
                         </article>
                       ))}

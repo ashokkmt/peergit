@@ -66,7 +66,7 @@ func TestPhase5ADailyCollaborationAccessAndConcurrency(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	errs := errormanager.NewManager(logger)
 	auth := identity.NewHandler(pool, identity.Config{AppOrigin: "http://peergit.test", SessionHashKey: string(key), CookieSecure: false}, logger, errs)
-	work := collaboration.NewHandler(pool, auth, logger, errs)
+	work := collaboration.NewHandler(pool, auth, logger, errs, []byte("phase5a integration cursor signing key"))
 	router := httpserver.NewRouter(health.NewHandler(logger, errs, pool), logger, errs, auth.Register, work.Register)
 	for name, token := range tokens {
 		req := httptest.NewRequest(http.MethodGet, "http://peergit.test/api/v1/session", nil)

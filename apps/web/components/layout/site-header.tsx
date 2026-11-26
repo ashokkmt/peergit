@@ -71,7 +71,7 @@ export function SiteHeader({ workspace = false }: { workspace?: boolean }) {
               Menu
             </summary>
             <nav
-              className="absolute z-40 left-0 top-[calc(100%+8px)] w-[min(260px,calc(100vw-32px))] grid gap-0.5 p-2 bg-surface border border-hairline rounded-xl shadow-[var(--shadow)]"
+              className="fixed z-40 left-3 right-3 top-[72px] w-auto max-w-[260px] grid gap-0.5 p-2 bg-surface border border-hairline rounded-xl shadow-[var(--shadow)]"
               aria-label="Mobile navigation"
             >
               <a className={menuItemClass} href="/explore">
@@ -87,6 +87,15 @@ export function SiteHeader({ workspace = false }: { workspace?: boolean }) {
                 <>
                   <a className={menuItemClass} href="/home">
                     My workspace
+                  </a>
+                  <a className={menuItemClass} href="/feed">
+                    Campus feed
+                  </a>
+                  <a className={menuItemClass} href="/messages">
+                    Messages
+                  </a>
+                  <a className={menuItemClass} href="/applications">
+                    My applications
                   </a>
                   <a className={menuItemClass} href="/inbox">
                     Inbox
@@ -136,6 +145,27 @@ export function SiteHeader({ workspace = false }: { workspace?: boolean }) {
                 aria-current={pathname === "/home" ? "page" : undefined}
               >
                 My workspace
+              </a>
+              <a
+                className={navLinkClass}
+                href="/feed"
+                aria-current={pathname === "/feed" ? "page" : undefined}
+              >
+                Campus feed
+              </a>
+              <a
+                className={navLinkClass}
+                href="/messages"
+                aria-current={pathname.startsWith("/messages") ? "page" : undefined}
+              >
+                Messages
+              </a>
+              <a
+                className={navLinkClass}
+                href="/applications"
+                aria-current={pathname === "/applications" ? "page" : undefined}
+              >
+                Applications
               </a>
               <a
                 className={navLinkClass}

@@ -135,7 +135,7 @@ func (h *Handler) getPreferences(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	_, err := h.pool.Exec(r.Context(), `INSERT INTO notification_preferences(college_id,user_id,category,email_enabled) VALUES($1,$2,'applications',true),($1,$2,'project_activity',false) ON CONFLICT DO NOTHING`, s.CollegeID, s.UserID)
+	_, err := h.pool.Exec(r.Context(), `INSERT INTO notification_preferences(college_id,user_id,category,email_enabled) VALUES($1,$2,'applications',true),($1,$2,'project_activity',false),($1,$2,'messages',false) ON CONFLICT DO NOTHING`, s.CollegeID, s.UserID)
 	if err != nil {
 		http.Error(w, "preferences unavailable", http.StatusServiceUnavailable)
 		return

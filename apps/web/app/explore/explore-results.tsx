@@ -13,11 +13,32 @@ type Project = {
   skills: string[];
 };
 
+type Role = {
+  id: string;
+  role_id: string;
+  title: string;
+  summary: string;
+  project_title: string;
+  difficulty: string;
+  good_first_task: boolean;
+  prerequisite_skills: string[];
+};
+
+type Person = {
+  id: string;
+  handle: string;
+  display_name: string;
+  headline: string;
+  skills: string[];
+};
+
 const apiLoadError =
   "Couldn't load projects right now. Check that the backend API is running and try again.";
 
 export function ExploreResults() {
   const [items, setItems] = useState<Project[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [people, setPeople] = useState<Person[]>([]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [recruitingOnly, setRecruitingOnly] = useState(false);
@@ -28,15 +49,38 @@ export function ExploreResults() {
 
   useEffect(() => {
     let active = true;
-    const url = new URL("/api/v1/projects", window.location.origin);
-    url.searchParams.set("scope", request.scope);
+    const url = new URL(
+      request.scope === "public" ? "/api/v1/projects" : "/api/v1/search",
+      window.location.origin,
+    );
+    if (request.scope === "public") url.searchParams.set("scope", "public");
     if (request.term) url.searchParams.set("q", request.term);
     fetch(url, { cache: "no-store" })
       .then(async (response) => {
-        const result = await readApiEnvelope<{ items: Project[] }>(response, apiLoadError);
-        if (!response.ok) throw new Error(result.error?.message ?? apiLoadError);
+        const result = await readApiEnvelope<{
+          items?: Project[];
+          projects?: Project[];
+          roles?: Role[];
+          people?: Person[];
+        }>(response, apiLoadError);
+        if (!response.ok) {
+          if (request.scope === "campus" && [401, 403, 404].includes(response.status)) {
+            setItems([]);
+            setRoles([]);
+            setPeople([]);
+          }
+          throw new Error(result.error?.message ?? apiLoadError);
+        }
         if (active) {
-          setItems((result.data?.items ?? []).filter((item) => item.visibility === request.scope));
+          if (request.scope === "public") {
+            setItems((result.data?.items ?? []).filter((item) => item.visibility === "public"));
+            setRoles([]);
+            setPeople([]);
+          } else {
+            setItems(result.data?.projects ?? []);
+            setRoles(result.data?.roles ?? []);
+            setPeople(result.data?.people ?? []);
+          }
         }
       })
       .catch(
@@ -56,10 +100,22 @@ export function ExploreResults() {
     };
   }, [request]);
 
+  useEffect(() => {
+    const revalidate = () => {
+      if (scope === "campus" && document.visibilityState === "visible") {
+        setRequest((current) => ({ ...current }));
+      }
+    };
+    window.addEventListener("focus", revalidate);
+    return () => window.removeEventListener("focus", revalidate);
+  }, [scope]);
+
   function runSearch(nextScope = scope, nextTerm = query.trim()) {
     setLoading(true);
     setError("");
     setItems([]);
+    setRoles([]);
+    setPeople([]);
     setRequest({ term: nextTerm, scope: nextScope });
   }
 
@@ -87,9 +143,10 @@ export function ExploreResults() {
           <h1 className="font-display text-[clamp(1.75rem,3.2vw,2.75rem)] font-bold leading-[1.14] tracking-[-0.02em] m-0">
             Explore projects
           </h1>
-          <p className="text-sm leading-[21px] text-muted mt-1.5 mb-0">
-            Showing opted-in public presentations. Verify your campus to switch to campus-only
-            projects.
+        <p className="text-sm leading-[21px] text-muted mt-1.5 mb-0">
+            {scope === "public"
+              ? "Explore public project presentations. Verify your campus to find teammates and campus work."
+              : "Search visible projects, open roles, and students who chose to appear in campus discovery."}
           </p>
         </div>
 
@@ -138,13 +195,13 @@ export function ExploreResults() {
         >
           <div className="grid grid-cols-1 md:grid-cols-[minmax(280px,3fr)_minmax(170px,1.2fr)_auto_auto] gap-3.5 items-end">
             <label className="grid gap-1.5 text-[13px] font-medium text-on-surface" htmlFor="explore-search">
-              Search projects
+            {scope === "public" ? "Search projects" : "Search campus work and people"}
               <input
                 id="explore-search"
                 type="search"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search title, skill, or topic"
+                placeholder={scope === "public" ? "Search title, skill, or topic" : "Projects, roles, people, or skills"}
                 className="w-full min-h-11 px-3.5 py-2.5 border border-control rounded-lg bg-surface text-on-surface text-sm leading-5"
               />
             </label>
@@ -248,7 +305,7 @@ export function ExploreResults() {
         >
           Loading projects…
         </div>
-      ) : !error && filtered.length > 0 ? (
+      ) : !error && (filtered.length > 0 || (scope === "campus" && (roles.length > 0 || people.length > 0))) ? (
         <section aria-label="Project results" className="grid grid-cols-1 min-[900px]:grid-cols-3 gap-6">
           {filtered.map((project) => (
             <a
@@ -292,20 +349,60 @@ export function ExploreResults() {
       ) : !error ? (
         <div className="grid justify-items-center content-center gap-2.5 min-h-[220px] p-8 border border-dashed border-control rounded-2xl text-center bg-surface">
           <h2 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
-            No public projects yet
+            {scope === "public" ? "No public projects yet" : "No campus matches yet"}
           </h2>
           <p className="text-sm leading-[21px] text-muted max-w-[500px] m-0">
-            Public discovery only includes project presentations their owners have chosen to share.
-            You can still create an account and verify your campus to find campus projects.
+            {scope === "public"
+              ? "Public discovery only includes project presentations their owners have chosen to share. Verify your campus to find campus projects and open roles."
+              : "Try another skill or project name. People appear here only when they have enabled profile discovery."}
           </p>
           <a
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-[18px] py-2 text-sm font-medium leading-5 no-underline whitespace-nowrap border border-primary bg-primary text-on-primary hover:opacity-90"
-            href="/signup"
+            href={scope === "public" ? "/signup" : "/feed"}
           >
-            Join PeerGit
+            {scope === "public" ? "Join PeerGit" : "Open campus feed"}
           </a>
         </div>
       ) : null}
+
+      {!error && scope === "campus" && roles.length > 0 && (
+        <section className="grid gap-3" aria-labelledby="campus-roles-title">
+          <h2 id="campus-roles-title" className="m-0 text-xl font-semibold">Open roles</h2>
+          <div className="grid gap-3 md:grid-cols-2">
+            {roles.map((role) => (
+              <a
+                className="grid gap-2 rounded-2xl border border-hairline bg-surface p-5 text-on-surface no-underline hover:border-link"
+                href={`/projects/${role.id}#open-roles`}
+                key={role.role_id}
+              >
+                <span className="text-xs font-medium text-success">{role.difficulty.replaceAll("_", " ")}{role.good_first_task ? " · Good first task" : ""}</span>
+                <strong>{role.title}</strong>
+                <span className="text-sm text-muted">{role.project_title} · {role.summary}</span>
+                {role.prerequisite_skills.length > 0 && <span className="text-xs text-muted">Skills: {role.prerequisite_skills.slice(0, 4).join(", ")}</span>}
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {!error && scope === "campus" && people.length > 0 && (
+        <section className="grid gap-3" aria-labelledby="campus-people-title">
+          <h2 id="campus-people-title" className="m-0 text-xl font-semibold">Students</h2>
+          <div className="grid gap-3 md:grid-cols-2">
+            {people.map((person) => (
+              <a
+                className="grid gap-2 rounded-2xl border border-hairline bg-surface p-5 text-on-surface no-underline hover:border-link"
+                href={`/u/${person.handle}`}
+                key={person.id}
+              >
+                <strong>{person.display_name}</strong>
+                <span className="text-sm text-muted">{person.headline || `@${person.handle}`}</span>
+                {person.skills.length > 0 && <span className="text-xs text-muted">{person.skills.slice(0, 4).join(", ")}</span>}
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

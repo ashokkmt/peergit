@@ -219,6 +219,118 @@ const { chromium } = require('playwright');
     console.log('Phase 5B inbox, replay reconnect state, mobile reflow, and email preferences passed');
     if (process.env.PHASE5B_ONLY) return;
 
+    const campusExplore = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await campusExplore.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: true, csrf_token: 'phase5c-csrf', user: { id: 'student-1', display_name: 'Test Student', college_id: 'campus-1', terms_accepted: true, privacy_accepted: true } } }) }));
+    await campusExplore.route('**/api/v1/projects**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [] } }) }));
+    await campusExplore.route('**/api/v1/search**', async route => {
+      const query = new URL(route.request().url()).searchParams.get('q');
+      if (!query) {
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { projects: [], roles: [], people: [] } }) });
+      }
+      assert.equal(query, 'Campus Transit');
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: {
+        projects: [{ id: 'campus-project', title: 'Campus Transit Board', summary: 'A campus routing project', project_type: 'civic_campus', visibility: 'campus', recruiting: true, skills: ['Go'] }],
+        roles: [{ id: 'campus-project', role_id: 'role-1', title: 'Route mapper', summary: 'Map service routes', project_title: 'Campus Transit Board', difficulty: 'beginner', good_first_task: true, prerequisite_skills: [] }],
+        people: [{ id: 'student-2', handle: 'sam', display_name: 'Sam Student', headline: 'Transit data', skills: ['Go'] }],
+      } }) });
+    });
+    await campusExplore.goto(`${baseURL}/explore`);
+    await campusExplore.getByRole('button', { name: 'My campus' }).click();
+    await campusExplore.getByRole('searchbox', { name: 'Search campus work and people' }).fill('Campus Transit');
+    await campusExplore.getByRole('button', { name: 'Search', exact: true }).click();
+    await campusExplore.getByRole('heading', { name: 'Campus Transit Board' }).waitFor();
+    await campusExplore.getByRole('heading', { name: 'Open roles' }).waitFor();
+    await campusExplore.getByRole('heading', { name: 'Students' }).waitFor();
+    assert(await campusExplore.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'campus search overflowed on mobile');
+    await campusExplore.setViewportSize({ width: 320, height: 700 });
+    assert(await campusExplore.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'campus search overflowed at 320 px');
+    await campusExplore.close();
+
+    const campusAdmin = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await campusAdmin.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: true, user: { id: 'admin-1', display_name: 'Campus Admin', college_id: 'campus-1', campus_admin: true } } }) }));
+    await campusAdmin.route('**/api/v1/campus/insights/wacp', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: {
+      metric: 'Weekly Active Collaborative Projects', value: 6, freshness_at: '2026-11-26T10:00:00Z',
+      sources: ['project_update', 'task_transition'], descriptive_only: true,
+    } }) }));
+    await campusAdmin.goto(`${baseURL}/campus/overview`);
+    await campusAdmin.getByRole('heading', { name: 'Weekly active collaborating projects' }).waitFor();
+    await campusAdmin.getByText('Descriptive aggregate').waitFor();
+    await campusAdmin.getByText('This is not a student score or grade.').waitFor();
+    await campusAdmin.close();
+
+    const messageInbox = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await messageInbox.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: true, user: { id: 'student-1', display_name: 'Test Student', college_id: 'campus-1' } } }) }));
+    await messageInbox.route('**/api/v1/me/conversations', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [{ id: 'conversation-1', context_type: 'project', project_id: 'campus-project', project_title: 'Campus Transit Board', last_message_at: '2026-11-26T10:00:00Z' }] } }) }));
+    await messageInbox.goto(`${baseURL}/messages`);
+    await messageInbox.getByRole('heading', { name: 'Messages', exact: true }).waitFor();
+    assert.equal(await messageInbox.getByRole('link', { name: /Campus Transit Board/ }).getAttribute('href'), '/messages/conversation-1');
+    await messageInbox.close();
+
+    const campusFeed = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    let feedAccess = true;
+    await campusFeed.route('**/api/v1/feed**', async route => {
+      if (!feedAccess) return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Campus access changed.' } }) });
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: [{ id: 'update-1', project_id: 'campus-project', project_title: 'Campus Transit Board', actor_name: 'Sam Student', kind: 'update', summary: 'Shared campus progress', created_at: '2026-11-26T10:00:00Z' }], next_cursor: null } }) });
+    });
+    await campusFeed.goto(`${baseURL}/feed`);
+    await campusFeed.getByText('Shared campus progress').waitFor();
+    assert(await campusFeed.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'campus feed overflowed on mobile');
+    feedAccess = false;
+    await campusFeed.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await campusFeed.getByRole('alert').getByText('Campus access changed.').waitFor();
+    assert.equal(await campusFeed.getByText('Shared campus progress').count(), 0, 'feed content should clear after campus access is withdrawn');
+    await campusFeed.close();
+
+    const conversation = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    let conversationAvailable = true;
+    let conversationMessages = [{ id: 'message-1', sender_id: 'student-2', sender_name: 'Sam Student', body: 'Use the transit fixture branch.', created_at: '2026-11-26T10:00:00Z' }];
+    await conversation.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { csrf_token: 'phase5c-csrf', user: { id: 'student-1' } } }) }));
+    await conversation.route('**/api/v1/conversations/conversation-1/messages**', async route => {
+      if (!conversationAvailable) return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { message: 'Conversation access changed.' } }) });
+      if (route.request().method() === 'POST') {
+        const input = route.request().postDataJSON();
+        conversationMessages.push({ id: 'message-2', sender_id: 'student-1', sender_name: 'Test Student', body: input.body, created_at: '2026-11-26T10:01:00Z' });
+        return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ data: { id: 'message-2' } }) });
+      }
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { items: conversationMessages, context_type: 'project', project_id: 'campus-project', state: 'open', participants: [{ id: 'student-1', handle: 'test', display_name: 'Test Student' }, { id: 'student-2', handle: 'sam', display_name: 'Sam Student' }] } }) });
+    });
+    await conversation.route('**/api/v1/conversations/conversation-1/reports', async route => {
+      assert.equal(route.request().postDataJSON().message_id, 'message-1');
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ data: { reported: true } }) });
+    });
+    await conversation.route('**/api/v1/blocks/student-2', async route => {
+      assert.equal(route.request().method(), 'PUT');
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { blocked: true } }) });
+    });
+    await conversation.goto(`${baseURL}/messages/conversation-1`);
+    await conversation.getByText('Use the transit fixture branch.').waitFor();
+    await conversation.getByLabel('Write a message').fill('The map is ready for review.');
+    await conversation.getByRole('button', { name: 'Send message' }).click();
+    await conversation.getByText('The map is ready for review.').waitFor();
+    await conversation.getByText('Report message').click();
+    await conversation.getByRole('button', { name: 'Submit report' }).click();
+    await conversation.getByRole('status').getByText('Report received.').waitFor();
+    await conversation.getByRole('button', { name: 'Block Sam Student' }).click();
+    await conversation.getByRole('status').getByText('This account is blocked.').waitFor();
+    assert(await conversation.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'conversation overflowed on mobile');
+    await conversation.setViewportSize({ width: 320, height: 700 });
+    const conversationOverflow = await conversation.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+      offenders: [...document.querySelectorAll('body *')]
+        .filter(element => element.getBoundingClientRect().width > 0 && element.getBoundingClientRect().right > window.innerWidth + 1)
+        .slice(0, 8)
+        .map(element => ({ tag: element.tagName, className: element.className, text: element.textContent?.trim().slice(0, 60), right: Math.round(element.getBoundingClientRect().right) })),
+    }));
+    assert(conversationOverflow.scrollWidth <= conversationOverflow.viewportWidth, `conversation overflowed at 320 px: ${JSON.stringify(conversationOverflow)}`);
+    conversationAvailable = false;
+    await conversation.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await conversation.getByRole('alert').getByText('Conversation access changed.').waitFor();
+    assert.equal(await conversation.getByText('Use the transit fixture branch.').count(), 0, 'message body should clear after access is withdrawn');
+    await conversation.close();
+    console.log('Phase 5C grouped discovery, WACP summary, message inbox, campus feed, scoped messages, report/block controls, access revalidation, and 320 px reflow passed');
+    if (process.env.PHASE5C_ONLY) return;
+
     const signup = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await signup.goto(`${baseURL}/signup`);
     await signup.getByRole('heading', { name: 'Start with GitHub' }).waitFor();

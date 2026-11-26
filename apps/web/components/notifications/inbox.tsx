@@ -37,7 +37,9 @@ async function getCsrfToken(): Promise<string> {
 }
 
 function formatCategory(category: string): string {
-  return category === "applications" ? "Application" : "Project activity";
+	if (category === "applications") return "Application";
+	if (category === "messages") return "Message";
+	return "Project activity";
 }
 
 function formatTimestamp(iso: string): string {
