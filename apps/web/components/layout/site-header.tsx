@@ -64,6 +64,7 @@ export function SiteHeader({ workspace = false }: { workspace?: boolean }) {
                 <>
                   <a href="/home">My workspace</a>
                   <a href="/inbox">Inbox</a>
+              <a href="/saved">Saved projects</a>
                 </>
               )}
               {!session.authenticated && (
@@ -122,6 +123,7 @@ export function SiteHeader({ workspace = false }: { workspace?: boolean }) {
                 )}
                 <a href="/account/profile">Profile</a>
                 <a href="/projects">My projects</a>
+                <a href="/saved">Saved projects</a>
                 <a href="/account/github">GitHub connection</a>
                 <a href="/account/settings">Account settings</a>
                 <button type="button" onClick={() => void signOut()}>
