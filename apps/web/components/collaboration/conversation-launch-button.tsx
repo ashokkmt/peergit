@@ -6,7 +6,7 @@ import { readApiEnvelope } from "@/lib/http";
 type ContextType = "project" | "application";
 
 const buttonClass =
-  "inline-flex min-h-10 items-center justify-center rounded-lg border border-control bg-surface px-3.5 py-2 text-sm font-medium text-on-surface hover:bg-raised disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex min-h-[38px] items-center justify-center rounded-lg border border-control bg-surface px-3.5 py-1.5 text-[13px] font-medium text-on-surface whitespace-nowrap cursor-pointer hover:bg-raised transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-60";
 
 export function ConversationLaunchButton({
   contextType,

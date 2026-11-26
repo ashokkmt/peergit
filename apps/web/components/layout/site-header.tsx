@@ -127,17 +127,20 @@ export function SiteHeader({ workspace = false }: { workspace?: boolean }) {
           >
             Explore projects
           </a>
-          <a className={navLinkClass} href="/#how-it-works">
-            How it works
-          </a>
-          <a
-            className={navLinkClass}
-            href="/institutes"
-            aria-current={pathname === "/institutes" ? "page" : undefined}
-          >
-            For institutes
-          </a>
-          {session.user?.college_id && (
+          {!session.user?.college_id ? (
+            <>
+              <a className={navLinkClass} href="/#how-it-works">
+                How it works
+              </a>
+              <a
+                className={navLinkClass}
+                href="/institutes"
+                aria-current={pathname === "/institutes" ? "page" : undefined}
+              >
+                For institutes
+              </a>
+            </>
+          ) : (
             <>
               <a
                 className={navLinkClass}
@@ -159,13 +162,6 @@ export function SiteHeader({ workspace = false }: { workspace?: boolean }) {
                 aria-current={pathname.startsWith("/messages") ? "page" : undefined}
               >
                 Messages
-              </a>
-              <a
-                className={navLinkClass}
-                href="/applications"
-                aria-current={pathname === "/applications" ? "page" : undefined}
-              >
-                Applications
               </a>
               <a
                 className={navLinkClass}
@@ -219,6 +215,12 @@ export function SiteHeader({ workspace = false }: { workspace?: boolean }) {
                 </a>
                 <a className={menuItemClass} href="/projects">
                   My projects
+                </a>
+                <a className={menuItemClass} href="/applications">
+                  My applications
+                </a>
+                <a className={menuItemClass} href="/saved">
+                  Saved projects
                 </a>
                 <a className={menuItemClass} href="/account/github">
                   GitHub connection

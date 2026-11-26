@@ -14,7 +14,7 @@ export default function FeedPage() {
       <SiteHeader workspace />
       <main
         id="main-content"
-        className="mx-auto flex w-[min(1080px,calc(100%-32px))] flex-1 flex-col gap-6 py-8 md:w-[min(1080px,calc(100%-64px))] md:py-12"
+        className="mx-auto flex w-[min(1240px,calc(100%-32px))] flex-1 flex-col gap-6 py-8 md:w-[min(1240px,calc(100%-64px))] md:py-12"
       >
         <CampusFeed />
       </main>

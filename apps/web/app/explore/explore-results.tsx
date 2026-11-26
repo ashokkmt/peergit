@@ -133,6 +133,8 @@ export function ExploreResults() {
     return true;
   });
 
+  const totalResults =
+    filtered.length + (scope === "campus" ? roles.length + people.length : 0);
   const categories = Array.from(new Set(items.map((item) => item.project_type).filter(Boolean)));
 
   return (
@@ -143,7 +145,7 @@ export function ExploreResults() {
           <h1 className="font-display text-[clamp(1.75rem,3.2vw,2.75rem)] font-bold leading-[1.14] tracking-[-0.02em] m-0">
             Explore projects
           </h1>
-        <p className="text-sm leading-[21px] text-muted mt-1.5 mb-0">
+          <p className="text-sm leading-[21px] text-muted mt-1.5 mb-0">
             {scope === "public"
               ? "Explore public project presentations. Verify your campus to find teammates and campus work."
               : "Search visible projects, open roles, and students who chose to appear in campus discovery."}
@@ -195,7 +197,7 @@ export function ExploreResults() {
         >
           <div className="grid grid-cols-1 md:grid-cols-[minmax(280px,3fr)_minmax(170px,1.2fr)_auto_auto] gap-3.5 items-end">
             <label className="grid gap-1.5 text-[13px] font-medium text-on-surface" htmlFor="explore-search">
-            {scope === "public" ? "Search projects" : "Search campus work and people"}
+              {scope === "public" ? "Search projects" : "Search campus work and people"}
               <input
                 id="explore-search"
                 type="search"
@@ -249,7 +251,7 @@ export function ExploreResults() {
         <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-hairline">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[13px] font-medium leading-[18px] tabular-nums">
-              {filtered.length} {filtered.length === 1 ? "result" : "results"}
+              {totalResults} {totalResults === 1 ? "result" : "results"}
             </span>
             {category !== "all" && (
               <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-raised border border-hairline text-xs font-medium leading-4">
@@ -268,8 +270,11 @@ export function ExploreResults() {
             )}
           </div>
           <div className="flex flex-wrap items-center gap-4">
-            <a href="/onboarding" className="text-[13px] font-medium leading-[18px] text-link no-underline hover:underline">
-              Verify campus for campus-only discovery
+            <a
+              href={scope === "public" ? "/onboarding" : "/feed"}
+              className="text-[13px] font-medium leading-[18px] text-link no-underline hover:underline"
+            >
+              {scope === "public" ? "Verify campus for campus-only discovery" : "Open campus feed"}
             </a>
             <button
               type="button"
@@ -305,47 +310,61 @@ export function ExploreResults() {
         >
           Loading projects…
         </div>
-      ) : !error && (filtered.length > 0 || (scope === "campus" && (roles.length > 0 || people.length > 0))) ? (
-        <section aria-label="Project results" className="grid grid-cols-1 min-[900px]:grid-cols-3 gap-6">
-          {filtered.map((project) => (
-            <a
-              key={project.id}
-              className="bg-surface border border-hairline rounded-2xl p-6 no-underline text-on-surface flex flex-col justify-between gap-4 hover:border-link transition-colors duration-100"
-              href={`/${request.scope === "public" ? "showcase" : "projects"}/${project.id}`}
-            >
-              <div className="flex flex-col gap-2">
+      ) : !error && totalResults > 0 ? (
+        <>
+          {filtered.length > 0 && (
+            <section aria-label="Project results" className="grid gap-3">
+              {scope === "campus" && (
                 <div className="flex items-center justify-between gap-2">
-                  <span
-                    className={`text-xs font-medium leading-4 ${
-                      project.recruiting ? "text-success" : "text-link"
-                    }`}
-                  >
-                    {project.recruiting ? "Active · Recruiting" : "Active"}
-                  </span>
-                  <span className="text-xs font-medium leading-4 text-muted">
-                    {project.project_type.replaceAll("_", " ")}
+                  <h2 className="m-0 text-xl font-semibold">Projects</h2>
+                  <span className="text-xs font-medium text-muted tabular-nums">
+                    {filtered.length} {filtered.length === 1 ? "project" : "projects"}
                   </span>
                 </div>
-                <h2 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
-                  {project.title}
-                </h2>
-                <p className="text-sm leading-[21px] text-muted m-0">{project.summary}</p>
-              </div>
-              {project.skills.length > 0 && (
-                <ul className="flex flex-wrap gap-1.5 list-none m-0 pt-3 px-0 pb-0 border-t border-hairline">
-                  {project.skills.slice(0, 4).map((skill) => (
-                    <li
-                      key={skill}
-                      className="inline-flex items-center px-2.5 py-1 rounded bg-raised text-on-surface text-xs font-medium leading-4"
-                    >
-                      {skill}
-                    </li>
-                  ))}
-                </ul>
               )}
-            </a>
-          ))}
-        </section>
+              <div className="grid grid-cols-1 min-[900px]:grid-cols-3 gap-6">
+                {filtered.map((project) => (
+                  <a
+                    key={project.id}
+                    className="bg-surface border border-hairline rounded-2xl p-6 no-underline text-on-surface flex flex-col justify-between gap-4 hover:border-link transition-colors duration-100"
+                    href={`/${request.scope === "public" ? "showcase" : "projects"}/${project.id}`}
+                  >
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className={`text-xs font-medium leading-4 ${
+                            project.recruiting ? "text-success" : "text-link"
+                          }`}
+                        >
+                          {project.recruiting ? "Active · Recruiting" : "Active"}
+                        </span>
+                        <span className="text-xs font-medium leading-4 text-muted">
+                          {project.project_type.replaceAll("_", " ")}
+                        </span>
+                      </div>
+                      <h2 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
+                        {project.title}
+                      </h2>
+                      <p className="text-sm leading-[21px] text-muted m-0">{project.summary}</p>
+                    </div>
+                    {project.skills.length > 0 && (
+                      <ul className="flex flex-wrap gap-1.5 list-none m-0 pt-3 px-0 pb-0 border-t border-hairline">
+                        {project.skills.slice(0, 4).map((skill) => (
+                          <li
+                            key={skill}
+                            className="inline-flex items-center px-2.5 py-1 rounded bg-raised text-on-surface text-xs font-medium leading-4"
+                          >
+                            {skill}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </a>
+                ))}
+              </div>
+            </section>
+          )}
+        </>
       ) : !error ? (
         <div className="grid justify-items-center content-center gap-2.5 min-h-[220px] p-8 border border-dashed border-control rounded-2xl text-center bg-surface">
           <h2 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
@@ -367,18 +386,45 @@ export function ExploreResults() {
 
       {!error && scope === "campus" && roles.length > 0 && (
         <section className="grid gap-3" aria-labelledby="campus-roles-title">
-          <h2 id="campus-roles-title" className="m-0 text-xl font-semibold">Open roles</h2>
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="flex items-center justify-between gap-2">
+            <h2 id="campus-roles-title" className="m-0 text-xl font-semibold">
+              Open roles
+            </h2>
+            <span className="text-xs font-medium text-muted tabular-nums">
+              {roles.length} {roles.length === 1 ? "role" : "roles"}
+            </span>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {roles.map((role) => (
               <a
-                className="grid gap-2 rounded-2xl border border-hairline bg-surface p-5 text-on-surface no-underline hover:border-link"
+                className="flex flex-col justify-between gap-3 rounded-2xl border border-hairline bg-surface p-5 text-on-surface no-underline hover:border-link transition-colors duration-100"
                 href={`/projects/${role.id}#open-roles`}
                 key={role.role_id}
               >
-                <span className="text-xs font-medium text-success">{role.difficulty.replaceAll("_", " ")}{role.good_first_task ? " · Good first task" : ""}</span>
-                <strong>{role.title}</strong>
-                <span className="text-sm text-muted">{role.project_title} · {role.summary}</span>
-                {role.prerequisite_skills.length > 0 && <span className="text-xs text-muted">Skills: {role.prerequisite_skills.slice(0, 4).join(", ")}</span>}
+                <div className="grid gap-1.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="font-medium text-success">
+                      {role.difficulty.replaceAll("_", " ")}
+                      {role.good_first_task ? " · Good first task" : ""}
+                    </span>
+                    <span className="text-muted">Role opening</span>
+                  </div>
+                  <strong className="text-base font-semibold leading-5">{role.title}</strong>
+                  <span className="text-xs font-medium text-link">{role.project_title}</span>
+                  <p className="m-0 text-sm leading-[21px] text-muted">{role.summary}</p>
+                </div>
+                {role.prerequisite_skills.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 border-t border-hairline pt-3">
+                    {role.prerequisite_skills.slice(0, 4).map((skill) => (
+                      <span
+                        key={skill}
+                        className="inline-flex items-center rounded bg-raised px-2 py-0.5 text-xs font-medium text-on-surface"
+                      >
+                        {skill}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </a>
             ))}
           </div>
@@ -387,17 +433,52 @@ export function ExploreResults() {
 
       {!error && scope === "campus" && people.length > 0 && (
         <section className="grid gap-3" aria-labelledby="campus-people-title">
-          <h2 id="campus-people-title" className="m-0 text-xl font-semibold">Students</h2>
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="flex items-center justify-between gap-2">
+            <h2 id="campus-people-title" className="m-0 text-xl font-semibold">
+              Students
+            </h2>
+            <span className="text-xs font-medium text-muted tabular-nums">
+              {people.length} {people.length === 1 ? "student" : "students"}
+            </span>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {people.map((person) => (
               <a
-                className="grid gap-2 rounded-2xl border border-hairline bg-surface p-5 text-on-surface no-underline hover:border-link"
+                className="flex flex-col justify-between gap-3 rounded-2xl border border-hairline bg-surface p-5 text-on-surface no-underline hover:border-link transition-colors duration-100"
                 href={`/u/${person.handle}`}
                 key={person.id}
               >
-                <strong>{person.display_name}</strong>
-                <span className="text-sm text-muted">{person.headline || `@${person.handle}`}</span>
-                {person.skills.length > 0 && <span className="text-xs text-muted">{person.skills.slice(0, 4).join(", ")}</span>}
+                <div className="flex items-start gap-3">
+                  <span
+                    className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-hairline bg-raised text-sm font-semibold text-on-surface"
+                    aria-hidden="true"
+                  >
+                    {person.display_name.slice(0, 1).toUpperCase()}
+                  </span>
+                  <div className="grid min-w-0 gap-0.5">
+                    <strong className="text-base font-semibold leading-5 truncate">
+                      {person.display_name}
+                    </strong>
+                    <span className="font-mono text-xs text-muted">@{person.handle}</span>
+                    {person.headline && (
+                      <p className="mt-1 mb-0 text-sm leading-[20px] text-muted">
+                        {person.headline}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                {person.skills.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 border-t border-hairline pt-3">
+                    {person.skills.slice(0, 4).map((skill) => (
+                      <span
+                        key={skill}
+                        className="inline-flex items-center rounded bg-raised px-2 py-0.5 text-xs font-medium text-on-surface"
+                      >
+                        {skill}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </a>
             ))}
           </div>

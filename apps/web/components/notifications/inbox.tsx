@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PreviewBadge } from "@/components/layout/preview-banner";
+import { ConversationLaunchButton } from "@/components/collaboration/conversation-launch-button";
 import { readApiEnvelope } from "@/lib/http";
 
 type Item = {
@@ -37,9 +37,9 @@ async function getCsrfToken(): Promise<string> {
 }
 
 function formatCategory(category: string): string {
-	if (category === "applications") return "Application";
-	if (category === "messages") return "Message";
-	return "Project activity";
+  if (category === "applications") return "Application";
+  if (category === "messages") return "Message";
+  return "Project activity";
 }
 
 function formatTimestamp(iso: string): string {
@@ -420,31 +420,30 @@ export function Inbox() {
 
               <div className="flex items-center justify-between flex-wrap gap-3 p-4 border border-hairline rounded-xl bg-raised text-muted text-[13px] leading-[19px]">
                 <span>
-                  Contextual direct replies for project and application threads ship separately from
-                  notifications.
+                  Direct replies happen in scoped project and application conversations with current
+                  participants.
                 </span>
-                <PreviewBadge phase="Phase 5C" />
+                <div className="flex flex-wrap items-center gap-2">
+                  {(selected.application_id || selected.project_id) && (
+                    <ConversationLaunchButton
+                      contextType={selected.application_id ? "application" : "project"}
+                      resourceID={selected.application_id ?? selected.project_id!}
+                      label={
+                        selected.application_id
+                          ? "Open application conversation"
+                          : "Open project conversation"
+                      }
+                    />
+                  )}
+                  <a
+                    className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium no-underline whitespace-nowrap border border-control bg-surface text-on-surface hover:bg-raised"
+                    href="/messages"
+                  >
+                    All messages →
+                  </a>
+                </div>
               </div>
             </div>
-
-            <form className="px-6 py-4 border-t border-hairline flex flex-wrap gap-2.5">
-              <label className="sr-only" htmlFor="reply-box">
-                Contextual messaging preview
-              </label>
-              <input
-                id="reply-box"
-                className="flex-[1_1_200px] min-h-11 px-3.5 py-2.5 border border-control rounded-lg bg-surface text-on-surface text-sm leading-5 disabled:opacity-60"
-                disabled
-                placeholder="Direct replies will get implemented in a later phase"
-              />
-              <button
-                className="inline-flex min-h-[38px] items-center justify-center rounded-lg px-3.5 py-1.5 text-[13px] font-medium whitespace-nowrap border border-primary bg-primary text-on-primary disabled:opacity-55 disabled:cursor-not-allowed"
-                disabled
-                type="button"
-              >
-                Send
-              </button>
-            </form>
           </section>
         )}
       </div>

@@ -19,15 +19,22 @@ export function WACPSummary() {
     setMessage("Loading authorized campus summary…");
     try {
       const response = await fetch("/api/v1/campus/insights/wacp", { cache: "no-store" });
-      const result = await readApiEnvelope<Summary>(response, "Collaboration summary is unavailable.");
+      const result = await readApiEnvelope<Summary>(
+        response,
+        "Collaboration summary is unavailable.",
+      );
       if (!response.ok || !result.data) {
-        throw new Error(result.error?.message ?? "Campus administrator access is required for this aggregate.");
+        throw new Error(
+          result.error?.message ?? "Campus administrator access is required for this aggregate.",
+        );
       }
       setSummary(result.data);
       setMessage("");
     } catch (error) {
       setSummary(null);
-      setMessage(error instanceof Error ? error.message : "Collaboration summary is unavailable.");
+      setMessage(
+        error instanceof Error ? error.message : "Collaboration summary is unavailable.",
+      );
     }
   }
 
@@ -41,20 +48,53 @@ export function WACPSummary() {
   }, []);
 
   return (
-    <section className="grid gap-4 rounded-2xl border border-hairline bg-surface p-6" aria-labelledby="wacp-title">
+    <section
+      className="grid gap-4 rounded-2xl border border-hairline bg-surface p-6"
+      aria-labelledby="wacp-title"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="mb-1 mt-0 text-xs font-semibold text-link">Trailing 7 days</p>
-          <h2 id="wacp-title" className="m-0 text-xl font-semibold">Weekly active collaborating projects</h2>
+          <p className="mb-1 mt-0 text-xs font-semibold tracking-[0.02em] text-link">
+            Trailing 7 days
+          </p>
+          <h2 id="wacp-title" className="m-0 text-xl font-semibold">
+            Weekly active collaborating projects
+          </h2>
         </div>
-        {summary?.descriptive_only && <span className="rounded-full border border-hairline bg-raised px-3 py-1 text-xs font-medium">Descriptive aggregate</span>}
+        {summary?.descriptive_only && (
+          <span className="inline-flex items-center rounded-full border border-hairline bg-raised px-3 py-1 text-xs font-medium">
+            Descriptive aggregate
+          </span>
+        )}
       </div>
+
       {summary ? (
-        <div className="grid gap-4 sm:grid-cols-[auto_1fr] sm:items-end">
-          <strong className="font-display text-5xl font-semibold tabular-nums">{summary.value}</strong>
-          <div className="grid gap-1 text-sm text-muted">
-            <span>{summary.sources.length ? `Observed sources: ${summary.sources.map((source) => source.replaceAll("_", " ")).join(", ")}` : "No qualifying activity observed in this window."}</span>
-            <span>
+        <div className="grid gap-4 sm:grid-cols-[auto_1fr] sm:items-center">
+          <div className="grid justify-items-start rounded-xl border border-hairline bg-raised px-5 py-3.5">
+            <strong className="font-display text-5xl font-semibold leading-none tabular-nums">
+              {summary.value}
+            </strong>
+            <span className="mt-1 text-xs font-medium text-muted">Active projects</span>
+          </div>
+          <div className="grid gap-2 text-sm text-muted">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs font-medium text-on-surface">Observed sources:</span>
+              {summary.sources.length ? (
+                summary.sources.map((source) => (
+                  <span
+                    key={source}
+                    className="inline-flex items-center rounded border border-hairline bg-canvas px-2 py-0.5 text-xs font-medium text-on-surface"
+                  >
+                    {source.replaceAll("_", " ")}
+                  </span>
+                ))
+              ) : (
+                <span className="text-xs text-muted">
+                  No qualifying activity observed in this window.
+                </span>
+              )}
+            </div>
+            <span className="text-xs text-muted">
               {summary.freshness_at
                 ? `Source data recorded ${new Date(summary.freshness_at).toLocaleString()}`
                 : "No qualifying source activity has been recorded in this window."}
@@ -62,13 +102,25 @@ export function WACPSummary() {
           </div>
         </div>
       ) : (
-        <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted" role="status">
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline bg-canvas px-4 py-3 text-sm text-muted"
+          role="status"
+        >
           <span>{message}</span>
-          <button className="rounded-lg border border-control bg-surface px-3 py-1.5 text-sm text-on-surface" onClick={() => void load()} type="button">Retry</button>
+          <button
+            className="inline-flex min-h-[38px] cursor-pointer items-center justify-center rounded-lg border border-control bg-surface px-3.5 py-1.5 text-[13px] font-medium text-on-surface hover:bg-raised"
+            onClick={() => void load()}
+            type="button"
+          >
+            Retry
+          </button>
         </div>
       )}
+
       <p className="m-0 border-t border-hairline pt-3 text-xs leading-5 text-muted">
-        A project counts when at least two distinct members have a meaningful recorded action. Views, likes alone, messages, and duplicate provider syncs are excluded. This is not a student score or grade.
+        A project counts when at least two distinct members have a meaningful recorded action. Views,
+        likes alone, messages, and duplicate provider syncs are excluded. This is not a student score
+        or grade.
       </p>
     </section>
   );
