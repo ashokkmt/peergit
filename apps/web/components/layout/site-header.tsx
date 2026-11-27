@@ -213,6 +213,9 @@ export function SiteHeader({ workspace = false }: { workspace?: boolean }) {
                 <a className={menuItemClass} href="/account/profile">
                   Profile
                 </a>
+                <a className={menuItemClass} href="/account/portfolio">
+                  Portfolio
+                </a>
                 <a className={menuItemClass} href="/projects">
                   My projects
                 </a>

@@ -11,10 +11,18 @@ export default async function SharedPortfolioPage({
 
   return (
     <>
+      <a
+        className="fixed left-4 -top-20 z-100 rounded-lg bg-primary px-4 py-2.5 font-semibold text-on-primary focus:top-3 print:hidden"
+        href="#main-content"
+      >
+        Skip to content
+      </a>
       <div className="print:hidden">
         <SiteHeader />
       </div>
-      <PublicPortfolio token={token} />
+      <main id="main-content" className="flex-1">
+        <PublicPortfolio token={token} />
+      </main>
       <div className="print:hidden">
         <SiteFooter />
       </div>

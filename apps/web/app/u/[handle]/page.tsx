@@ -11,16 +11,16 @@ export default async function PublicProfilePage({
 
   return (
     <>
+      <a
+        className="fixed left-4 -top-20 z-100 rounded-lg bg-primary px-4 py-2.5 font-semibold text-on-primary focus:top-3 print:hidden"
+        href="#main-content"
+      >
+        Skip to content
+      </a>
       <div className="print:hidden">
         <SiteHeader workspace />
       </div>
       <main id="main-content" className="flex-1">
-        <a
-          className="fixed left-4 top-[-5rem] z-100 rounded-lg bg-primary px-4 py-2.5 font-semibold text-on-primary focus:top-3 print:hidden"
-          href="#main-content"
-        >
-          Skip to content
-        </a>
         <PublicPortfolio handle={handle} />
       </main>
       <div className="print:hidden">
