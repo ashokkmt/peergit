@@ -137,9 +137,9 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
           avatar_media_id: avatarID,
         }),
       );
-      for (const purpose of ["terms", "privacy", "profile_discovery"]) {
+      for (const purpose of ["terms", "privacy", "profile_discovery", "portfolio"]) {
         const granted = consents.includes(purpose);
-        if (purpose === "profile_discovery" || granted) {
+        if (purpose === "profile_discovery" || purpose === "portfolio" || granted) {
           await post(
             "/api/v1/me/consent",
             "PUT",
@@ -549,6 +549,24 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
               />
               <span>
                 Allow my profile and image to be discoverable by signed-in people at my campus.
+              </span>
+            </label>
+            <label className="flex items-start gap-2.5 my-1.5 text-sm leading-5">
+              <input
+                type="checkbox"
+                checked={consents.includes("portfolio")}
+                onChange={(e) =>
+                  setConsents((old) =>
+                    e.target.checked
+                      ? [...new Set([...old, "portfolio"])]
+                      : old.filter((v) => v !== "portfolio"),
+                  )
+                }
+                className="w-4 h-4 mt-0.5 accent-primary shrink-0"
+              />
+              <span>
+                Allow the work I select for my portfolio to appear on my public page or on active
+                share links. Revoking this hides the page and disables every share link.
               </span>
             </label>
           </fieldset>

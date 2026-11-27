@@ -4,6 +4,8 @@ import { usePathname } from "next/navigation";
 
 const sections = [
   ["/account/profile", "Profile"],
+  ["/account/portfolio", "Portfolio"],
+  ["/account/succession", "Project succession"],
   ["/onboarding", "Campus verification"],
   ["/account/github", "GitHub connection"],
   ["/account/settings", "Security & appearance"],

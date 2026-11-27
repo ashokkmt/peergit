@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"peergit/internal/platform/audit"
 	"peergit/internal/platform/errormanager"
 	"peergit/internal/platform/http/request"
 	"peergit/internal/platform/http/response"
@@ -395,7 +396,24 @@ func (h *Handler) updateConsent(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, http.StatusBadRequest, "consent_invalid", "consent request is invalid", nil)
 		return
 	}
-	if input.Granted {
+	if !input.Granted && input.Purpose == "portfolio" {
+		tx, beginErr := h.pool.Begin(r.Context())
+		if beginErr != nil {
+			h.err.Handle(w, r, beginErr)
+			return
+		}
+		defer tx.Rollback(r.Context())
+		_, err = tx.Exec(r.Context(), `UPDATE consent_records SET revoked_at=now() WHERE user_id=$1 AND purpose='portfolio' AND revoked_at IS NULL`, s.UserID)
+		if err == nil {
+			_, err = tx.Exec(r.Context(), `UPDATE portfolio_share_grants SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL`, s.UserID)
+		}
+		if err == nil && s.CollegeID != "" {
+			err = audit.Append(r.Context(), tx, audit.Entry{TenantID: s.CollegeID, ActorID: s.UserID, Action: "portfolio.consent.revoked", ResourceType: "portfolio", ResourceID: s.UserID})
+		}
+		if err == nil {
+			err = tx.Commit(r.Context())
+		}
+	} else if input.Granted {
 		_, err = h.pool.Exec(r.Context(), `INSERT INTO consent_records(user_id,purpose,policy_version)
 			SELECT $1,$2,$3 WHERE NOT EXISTS(SELECT 1 FROM consent_records WHERE user_id=$1 AND purpose=$2 AND policy_version=$3 AND revoked_at IS NULL)`, s.UserID, input.Purpose, input.PolicyVersion)
 	} else {

@@ -123,15 +123,31 @@ const { chromium } = require('playwright');
     console.log('Service-unavailable state passed');
 
     const previews = await browser.newPage({ viewport: { width: 390, height: 844 } });
-    for (const [path, heading] of [
-      ['/preview/native', 'PeerGit hosted repositories'],
-      ['/u/example-student', 'Example Student'],
-      ['/campus/overview', 'Campus overview'],
-      ['/campus/reports', 'Cohorts, verification & reports'],
+    await previews.route('**/api/v1/portfolio/example-student', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          handle: 'example-student',
+          display_name: 'Example Student',
+          headline: 'Computer science student',
+          bio: 'A fictional portfolio for the browser walkthrough.',
+          audience: 'public',
+          items: [],
+        },
+      }),
+    }));
+    for (const [path, heading, laterPhase] of [
+      ['/preview/native', 'PeerGit hosted repositories', true],
+      ['/u/example-student', 'Example Student', false],
+      ['/campus/overview', 'Campus overview', true],
+      ['/campus/reports', 'Cohorts, verification & reports', true],
     ]) {
       await previews.goto(baseURL + path);
       await previews.getByRole('heading', { level: 1, name: heading }).waitFor();
-      await previews.getByText('Will get implemented in a later phase', { exact: false }).first().waitFor();
+      if (laterPhase) {
+        await previews.getByText('Will get implemented in a later phase', { exact: false }).first().waitFor();
+      }
       assert(await previews.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `horizontal overflow on ${path}`);
     }
     await previews.close();
@@ -418,6 +434,160 @@ const { chromium } = require('playwright');
     assert(await profile.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'profile image flow overflowed on mobile');
     await profile.close();
     console.log('Unverified profile image upload path passed at mobile width');
+
+    const portfolio = await browser.newPage({ viewport: { width: 320, height: 780 } });
+    const portfolioItem = {
+      project_id: 'portfolio-project',
+      caption: 'Built the accessible project dashboard.',
+      title: 'Campus dashboard',
+      summary: 'A synthetic portfolio project.',
+      visibility: 'public',
+      lifecycle: 'active',
+      role: 'owner',
+      source_active: true,
+    };
+    let portfolioShares = [];
+    await portfolio.route('**/api/v1/session', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          authenticated: true,
+          csrf_token: 'portfolio-csrf',
+          user: { id: 'portfolio-user', display_name: 'Portfolio Student' },
+        },
+      }),
+    }));
+    await portfolio.route('**/api/v1/me/portfolio', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          handle: 'portfolio-student',
+          consented: true,
+          items: [portfolioItem],
+          shares: portfolioShares,
+        },
+      }),
+    }));
+    await portfolio.route('**/api/v1/projects', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          items: [{
+            id: 'portfolio-project',
+            title: 'Campus dashboard',
+            summary: 'A synthetic portfolio project.',
+            visibility: 'public',
+            lifecycle: 'active',
+          }],
+        },
+      }),
+    }));
+    await portfolio.route('**/api/v1/me/portfolio/items', async route => {
+      assert.equal(route.request().method(), 'PUT');
+      assert.deepEqual(route.request().postDataJSON().items, [
+        { project_id: 'portfolio-project', caption: 'Built the accessible project dashboard.' },
+      ]);
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: {} }) });
+    });
+    await portfolio.route('**/api/v1/me/portfolio/shares', async route => {
+      if (route.request().method() === 'POST') {
+        assert.equal(route.request().postDataJSON().audience, 'public');
+        portfolioShares = [{ id: 'share-1', audience: 'public', expires_at: '2026-12-27T00:00:00Z', revoked_at: null }];
+        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ data: { id: 'share-1', url: '/portfolio/share/opaque-token' } }) });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: {} }) });
+    });
+    await portfolio.route('**/api/v1/me/portfolio/shares/share-1', async route => {
+      assert.equal(route.request().method(), 'DELETE');
+      portfolioShares = [{ ...portfolioShares[0], revoked_at: '2026-11-27T00:00:00Z' }];
+      await route.fulfill({ status: 204, body: '' });
+    });
+    await portfolio.goto(`${baseURL}/account/portfolio`);
+    await portfolio.getByRole('heading', { name: 'Portfolio' }).waitFor();
+    await portfolio.getByRole('button', { name: 'Save selections' }).click();
+    await portfolio.getByText('Portfolio selections saved.').waitFor();
+    await portfolio.getByRole('button', { name: 'Create link' }).click();
+    await portfolio.getByLabel('Copy your new link').waitFor();
+    await portfolio.getByRole('button', { name: 'Revoke' }).click();
+    await portfolio.getByText('Revoked', { exact: true }).waitFor();
+    assert(await portfolio.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'portfolio editor overflowed at 320 px');
+    await portfolio.close();
+
+    const publicPortfolio = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await publicPortfolio.addInitScript(() => {
+      window.print = () => { document.documentElement.dataset.printCalled = 'true'; };
+    });
+    let portfolioVisible = true;
+    await publicPortfolio.route('**/api/v1/portfolio/portfolio-student', route => route.fulfill({
+      status: portfolioVisible ? 200 : 404,
+      contentType: 'application/json',
+      body: JSON.stringify(portfolioVisible
+        ? { data: { handle: 'portfolio-student', display_name: 'Portfolio Student', headline: 'Computer science student', bio: '', audience: 'public', items: [{ project_id: 'portfolio-project', title: 'Campus dashboard', summary: 'A synthetic portfolio project.', caption: 'Built the accessible project dashboard.', role: 'owner' }] } }
+        : { error: { message: 'Portfolio unavailable' } }),
+    }));
+    await publicPortfolio.goto(`${baseURL}/u/portfolio-student`);
+    await publicPortfolio.getByRole('heading', { name: 'Portfolio Student' }).waitFor();
+    await publicPortfolio.getByRole('button', { name: 'Print or save as PDF' }).click();
+    assert.equal(await publicPortfolio.locator('html').getAttribute('data-print-called'), 'true');
+    await publicPortfolio.emulateMedia({ media: 'print' });
+    assert.equal(await publicPortfolio.getByRole('button', { name: 'Print or save as PDF' }).count(), 0, 'print control must be hidden in print media');
+    await publicPortfolio.emulateMedia({ media: 'screen' });
+    assert(await publicPortfolio.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'public portfolio overflowed on mobile');
+    portfolioVisible = false;
+    await publicPortfolio.reload();
+    await publicPortfolio.getByRole('heading', { name: 'Portfolio unavailable' }).waitFor();
+    await publicPortfolio.close();
+
+    const succession = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    const incomingHandover = {
+      id: 'handover-1',
+      resource_type: 'project',
+      resource_id: 'portfolio-project',
+      title: 'Campus dashboard',
+      from_user_id: 'current-owner',
+      to_user_id: 'portfolio-user',
+      state: 'pending',
+      provider_state: 'upstream_unchanged',
+      message: 'Please keep this project moving.',
+      expires_at: '2026-12-04T00:00:00Z',
+      recipient: true,
+    };
+    let successionListRequested = false;
+    await succession.route('**/api/v1/session', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ data: { authenticated: true, csrf_token: 'succession-csrf', user: { id: 'portfolio-user', display_name: 'Portfolio Student', college_id: 'campus-1' } } }),
+    }));
+    await succession.route('**/api/v1/me/handoverable', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ data: { items: [] } }),
+    }));
+    await succession.route('**/api/v1/me/handovers**', route => {
+      successionListRequested = true;
+      return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ data: { items: [incomingHandover] } }),
+      });
+    });
+    await succession.route('**/api/v1/handovers/handover-1/accept', async route => {
+      assert.equal(route.request().method(), 'POST');
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { state: 'accepted' } }) });
+    });
+    await succession.goto(`${baseURL}/account/succession`);
+    await succession.getByRole('heading', { name: 'Project succession' }).waitFor();
+    await succession.getByText('Please keep this project moving.').waitFor();
+    assert(successionListRequested, 'handover request fixture was not used');
+    await succession.getByRole('button', { name: 'Accept' }).click();
+    await succession.getByText('Ownership transferred in PeerGit.').waitFor();
+    assert(await succession.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'succession page overflowed on mobile');
+    await succession.close();
+    console.log('Portfolio consent-aware preview/print/revocation and succession acceptance passed');
 
     const projectPage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     projectPage.on('pageerror', error => console.error(`Project detail browser error: ${error.message}`));
