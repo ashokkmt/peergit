@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"peergit/internal/academic"
 	"peergit/internal/campus"
 	"peergit/internal/collaboration"
 	"peergit/internal/github"
@@ -85,6 +86,7 @@ func run() error {
 	collaborationHandler := collaboration.NewHandler(pool, identityHandler, logger, errorManager, []byte(cursorKey))
 	notificationHandler := notification.NewHandler(pool, identityHandler)
 	portfolioHandler := portfolio.NewHandler(pool, identityHandler, errorManager)
+	academicHandler := academic.NewHandler(pool, identityHandler, errorManager)
 	githubClient := github.New()
 	if cfg.GitHubAPIURL != "" {
 		githubClient.API = cfg.GitHubAPIURL
@@ -102,7 +104,7 @@ func run() error {
 		OAuthAuthorizeURL: cfg.GitHubAuthorizeURL, OAuthTokenURL: cfg.GitHubTokenURL, APIURL: cfg.GitHubAPIURL,
 	}, logger, errorManager)
 	webhookHandler := campus.NewResendWebhookHandler(pool, cfg.ResendWebhookSecret, cfg.VerificationHashKey, logger)
-	router := httpserver.NewRouter(healthHandler, logger, errorManager, webhookHandler.Register, identityHandler.Register, campusHandler.Register, mediaHandler.Register, projectHandler.Register, recruitmentHandler.Register, collaborationHandler.Register, notificationHandler.Register, repositoryHandler.Register, portfolioHandler.Register)
+	router := httpserver.NewRouter(healthHandler, logger, errorManager, webhookHandler.Register, identityHandler.Register, campusHandler.Register, mediaHandler.Register, projectHandler.Register, recruitmentHandler.Register, collaborationHandler.Register, notificationHandler.Register, repositoryHandler.Register, portfolioHandler.Register, academicHandler.Register)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {

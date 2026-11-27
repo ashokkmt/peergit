@@ -21,6 +21,24 @@ const actionItems = [
     href: "/messages",
     cta: "Open messages →",
   },
+  {
+    title: "Courses & PBL",
+    description: "Review academic assignments and link a repository snapshot to a course deliverable.",
+    href: "/academics",
+    cta: "Open academic work →",
+  },
+  {
+    title: "Mentorship",
+    description: "Find a verified mentor for a project or manage an invitation-scoped mentor profile.",
+    href: "/mentorship",
+    cta: "Explore mentorship →",
+  },
+  {
+    title: "Programs & research",
+    description: "Discover campus calls, apply with a project, and follow cohort outcomes.",
+    href: "/programs",
+    cta: "Browse campus programs →",
+  },
 ] as const;
 
 export default function StudentHomePage() {

@@ -3,8 +3,8 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { PreviewBadge } from "@/components/layout/preview-banner";
 
 const previews = [
-  ["Campus reporting preview", "/campus/overview", "Phases 6–8"],
-  ["Cohorts and reports", "/campus/reports", "Phases 6–8"],
+  ["Campus reporting preview", "/campus/overview", "Phases 7–8"],
+  ["Cohorts and reports", "/campus/reports", "Phases 7–8"],
   ["PeerGit hosted repositories", "/preview/native", "Stage B1"],
 ];
 

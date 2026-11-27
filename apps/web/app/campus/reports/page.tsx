@@ -20,13 +20,13 @@ export default function CampusReportsPage() {
             Cohorts, verification &amp; reports
           </h1>
         </div>
-        <PreviewBadge phase="Phases 6–8 preview" />
+        <PreviewBadge phase="Phases 7–8 preview" />
       </div>
 
       <div className="flex items-start gap-3 p-4 border border-hairline rounded-xl bg-raised text-muted text-[13px] leading-[19px]">
         <span>
-          No report exports or named student analytics are connected yet. Any future reports must
-          declare their scope and coverage and suppress groups smaller than campus policy allows.
+          Campus-wide cohort analytics remain a later phase. Phase 6 exports are limited to an
+          authorized program call or cohort, with no individual productivity score or ranking.
         </span>
       </div>
 
@@ -116,6 +116,33 @@ export default function CampusReportsPage() {
           </div>
         </section>
       </div>
+
+      <section className="grid gap-3 rounded-2xl border border-hairline bg-surface p-5 md:p-6">
+        <div>
+          <h2 className="m-0 text-lg font-semibold">Faculty, mentorship &amp; programs</h2>
+          <p className="mb-0 mt-1 text-[13px] leading-5 text-muted">
+            Open the live tools for affiliation review, mentor access, course contexts, research calls,
+            and program outcomes.
+          </p>
+        </div>
+        <nav aria-label="Academic and program tools" className="flex flex-wrap gap-2">
+          {[
+            ["/admin/academic-reviews", "Review faculty & mentors"],
+            ["/faculty", "Faculty workspace"],
+            ["/academics", "Courses & assignments"],
+            ["/mentorship", "Mentorship"],
+            ["/programs", "Programs & calls"],
+          ].map(([href, label]) => (
+            <a
+              key={href}
+              href={href}
+              className="inline-flex min-h-10 items-center rounded-lg border border-control bg-surface px-3.5 py-2 text-[13px] font-medium text-on-surface no-underline hover:bg-raised"
+            >
+              {label}
+            </a>
+          ))}
+        </nav>
+      </section>
     </>
   );
 }

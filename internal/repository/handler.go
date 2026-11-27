@@ -335,7 +335,7 @@ func (h *Handler) snapshotStatus(w http.ResponseWriter, r *http.Request) {
 	var size *int64
 	var code *string
 	var retryAvailable bool
-	err := h.pool.QueryRow(r.Context(), `SELECT s.state,s.requested_ref,s.commit_sha,s.receipt_at,s.archive_bytes,s.failure_code,COALESCE(j.state='dead',false) FROM repository_snapshots s LEFT JOIN jobs j ON j.id=s.job_id WHERE s.id=$1 AND s.project_id=$2 AND s.college_id=$3 AND EXISTS(SELECT 1 FROM project_members WHERE project_id=$2 AND user_id=$4 AND college_id=$3)`, id, projectID, s.CollegeID, s.UserID).Scan(&state, &ref, &sha, &at, &size, &code, &retryAvailable)
+	err := h.pool.QueryRow(r.Context(), `SELECT s.state,s.requested_ref,s.commit_sha,s.receipt_at,s.archive_bytes,s.failure_code,COALESCE(j.state='dead' AND EXISTS(SELECT 1 FROM project_members WHERE project_id=$2 AND user_id=$4 AND college_id=$3),false) FROM repository_snapshots s LEFT JOIN jobs j ON j.id=s.job_id WHERE s.id=$1 AND s.project_id=$2 AND s.college_id=$3 AND (EXISTS(SELECT 1 FROM project_members WHERE project_id=$2 AND user_id=$4 AND college_id=$3) OR EXISTS(SELECT 1 FROM academic_submissions sub JOIN academic_assignment_evaluators ae ON ae.assignment_id=sub.assignment_id AND ae.user_id=$4 JOIN faculty_profiles fp ON fp.college_id=ae.college_id AND fp.user_id=ae.user_id AND fp.status='active' WHERE sub.snapshot_id=s.id AND sub.college_id=s.college_id) OR EXISTS(SELECT 1 FROM academic_submissions sub JOIN academic_assignments a ON a.id=sub.assignment_id AND a.college_id=sub.college_id JOIN academic_cohorts co ON co.id=a.cohort_id AND co.college_id=a.college_id JOIN academic_course_staff cs ON cs.course_id=co.course_id AND cs.user_id=$4 JOIN faculty_profiles fp ON fp.college_id=cs.college_id AND fp.user_id=cs.user_id AND fp.status='active' WHERE sub.snapshot_id=s.id AND sub.college_id=s.college_id))`, id, projectID, s.CollegeID, s.UserID).Scan(&state, &ref, &sha, &at, &size, &code, &retryAvailable)
 	if err != nil {
 		h.fail(w, r, 404, "snapshot_not_found", "snapshot was not found", err)
 		return
@@ -405,7 +405,7 @@ func (h *Handler) downloadSnapshot(w http.ResponseWriter, r *http.Request) {
 		WHERE s.id=$1 AND s.project_id=$2 AND s.college_id=$3 AND s.state='verified'
 		AND p.lifecycle<>'archived' AND p.github_revoke_deadline IS NULL
 		AND b.is_current AND b.access_state='active' AND i.status='active'
-		AND EXISTS(SELECT 1 FROM project_members WHERE project_id=$2 AND college_id=$3 AND user_id=$4)`, id, projectID, s.CollegeID, s.UserID).Scan(&key, &sha)
+		AND (EXISTS(SELECT 1 FROM project_members WHERE project_id=$2 AND college_id=$3 AND user_id=$4) OR EXISTS(SELECT 1 FROM academic_submissions sub JOIN academic_assignment_evaluators ae ON ae.assignment_id=sub.assignment_id AND ae.user_id=$4 JOIN faculty_profiles fp ON fp.college_id=ae.college_id AND fp.user_id=ae.user_id AND fp.status='active' WHERE sub.snapshot_id=s.id AND sub.college_id=s.college_id) OR EXISTS(SELECT 1 FROM academic_submissions sub JOIN academic_assignments a ON a.id=sub.assignment_id AND a.college_id=sub.college_id JOIN academic_cohorts co ON co.id=a.cohort_id AND co.college_id=a.college_id JOIN academic_course_staff cs ON cs.course_id=co.course_id AND cs.user_id=$4 JOIN faculty_profiles fp ON fp.college_id=cs.college_id AND fp.user_id=cs.user_id AND fp.status='active' WHERE sub.snapshot_id=s.id AND sub.college_id=s.college_id))`, id, projectID, s.CollegeID, s.UserID).Scan(&key, &sha)
 	if err != nil {
 		h.fail(w, r, 404, "snapshot_not_found", "verified snapshot is no longer available", err)
 		return
