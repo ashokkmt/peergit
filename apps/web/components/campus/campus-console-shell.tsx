@@ -7,6 +7,8 @@ import { AppearanceControl } from "@/components/layout/appearance-control";
 const consoleLinks = [
   ["/campus/overview", "Overview"],
   ["/admin/campus-reviews", "Verification"],
+  ["/admin/academic-reviews", "Faculty & mentor access"],
+  ["/faculty", "Academic workspace"],
   ["/campus/reports", "Cohorts & reports"],
   ["/preview", "Design previews"],
 ] as const;

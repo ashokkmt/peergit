@@ -29,7 +29,7 @@ export default function CampusOverviewPage() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="m-0 text-lg font-semibold">Cohort reporting preview</h2>
-        <PreviewBadge phase="Phases 6–8 preview" />
+        <PreviewBadge phase="Phases 7–8 preview" />
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -48,9 +48,9 @@ export default function CampusOverviewPage() {
 
       <div className="flex items-start gap-3 p-4 border border-hairline rounded-xl bg-raised text-muted text-[13px] leading-[19px]">
         <span>
-          Sample figures only. Institutional roles and aggregate reporting will be wired to
-          authorized campus data in Phases 6–8. No individual productivity scores or automatic
-          grades.
+          Sample figures only. Faculty verification and academic program tools are live in Phase 6;
+          campus-wide cohort reporting will be wired to authorized data in Phases 7–8. No
+          individual productivity scores or automatic grades.
         </span>
       </div>
 

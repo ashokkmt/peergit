@@ -152,12 +152,84 @@ const { chromium } = require('playwright');
     }
     await previews.close();
 
+    const phase6 = await browser.newPage({ viewport: { width: 320, height: 780 } });
+    await phase6.route('**/api/v1/session', route => route.fulfill({
+      json: {
+        data: {
+          authenticated: true,
+          csrf_token: 'phase6-csrf',
+          user: { id: 'phase6-user', display_name: 'Fixture User' },
+        },
+      },
+    }));
+    for (const path of [
+      '**/api/v1/me/faculty-verification-requests',
+      '**/api/v1/admin/faculty-verification-requests',
+      '**/api/v1/admin/faculty-profiles',
+      '**/api/v1/admin/mentor-profiles',
+      '**/api/v1/mentors',
+      '**/api/v1/me/mentorship-requests',
+      '**/api/v1/academic/terms',
+      '**/api/v1/academic/courses',
+      '**/api/v1/academic/cohorts',
+      '**/api/v1/academic/faculty',
+      '**/api/v1/academic/projects',
+      '**/api/v1/academic/assignments',
+      '**/api/v1/academic/calls',
+      '**/api/v1/academic/program-cohorts',
+      '**/api/v1/projects**',
+    ]) {
+      await phase6.route(path, route => route.fulfill({ json: { data: { items: [] } } }));
+    }
+    await phase6.route('**/api/v1/me/mentor-profile', route => route.fulfill({
+      json: { data: { profile: null } },
+    }));
+    await phase6.route('**/api/v1/academic/digest', route => route.fulfill({
+      json: {
+        data: {
+          cadence: 'weekly',
+          summary: { assignments_due: 0, reviews_pending: 0, mentorship_requests: 0 },
+        },
+      },
+    }));
+    for (const [path, title] of [
+      ['/faculty', 'Guide campus research and project work'],
+      ['/mentorship', 'Make a useful connection around a project'],
+      ['/academics', 'Connect assignments to immutable project evidence'],
+      ['/programs', 'Run a call from application to outcome'],
+      ['/admin/academic-reviews', 'Review faculty and mentor access'],
+    ]) {
+      await phase6.goto(baseURL + path);
+      await phase6.getByRole('heading', { level: 1, name: title }).waitFor();
+      assert(
+        await phase6.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        `Phase 6 horizontal overflow on ${path}`,
+      );
+      assert(
+        await phase6.evaluate(() => [...document.querySelectorAll('input:not([type="hidden"]),select,textarea')].every(element => element.labels.length > 0)),
+        `Phase 6 form label missing on ${path}`,
+      );
+      await phase6.emulateMedia({ colorScheme: 'dark' });
+      await phase6.waitForFunction(
+        () => document.documentElement.getAttribute('data-resolved-theme') === 'dark',
+      );
+    }
+    await phase6.close();
+
     const workspace = await browser.newPage({ viewport: { width: 320, height: 700 } });
     await workspace.route('**/api/v1/session', route => route.fulfill({ json: { data: { authenticated: false } } }));
     await workspace.route('**/api/v1/my/projects', route => route.fulfill({ json: { data: { items: [] } } }));
     await workspace.goto(`${baseURL}/home`);
     await workspace.getByRole('heading', { name: 'Student workspace' }).waitFor();
-    for (const [label, path] of [['Open inbox', '/inbox'], ['Open my projects', '/projects'], ['Open messages', '/messages'], ['Open campus feed', '/feed']]) {
+    for (const [label, path] of [
+      ['Open inbox', '/inbox'],
+      ['Open my projects', '/projects'],
+      ['Open messages', '/messages'],
+      ['Open campus feed', '/feed'],
+      ['Open academic work', '/academics'],
+      ['Explore mentorship', '/mentorship'],
+      ['Browse campus programs', '/programs'],
+    ]) {
       assert.equal(await workspace.getByRole('link', { name: label }).getAttribute('href'), path);
     }
     assert.equal(await workspace.getByText('Will get implemented in a later phase').count(), 0);
