@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { readApiEnvelope } from "@/lib/http";
+import { fetchSession, readApiEnvelope } from "@/lib/http";
 
 type Participant = { id: string; handle: string; display_name: string };
 type Message = {
@@ -85,7 +85,7 @@ export function ConversationRoom({ conversationID }: { conversationID: string })
 
   useEffect(() => {
     let active = true;
-    void fetch("/api/v1/session", { cache: "no-store" })
+    void fetchSession()
       .then(async (response) => {
         const result = await readApiEnvelope<{ csrf_token?: string; user?: { id?: string } }>(
           response,

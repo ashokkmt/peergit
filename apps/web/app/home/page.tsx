@@ -1,32 +1,25 @@
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { MyProjects } from "@/components/projects/my-projects";
-import { PreviewBadge } from "@/components/layout/preview-banner";
 
 const actionItems = [
   {
-    color: "text-warning",
-    label: "Review requested · Sample",
-    title: "PR #14 · Add live route status",
-    meta: "Campus Shuttle Tracker · feature/route-alerts → main",
-    href: "/projects/sample/work",
-    cta: "Preview project work →",
-  },
-  {
-    color: "text-link",
-    label: "Team application · Sample",
-    title: "Dev Patel applied for QA & Field Tester",
-    meta: "Campus Shuttle Tracker · 1 seat remaining",
+    title: "Inbox",
+    description: "Review project updates, application decisions, and unread notifications.",
     href: "/inbox",
     cta: "Open inbox →",
   },
   {
-    color: "text-success",
-    label: "Upcoming submission · Sample",
-    title: "CS 340 Milestone 2 Snapshot",
-    meta: "Due Nov 28 · Last verified at 7c1a9de",
+    title: "Project work",
+    description: "Choose a project and open Work to see tasks, milestones, and discussions.",
     href: "/projects",
     cta: "Open my projects →",
+  },
+  {
+    title: "Messages",
+    description: "Continue conversations from your projects and accepted applications.",
+    href: "/messages",
+    cta: "Open messages →",
   },
 ] as const;
 
@@ -50,7 +43,7 @@ export default function StudentHomePage() {
               Student workspace
             </h1>
             <p className="text-sm leading-[21px] text-muted mt-1 mb-0">
-              Your campus projects, action items, and workspace activity.
+              Your campus projects, conversations, and workspace activity.
             </p>
           </div>
           <div className="flex flex-wrap gap-2.5 items-center">
@@ -69,14 +62,10 @@ export default function StudentHomePage() {
           </div>
         </div>
 
-        {/* Actionable Items Preview */}
-        <section aria-label="Actionable items" className="flex flex-col gap-3.5">
-          <div className="flex flex-wrap items-center justify-between gap-2.5">
-            <h2 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
-              Needs your attention
-            </h2>
-            <PreviewBadge phase="Phase 5A–5B sample" />
-          </div>
+        <section aria-labelledby="collaboration-title" className="flex flex-col gap-3.5">
+          <h2 id="collaboration-title" className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
+            Collaboration
+          </h2>
           <div className="grid grid-cols-1 min-[900px]:grid-cols-3 gap-6">
             {actionItems.map((item) => (
               <article
@@ -84,9 +73,10 @@ export default function StudentHomePage() {
                 className="min-w-0 max-w-full bg-surface border border-hairline rounded-2xl p-6 flex flex-col justify-between gap-3"
               >
                 <div>
-                  <span className={`text-xs font-medium leading-4 ${item.color}`}>{item.label}</span>
                   <h3 className="text-base font-semibold leading-[22px] mt-1 mb-0">{item.title}</h3>
-                  <p className="text-[13px] leading-[19px] text-muted mt-1 mb-0">{item.meta}</p>
+                  <p className="text-[13px] leading-[19px] text-muted mt-1 mb-0">
+                    {item.description}
+                  </p>
                 </div>
                 <a className="text-[13px] font-medium leading-[18px]" href={item.href}>
                   {item.cta}
@@ -100,39 +90,15 @@ export default function StudentHomePage() {
           <MyProjects />
 
           <section className="min-w-0 max-w-full bg-surface border border-hairline rounded-2xl p-6 flex flex-col gap-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
-                Campus activity
-              </h2>
-              <PreviewBadge phase="Phase 5C" />
-            </div>
-            <div className="flex flex-col gap-3.5">
-              <div className="pb-3 border-b border-hairline">
-                <p className="text-sm leading-[21px] m-0">
-                  <strong>Campus Shuttle Tracker</strong> captured snapshot{" "}
-                  <code className="font-mono text-[13px] leading-[19px]">rec_84f19a</code>
-                </p>
-                <p className="text-[13px] leading-[19px] text-muted mt-1 mb-0">
-                  Sample · Archive verified
-                </p>
-              </div>
-              <div className="pb-3 border-b border-hairline">
-                <p className="text-sm leading-[21px] m-0">
-                  <strong>Bike Share Telemetry</strong> opened 2 roles for Spring mapping
-                </p>
-                <p className="text-[13px] leading-[19px] text-muted mt-1 mb-0">
-                  Sample · Northgate Campus
-                </p>
-              </div>
-              <div>
-                <p className="text-sm leading-[21px] m-0">
-                  <strong>CS 340 Software Engineering</strong> posted Milestone 2 deadline
-                </p>
-                <p className="text-[13px] leading-[19px] text-muted mt-1 mb-0">
-                  Sample · Prof. Elena Vance
-                </p>
-              </div>
-            </div>
+            <h2 className="text-[18px] font-semibold leading-6 tracking-[-0.005em] m-0">
+              Campus activity
+            </h2>
+            <p className="text-sm leading-[21px] m-0 text-muted">
+              See activity from projects you can access and switch to projects you follow.
+            </p>
+            <a className="text-[13px] font-medium leading-[18px]" href="/feed">
+              Open campus feed →
+            </a>
           </section>
         </div>
       </main>

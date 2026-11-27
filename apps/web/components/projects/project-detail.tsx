@@ -6,7 +6,7 @@ import { RepositoryCode } from "./repository-code";
 import { LegacyRepositoryLink } from "./legacy-repository-link";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
-import { readApiEnvelope } from "@/lib/http";
+import { fetchSession, readApiEnvelope } from "@/lib/http";
 import { ConversationLaunchButton } from "@/components/collaboration/conversation-launch-button";
 
 type Project = {
@@ -146,7 +146,7 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
         }
         return result.data;
       }),
-      fetch("/api/v1/session", { cache: "no-store" }).then(async (response) => {
+      fetchSession().then(async (response) => {
         const result = await readApiEnvelope<{
           csrf_token?: string;
           user?: {

@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { readApiEnvelope } from "@/lib/http";
+import { fetchSession, readApiEnvelope } from "@/lib/http";
 
 type Me = {
   id: string;
@@ -69,14 +69,16 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
   }, []);
 
   async function api<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(path, {
-      ...init,
-      cache: "no-store",
-      headers: {
-        ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-        ...(init?.headers ?? {}),
-      },
-    });
+    const response = path === "/api/v1/session"
+      ? await fetchSession()
+      : await fetch(path, {
+          ...init,
+          cache: "no-store",
+          headers: {
+            ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+            ...(init?.headers ?? {}),
+          },
+        });
     if (response.status === 204) return undefined as T;
     const result = await readApiEnvelope<T>(response, `Request failed (${response.status}).`);
     if (!response.ok || result.error) {

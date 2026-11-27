@@ -23,6 +23,12 @@ export default function CampusOverviewPage() {
             Institution-scoped visibility, verification and authorized evidence.
           </p>
         </div>
+      </div>
+
+      <WACPSummary />
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="m-0 text-lg font-semibold">Cohort reporting preview</h2>
         <PreviewBadge phase="Phases 6–8 preview" />
       </div>
 
@@ -47,8 +53,6 @@ export default function CampusOverviewPage() {
           grades.
         </span>
       </div>
-
-      <WACPSummary />
 
       <section
         aria-label="Cohort metrics"

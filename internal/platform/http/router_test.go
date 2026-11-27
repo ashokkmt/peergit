@@ -12,16 +12,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"peergit/internal/health"
 	"peergit/internal/platform/errormanager"
 	"peergit/internal/platform/http/response"
 )
 
-func TestRouterAddsRequestIDAndLogsRequest(t *testing.T) {
+func TestRouterCountsQuietProbesAndLogsFailures(t *testing.T) {
 	var logs bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	manager := errormanager.NewManager(logger)
-	router := NewRouter(health.NewHandler(logger, manager, nil), logger, manager)
+	router := NewRouter(health.NewHandler(manager, nil), logger, manager)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 
@@ -36,8 +37,37 @@ func TestRouterAddsRequestIDAndLogsRequest(t *testing.T) {
 	if got.RequestID != id || w.Code != http.StatusOK {
 		t.Fatalf("request ID/status mismatch: %#v, %d", got, w.Code)
 	}
-	if !strings.Contains(logs.String(), id) || !strings.Contains(logs.String(), "http request completed") {
-		t.Fatal("access log missing request ID or completion event")
+	metrics := httptest.NewRecorder()
+	router.ServeHTTP(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(metrics.Body.String(), "peergit_http_requests_total 1\n") || logs.Len() != 0 {
+		t.Fatalf("successful probes should be counted and quiet: metrics=%s logs=%s", metrics.Body, &logs)
+	}
+
+	failed := httptest.NewRecorder()
+	router.ServeHTTP(failed, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if failed.Code != http.StatusServiceUnavailable || !strings.Contains(logs.String(), "path=/readyz status=503") || !strings.Contains(logs.String(), failed.Header().Get("X-Request-ID")) {
+		t.Fatalf("readiness failure should remain visible: status=%d logs=%s", failed.Code, &logs)
+	}
+}
+
+func TestRouterLogsOneCompletionWithRoutePattern(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	manager := errormanager.NewManager(logger)
+	calls := 0
+	router := NewRouter(health.NewHandler(manager, nil), logger, manager, func(api chi.Router) {
+		api.Get("/portfolio/share/{token}", func(w http.ResponseWriter, _ *http.Request) {
+			calls++
+			response.NoContent(w)
+		})
+	})
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/portfolio/share/private-value", nil))
+	log := logs.String()
+	if calls != 1 || strings.Count(log, "http request completed") != 1 ||
+		!strings.Contains(log, "path=/api/v1/portfolio/share/{token}") ||
+		!strings.Contains(log, w.Header().Get("X-Request-ID")) || strings.Contains(log, "private-value") {
+		t.Fatalf("unexpected request lifecycle: calls=%d log=%s", calls, log)
 	}
 }
 
@@ -127,7 +157,7 @@ func TestStreamingPanicAbortsNetworkResponse(t *testing.T) {
 func TestRouterFallbacksUseErrorEnvelope(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	manager := errormanager.NewManager(logger)
-	router := NewRouter(health.NewHandler(logger, manager, nil), logger, manager)
+	router := NewRouter(health.NewHandler(manager, nil), logger, manager)
 	for _, tt := range []struct {
 		method, path, code string
 		status             int

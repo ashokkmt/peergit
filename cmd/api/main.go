@@ -62,7 +62,7 @@ func run() error {
 		}
 		defer pool.Close()
 	}
-	healthHandler := health.NewHandler(logger, errorManager, pool)
+	healthHandler := health.NewHandler(errorManager, pool)
 	identityHandler := identity.NewHandler(pool, identity.Config{
 		GitHubClientID: cfg.GitHubClientID, GitHubClientSecret: cfg.GitHubClientSecret, GitHubRedirectURL: cfg.GitHubRedirectURL,
 		GitHubAuthorizeURL: cfg.GitHubAuthorizeURL, GitHubTokenURL: cfg.GitHubTokenURL, GitHubAPIURL: cfg.GitHubAPIURL,

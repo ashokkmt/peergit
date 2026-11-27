@@ -75,10 +75,20 @@ func (router *Router) accessLog(next http.Handler) http.Handler {
 			if status >= http.StatusInternalServerError {
 				router.errors.Add(1)
 			}
+			if status < http.StatusBadRequest && r.Method == http.MethodGet {
+				switch r.URL.Path {
+				case "/healthz", "/readyz", "/metrics":
+					return
+				}
+			}
+			route := "unmatched"
+			if ctx := chi.RouteContext(r.Context()); ctx != nil && ctx.RoutePattern() != "" {
+				route = ctx.RoutePattern()
+			}
 			router.logger.InfoContext(r.Context(), "http request completed",
 				"request_id", w.Header().Get("X-Request-ID"),
 				"method", r.Method,
-				"path", r.URL.Path,
+				"path", route,
 				"status", status,
 				"bytes", wrapped.BytesWritten(),
 				"duration", time.Since(started),

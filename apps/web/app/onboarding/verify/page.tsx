@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { BrandLogo } from "@/components/layout/brand-logo";
 import { AppearanceControl } from "@/components/layout/appearance-control";
-import { readApiEnvelope } from "@/lib/http";
+import { fetchSession, readApiEnvelope } from "@/lib/http";
 
 export default function VerifyCampusPage() {
   const fragment = useRef<string | null>(null);
@@ -21,7 +21,7 @@ export default function VerifyCampusPage() {
     history.replaceState(history.state, "", location.pathname + location.search);
 
     const controller = new AbortController();
-    void fetch("/api/v1/session", { cache: "no-store", signal: controller.signal })
+    void fetchSession()
       .then((response) =>
         readApiEnvelope<{ authenticated: boolean; csrf_token?: string }>(
           response,
@@ -29,6 +29,7 @@ export default function VerifyCampusPage() {
         ),
       )
       .then((result) => {
+        if (controller.signal.aborted) return;
         if (!result.data?.authenticated) {
           location.assign("/login");
           return;

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CampusConsoleShell } from "@/components/campus/campus-console-shell";
-import { readApiEnvelope } from "@/lib/http";
+import { fetchSession, readApiEnvelope } from "@/lib/http";
 
 type Review = {
   id: string;
@@ -21,7 +21,7 @@ export default function CampusReviewsPage() {
 
   async function load() {
     try {
-      const sessionRes = await fetch("/api/v1/session", { cache: "no-store" });
+      const sessionRes = await fetchSession();
       const session = await readApiEnvelope<{
         authenticated: boolean;
         user?: { campus_admin: boolean; mfa_verified: boolean };

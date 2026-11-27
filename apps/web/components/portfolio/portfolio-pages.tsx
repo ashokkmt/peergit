@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { readApiEnvelope } from "@/lib/http";
+import { fetchSession, readApiEnvelope } from "@/lib/http";
 
 type Item = {
   project_id: string;
@@ -53,14 +53,16 @@ type Person = { user_id: string; display_name: string; handle: string };
 type CampusUser = { id: string; display_name: string; email: string; status: string };
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    cache: "no-store",
-    headers: {
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
+  const response = path === "/api/v1/session"
+    ? await fetchSession()
+    : await fetch(path, {
+        ...init,
+        cache: "no-store",
+        headers: {
+          ...(init?.body ? { "Content-Type": "application/json" } : {}),
+          ...(init?.headers ?? {}),
+        },
+      });
   const result = await readApiEnvelope<T>(response, `Request failed (${response.status}).`);
   if (!response.ok || result.error) {
     throw new Error(result.error?.message ?? `Request failed (${response.status}).`);

@@ -146,7 +146,7 @@ func TestPhase5BOutboxMaterializationIsDurableAndIdempotent(t *testing.T) {
 	secretBytes := []byte("phase5b webhook signing secret with entropy")
 	webhookSecret := "whsec_" + base64.StdEncoding.EncodeToString(secretBytes)
 	webhook := campus.NewResendWebhookHandler(pool, webhookSecret, "phase5b webhook suppression key with entropy", logger)
-	webhookRouter := httpserver.NewRouter(health.NewHandler(logger, errormanager.NewManager(logger), pool), logger, errormanager.NewManager(logger), webhook.Register)
+	webhookRouter := httpserver.NewRouter(health.NewHandler(errormanager.NewManager(logger), pool), logger, errormanager.NewManager(logger), webhook.Register)
 	sendWebhook := func(eventID, eventType string, occurred time.Time) *httptest.ResponseRecorder {
 		t.Helper()
 		body, marshalErr := json.Marshal(map[string]any{"type": eventType, "created_at": occurred.UTC(), "data": map[string]any{"email_id": "notification-resend-message", "to": []string{"member@phase5b.test"}}})
@@ -181,7 +181,7 @@ func TestPhase5BOutboxMaterializationIsDurableAndIdempotent(t *testing.T) {
 	errorManager := errormanager.NewManager(logger)
 	auth := identity.NewHandler(pool, identity.Config{AppOrigin: "http://peergit.test", SessionHashKey: string(key)}, logger, errorManager)
 	api := notification.NewHandler(pool, auth)
-	router := httpserver.NewRouter(health.NewHandler(logger, errorManager, pool), logger, errorManager, auth.Register, api.Register)
+	router := httpserver.NewRouter(health.NewHandler(errorManager, pool), logger, errorManager, auth.Register, api.Register)
 	call := func(method, path, body string, want int) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(method, "http://peergit.test"+path, bytes.NewBufferString(body))

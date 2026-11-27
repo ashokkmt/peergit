@@ -71,7 +71,7 @@ func TestPhase5DPortfolioConsentAndSuccession(t *testing.T) {
 	errs := errormanager.NewManager(logger)
 	auth := identity.NewHandler(pool, identity.Config{AppOrigin: "http://phase5d.test", SessionHashKey: string(key), MFAEncryptionKey: "phase5d integration mfa encryption key"}, logger, errs)
 	portfolioHandler := portfolio.NewHandler(pool, auth, errs)
-	router := httpserver.NewRouter(health.NewHandler(logger, errs, pool), logger, errs, auth.Register, portfolioHandler.Register)
+	router := httpserver.NewRouter(health.NewHandler(errs, pool), logger, errs, auth.Register, portfolioHandler.Register)
 	for actor, token := range tokens {
 		req := httptest.NewRequest(http.MethodGet, "http://phase5d.test/api/v1/session", nil)
 		req.AddCookie(&http.Cookie{Name: "peergit_session", Value: token})

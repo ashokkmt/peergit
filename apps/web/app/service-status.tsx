@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { fetchReadiness } from "@/lib/http";
 type ServiceState = "checking" | "ready" | "unavailable";
 
 export function ServiceStatus() {
@@ -8,7 +9,7 @@ export function ServiceStatus() {
 
   useEffect(() => {
     let active = true;
-    fetch("/readyz", { cache: "no-store" })
+    fetchReadiness()
       .then((response) => {
         if (!active) return;
         setRequestID(response.headers.get("X-Request-ID") ?? "");

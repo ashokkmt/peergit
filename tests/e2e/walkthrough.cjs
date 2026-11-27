@@ -152,6 +152,23 @@ const { chromium } = require('playwright');
     }
     await previews.close();
 
+    const workspace = await browser.newPage({ viewport: { width: 320, height: 700 } });
+    await workspace.route('**/api/v1/session', route => route.fulfill({ json: { data: { authenticated: false } } }));
+    await workspace.route('**/api/v1/my/projects', route => route.fulfill({ json: { data: { items: [] } } }));
+    await workspace.goto(`${baseURL}/home`);
+    await workspace.getByRole('heading', { name: 'Student workspace' }).waitFor();
+    for (const [label, path] of [['Open inbox', '/inbox'], ['Open my projects', '/projects'], ['Open messages', '/messages'], ['Open campus feed', '/feed']]) {
+      assert.equal(await workspace.getByRole('link', { name: label }).getAttribute('href'), path);
+    }
+    assert.equal(await workspace.getByText('Will get implemented in a later phase').count(), 0);
+    assert(await workspace.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+    await workspace.goto(`${baseURL}/preview`);
+    for (const path of ['/home', '/inbox', '/projects/sample/work', '/u/example-student']) {
+      assert.equal(await workspace.locator(`main a[href="${path}"]`).count(), 0);
+    }
+    await workspace.getByRole('link', { name: /PeerGit hosted repositories/ }).waitFor();
+    await workspace.close();
+
     const collaboration = await browser.newPage({ viewport: { width: 390, height: 844 } });
     const workProjectID = 'sample-work';
     const sampleTask = { id: 'task-1', title: 'Write onboarding guide', description: 'Keep this task small.', status: 'todo', priority: 'normal', milestone_id: null, milestone_title: null, assignee_ids: ['student-1'], assignee_names: ['Test Student'], version: 1, due_at: null, can_edit: true };
@@ -196,6 +213,15 @@ const { chromium } = require('playwright');
     if (process.env.PHASE5A_ONLY) return;
 
     const inbox = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await inbox.addInitScript(() => {
+      window.inboxStreamsOpened = 0;
+      window.EventSource = class extends window.EventSource {
+        constructor(...args) {
+          super(...args);
+          window.inboxStreamsOpened++;
+        }
+      };
+    });
     let inboxRead = false;
     await inbox.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: true, csrf_token: 'notifications-csrf', user: { id: 'student-1', display_name: 'Test Student', college_id: 'campus-1', terms_accepted: true, privacy_accepted: true } } }) }));
     await inbox.route('**/api/v1/notifications/stream*', route => route.abort());
@@ -210,9 +236,11 @@ const { chromium } = require('playwright');
     await inbox.getByRole('heading', { level: 1, name: 'Inbox' }).waitFor();
     await inbox.getByRole('heading', { name: 'New project update' }).waitFor();
     await inbox.getByRole('status').getByText('Live updates reconnecting').waitFor();
+    await inbox.waitForFunction(() => window.inboxStreamsOpened === 1);
     await inbox.getByRole('tab', { name: /Unread/ }).click();
     await inbox.getByRole('button', { name: 'Mark all read' }).click();
     await inbox.getByRole('heading', { name: 'You’re all caught up' }).waitFor();
+    assert.equal(await inbox.evaluate(() => window.inboxStreamsOpened), 1, 'filtering and refreshing should keep the existing inbox stream');
     assert(await inbox.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'notification inbox overflowed on mobile');
     await inbox.setViewportSize({ width: 320, height: 700 });
     assert(await inbox.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'notification inbox overflowed at 320 px');
@@ -269,8 +297,11 @@ const { chromium } = require('playwright');
       sources: ['project_update', 'task_transition'], descriptive_only: true,
     } }) }));
     await campusAdmin.goto(`${baseURL}/campus/overview`);
-    await campusAdmin.getByRole('heading', { name: 'Weekly active collaborating projects' }).waitFor();
-    await campusAdmin.getByText('Descriptive aggregate').waitFor();
+    const liveSummary = campusAdmin.getByRole('region', { name: 'Weekly active collaborating projects' });
+    await liveSummary.getByText('Descriptive aggregate').waitFor();
+    assert.equal(await liveSummary.getByText('Will get implemented in a later phase').count(), 0);
+    const cohortPreview = campusAdmin.getByRole('heading', { name: 'Cohort reporting preview' }).locator('..');
+    await cohortPreview.getByText('Will get implemented in a later phase').waitFor();
     await campusAdmin.getByText('This is not a student score or grade.').waitFor();
     await campusAdmin.close();
 
@@ -416,7 +447,17 @@ const { chromium } = require('playwright');
     console.log('Discovery-only homepage, accessible account menu, and private GitHub import initiation passed');
 
     const profile = await browser.newPage({ viewport: { width: 390, height: 844 } });
-    await profile.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: true, csrf_token: 'profile-csrf', user: { id: 'profile-user', display_name: 'Profile Student', college_id: '', campus_status: 'unverified', account_type: 'unverified' } } }) }));
+    let profileSessionRequests = 0;
+    await profile.route('**/api/v1/session', route => {
+      profileSessionRequests++;
+      return route.fulfill({ json: {
+        data: {
+          authenticated: true,
+          csrf_token: 'profile-csrf',
+          user: { id: 'profile-user', display_name: 'Profile Student', college_id: '', campus_status: 'unverified', account_type: 'unverified' },
+        },
+      } });
+    });
     await profile.route('**/api/v1/me', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { id: 'profile-user', email: 'profile@users.noreply.test', display_name: 'Profile Student', college_id: '', account_type: 'unverified', campus_status: 'unverified', profile: {}, skills: [], consents: ['terms', 'privacy'] } }) }));
     await profile.route('**/api/v1/media/intents', async route => {
       assert.equal(route.request().postDataJSON().visibility, 'private', 'unverified profile images stay private');
@@ -428,10 +469,14 @@ const { chromium } = require('playwright');
     });
     await profile.goto(`${baseURL}/account/profile`);
     await profile.getByRole('heading', { name: 'Profile Student' }).waitFor();
+    assert.equal(profileSessionRequests, 1, 'the header and profile should share their initial session request');
     await profile.getByLabel('Profile image (PNG/JPEG, up to 5 MiB)').setInputFiles({ name: 'avatar.png', mimeType: 'image/png', buffer: Buffer.from('synthetic fixture bytes') });
     await profile.getByText('Image uploaded and safely re-encoded. Save your profile to use it.').waitFor();
     await profile.getByRole('link', { name: 'View your uploaded image' }).waitFor();
     assert(await profile.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'profile image flow overflowed on mobile');
+    await profile.reload();
+    await profile.getByRole('heading', { name: 'Profile Student' }).waitFor();
+    assert.equal(profileSessionRequests, 2, 'a new page load should fetch the current session');
     await profile.close();
     console.log('Unverified profile image upload path passed at mobile width');
 

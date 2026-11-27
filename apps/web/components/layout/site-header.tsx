@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import { fetchSession } from "@/lib/http";
 import { BrandLogo } from "./brand-logo";
 import { AppearanceControl } from "./appearance-control";
 
@@ -28,10 +29,15 @@ export function SiteHeader({ workspace = false }: { workspace?: boolean }) {
   const pathname = usePathname();
 
   useEffect(() => {
-    void fetch("/api/v1/session", { cache: "no-store" })
+    let active = true;
+    void fetchSession()
       .then((r) => (r.ok && r.headers.get("content-type")?.includes("json") ? r.json() : {}))
-      .then((v: { data?: Session }) => setSession(v.data ?? { authenticated: false }))
-      .catch(() => setSession({ authenticated: false }));
+      .then((v: { data?: Session }) => {
+        if (active) setSession(v.data ?? { authenticated: false });
+      })
+      .catch(() => {
+        if (active) setSession({ authenticated: false });
+      });
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape" && menu.current?.open) {
         menu.current.open = false;
@@ -39,7 +45,10 @@ export function SiteHeader({ workspace = false }: { workspace?: boolean }) {
       }
     };
     document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
+    return () => {
+      active = false;
+      document.removeEventListener("keydown", closeOnEscape);
+    };
   }, []);
 
   async function signOut() {

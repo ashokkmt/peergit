@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { readApiEnvelope } from "@/lib/http";
+import { fetchSession, readApiEnvelope } from "@/lib/http";
 
 type ItemList<T> = { items: T[] };
 type Project = {
@@ -123,7 +123,9 @@ export function ProjectWork({ projectID }: { projectID: string }) {
   const [showNewMilestone, setShowNewMilestone] = useState(false);
 
   const get = useCallback(async <T,>(url: string): Promise<T> => {
-    const response = await fetch(url, { cache: "no-store" });
+    const response = url === "/api/v1/session"
+      ? await fetchSession()
+      : await fetch(url, { cache: "no-store" });
     const envelope = await readApiEnvelope<T>(response, "Could not load project collaboration.");
     if (!response.ok || !envelope.data) {
       throw new Error(envelope.error?.message ?? "Could not load project collaboration.");

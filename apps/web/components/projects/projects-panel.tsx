@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { readApiEnvelope } from "@/lib/http";
+import { fetchSession, readApiEnvelope } from "@/lib/http";
 
 type Project = {
   id: string;
@@ -31,7 +31,7 @@ export function ProjectsPanel() {
     setProblem("");
     try {
       const [sessionResponse, projectResponse] = await Promise.all([
-        fetch("/api/v1/session", { cache: "no-store" }).catch(() => null),
+        fetchSession().catch(() => null),
         fetch(
           `/api/v1/projects?scope=public${trimmed ? `&q=${encodeURIComponent(trimmed)}` : ""}`,
           { cache: "no-store" },

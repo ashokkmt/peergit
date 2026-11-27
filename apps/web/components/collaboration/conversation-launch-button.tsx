@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { readApiEnvelope } from "@/lib/http";
+import { fetchSession, readApiEnvelope } from "@/lib/http";
 
 type ContextType = "project" | "application";
 
@@ -27,7 +27,7 @@ export function ConversationLaunchButton({
     try {
       let token = csrf;
       if (!token) {
-        const sessionResponse = await fetch("/api/v1/session", { cache: "no-store" });
+        const sessionResponse = await fetchSession();
         const session = await readApiEnvelope<{ csrf_token?: string }>(sessionResponse, "Sign in before opening a conversation.");
         if (!sessionResponse.ok) throw new Error(session.error?.message ?? "Sign in before opening a conversation.");
         token = session.data?.csrf_token ?? "";
