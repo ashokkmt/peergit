@@ -85,7 +85,7 @@ func TestPhase5CScopedMessagingAndDiscovery(t *testing.T) {
 	auth := identity.NewHandler(pool, identity.Config{AppOrigin: "http://phase5c.test", SessionHashKey: string(key), CookieSecure: false}, logger, errs)
 	work := collaboration.NewHandler(pool, auth, logger, errs, cursorKey)
 	alerts := notification.NewHandler(pool, auth)
-	router := httpserver.NewRouter(health.NewHandler(logger, errs, pool), logger, errs, auth.Register, work.Register, alerts.Register)
+	router := httpserver.NewRouter(health.NewHandler(errs, pool), logger, errs, auth.Register, work.Register, alerts.Register)
 	for name, token := range tokens {
 		req := httptest.NewRequest(http.MethodGet, "http://phase5c.test/api/v1/session", nil)
 		req.AddCookie(&http.Cookie{Name: "peergit_session", Value: token})

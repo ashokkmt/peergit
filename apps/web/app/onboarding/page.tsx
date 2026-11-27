@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { AccountPanel } from "@/components/account/account-panel";
 import { BrandLogo } from "@/components/layout/brand-logo";
 import { AppearanceControl } from "@/components/layout/appearance-control";
-import { readApiEnvelope } from "@/lib/http";
+import { fetchSession, readApiEnvelope } from "@/lib/http";
 
 type Status = {
   campus_verified: boolean;
@@ -28,7 +28,7 @@ export default function OnboardingPage() {
 
   async function load() {
     try {
-      const sessionRes = await fetch("/api/v1/session", { cache: "no-store" });
+      const sessionRes = await fetchSession();
       const session = await readApiEnvelope<{ authenticated: boolean; csrf_token?: string }>(
         sessionRes,
         "Onboarding could not load.",

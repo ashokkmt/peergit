@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { readApiEnvelope } from "@/lib/http";
+import { fetchSession, readApiEnvelope } from "@/lib/http";
 
 type SavedProject = {
   id: string;
@@ -25,7 +25,7 @@ export function SavedProjects() {
     setError("");
     try {
       const [sessionResponse, savedResponse] = await Promise.all([
-        fetch("/api/v1/session", { cache: "no-store" }),
+        fetchSession(),
         fetch("/api/v1/me/saved-projects", { cache: "no-store" }),
       ]);
       const session = await readApiEnvelope<{ csrf_token?: string }>(

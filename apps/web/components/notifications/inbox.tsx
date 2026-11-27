@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { ConversationLaunchButton } from "@/components/collaboration/conversation-launch-button";
-import { readApiEnvelope } from "@/lib/http";
+import { fetchSession, readApiEnvelope } from "@/lib/http";
 
 type Item = {
   id: string;
@@ -28,7 +28,7 @@ const inboxLoadError = "Your inbox could not be loaded right now. Try again shor
 
 async function getCsrfToken(): Promise<string> {
   try {
-    const response = await fetch("/api/v1/session", { cache: "no-store" });
+    const response = await fetchSession();
     const result = await readApiEnvelope<{ csrf_token?: string }>(response, "");
     return result.data?.csrf_token ?? "";
   } catch {
@@ -106,23 +106,25 @@ export function Inbox() {
     void load(false);
   }, [load]);
 
-  const lastSequence = data?.last_sequence;
+  const canStream = data !== null && !needsSignIn;
+  const streamCursor = useEffectEvent(() => data?.last_sequence ?? 0);
+  const refreshInbox = useEffectEvent(() => {
+    void load(false);
+  });
+
   useEffect(() => {
-    if (lastSequence === undefined || needsSignIn) return;
-    const stream = new EventSource(`/api/v1/notifications/stream?after=${lastSequence}`);
+    if (!canStream) return;
+    // EventSource handles reconnection and replay independently of the inbox filter.
+    const stream = new EventSource(`/api/v1/notifications/stream?after=${streamCursor()}`);
     stream.onopen = () => setConnected(true);
     stream.onerror = () => setConnected(false);
-    stream.addEventListener("notification", () => {
-      void load(false);
-    });
-    stream.addEventListener("access-check", () => {
-      void load(false);
-    });
+    stream.addEventListener("notification", refreshInbox);
+    stream.addEventListener("access-check", refreshInbox);
     return () => {
       stream.close();
       setConnected(false);
     };
-  }, [lastSequence, needsSignIn, load]);
+  }, [canStream]);
 
   async function markRead(id: string) {
     const response = await fetch(`/api/v1/notifications/${encodeURIComponent(id)}/read`, {

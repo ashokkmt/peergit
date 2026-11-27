@@ -79,7 +79,7 @@ func TestPhase2SessionConsentAdminAndTenantIsolation(t *testing.T) {
 	auth := identity.NewHandler(pool, identity.Config{AppOrigin: "http://peergit.test", SessionHashKey: string(key), MFAEncryptionKey: "phase2 mfa encryption secret long enough", CookieSecure: false}, logger, errors)
 	campusHandler := campus.NewHandler(pool, auth, "http://peergit.test", errors, string(key), "phase2 delivery encryption secret")
 	mediaHandler := media.NewHandler(pool, storage.New("http://127.0.0.1:1", "test", "us-east-1", "key", "secret"), auth, errors)
-	router := httpserver.NewRouter(health.NewHandler(logger, errors, pool), logger, errors, auth.Register, campusHandler.Register, mediaHandler.Register)
+	router := httpserver.NewRouter(health.NewHandler(errors, pool), logger, errors, auth.Register, campusHandler.Register, mediaHandler.Register)
 	if _, err := pool.Exec(ctx, `UPDATE sessions SET college_id=NULL WHERE user_id=$1`, targetID); err != nil {
 		t.Fatal(err)
 	}
@@ -101,9 +101,21 @@ func TestPhase2SessionConsentAdminAndTenantIsolation(t *testing.T) {
 	get := httptest.NewRequest(http.MethodGet, "http://peergit.test/api/v1/session", nil)
 	get.AddCookie(&http.Cookie{Name: "peergit_session", Value: token})
 	getResponse := httptest.NewRecorder()
+	var originalSeen, updatedSeen time.Time
+	if err := pool.QueryRow(ctx, `UPDATE sessions SET last_seen_at=now()-interval '6 minutes' WHERE user_id=$1 RETURNING last_seen_at`, adminID).Scan(&originalSeen); err != nil {
+		t.Fatal(err)
+	}
 	router.ServeHTTP(getResponse, get)
 	if getResponse.Code != http.StatusOK {
 		t.Fatalf("session status=%d body=%s", getResponse.Code, getResponse.Body.String())
+	}
+	if err := pool.QueryRow(ctx, `SELECT last_seen_at FROM sessions WHERE user_id=$1`, adminID).Scan(&updatedSeen); err != nil || !updatedSeen.After(originalSeen) {
+		t.Fatalf("session activity was not refreshed: previous=%v current=%v err=%v", originalSeen, updatedSeen, err)
+	}
+	router.ServeHTTP(httptest.NewRecorder(), get.Clone(ctx))
+	var repeatedSeen time.Time
+	if err := pool.QueryRow(ctx, `SELECT last_seen_at FROM sessions WHERE user_id=$1`, adminID).Scan(&repeatedSeen); err != nil || !repeatedSeen.Equal(updatedSeen) {
+		t.Fatalf("recent session activity should not be rewritten: previous=%v current=%v err=%v", updatedSeen, repeatedSeen, err)
 	}
 	var envelope struct {
 		Data map[string]any `json:"data"`

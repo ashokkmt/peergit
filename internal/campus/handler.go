@@ -44,6 +44,7 @@ func (h *Handler) Register(r chi.Router) {
 		private.With(h.auth.RequireCSRF).Post("/admin/invitations", h.createInvitation)
 		private.With(h.auth.RequireCSRF).Post("/admin/invitations/{id}/revoke", h.revokeInvitation)
 		private.With(h.auth.RequireCSRF).Post("/admin/organizations", h.createOrganization)
+		private.With(h.auth.RequireCSRF).Post("/admin/organizations/{id}/members", h.addOrganizationMember)
 		private.With(h.auth.RequireCSRF).Post("/admin/roles", h.grantRole)
 		private.Get("/admin/users", h.users)
 		private.With(h.auth.RequireCSRF).Post("/admin/users/{id}/status", h.setUserStatus)
@@ -238,13 +239,17 @@ func (h *Handler) createOrganization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
-	err = tx.QueryRow(r.Context(), `INSERT INTO organizations(college_id,kind,slug,name,description) VALUES($1,$2,$3,$4,$5) RETURNING id::text`, s.CollegeID, input.Kind, input.Slug, input.Name, input.Description).Scan(&id)
+	err = tx.QueryRow(r.Context(), `INSERT INTO organizations(college_id,kind,slug,name,description,owner_user_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING id::text`, s.CollegeID, input.Kind, input.Slug, input.Name, input.Description, s.UserID).Scan(&id)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "duplicate key") {
 			h.fail(w, r, http.StatusConflict, "organization_slug_taken", "an organization with this slug already exists", err)
 		} else {
 			h.err.Handle(w, r, err)
 		}
+		return
+	}
+	if _, err = tx.Exec(r.Context(), `INSERT INTO organization_members(college_id,organization_id,user_id,role) VALUES($1,$2,$3,'owner')`, s.CollegeID, id, s.UserID); err != nil {
+		h.err.Handle(w, r, err)
 		return
 	}
 	if err = audit.Append(r.Context(), tx, audit.Entry{TenantID: s.CollegeID, ActorID: s.UserID, Action: "organization.created", ResourceType: "organization", ResourceID: id}); err != nil {
@@ -256,6 +261,49 @@ func (h *Handler) createOrganization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = response.Created(w, map[string]any{"id": id, "kind": input.Kind, "slug": input.Slug, "name": input.Name})
+}
+
+func (h *Handler) addOrganizationMember(w http.ResponseWriter, r *http.Request) {
+	s, ok := h.admin(w, r)
+	if !ok {
+		return
+	}
+	input, err := request.Decode[struct {
+		UserID string `json:"user_id"`
+		Role   string `json:"role"`
+	}](r)
+	if err != nil {
+		h.err.Handle(w, r, err)
+		return
+	}
+	if input.UserID == "" || input.Role != "member" && input.Role != "manager" {
+		h.fail(w, r, http.StatusBadRequest, "organization_member_invalid", "choose a campus member and a member or manager role", nil)
+		return
+	}
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		h.err.Handle(w, r, err)
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var organizationID string
+	err = tx.QueryRow(r.Context(), `INSERT INTO organization_members(college_id,organization_id,user_id,role)
+		SELECT $1,o.id,$3,$4 FROM organizations o JOIN users u ON u.id=$3 AND u.college_id=o.college_id AND u.status='active'
+		AND EXISTS(SELECT 1 FROM campus_verifications v WHERE v.college_id=o.college_id AND v.user_id=u.id AND v.revoked_at IS NULL)
+		WHERE o.id=$2 AND o.college_id=$1 RETURNING organization_id::text`, s.CollegeID, chi.URLParam(r, "id"), input.UserID, input.Role).Scan(&organizationID)
+	if err != nil {
+		h.fail(w, r, http.StatusConflict, "organization_member_ineligible", "organization or verified campus member is unavailable", err)
+		return
+	}
+	if err = audit.Append(r.Context(), tx, audit.Entry{TenantID: s.CollegeID, ActorID: s.UserID, Action: "organization.member.added", ResourceType: "organization", ResourceID: organizationID}); err != nil {
+		h.err.Handle(w, r, err)
+		return
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		h.err.Handle(w, r, err)
+		return
+	}
+	_ = response.Created(w, map[string]any{"organization_id": organizationID, "user_id": input.UserID, "role": input.Role})
 }
 
 func (h *Handler) grantRole(w http.ResponseWriter, r *http.Request) {

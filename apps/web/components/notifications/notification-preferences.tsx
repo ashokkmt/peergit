@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { readApiEnvelope } from "@/lib/http";
+import { fetchSession, readApiEnvelope } from "@/lib/http";
 
 type Preferences = {
   email: Record<string, boolean>;
@@ -23,7 +23,7 @@ export function NotificationPreferences() {
     setLoading(true);
     setError("");
     try {
-      const sessionResponse = await fetch("/api/v1/session", { cache: "no-store" });
+      const sessionResponse = await fetchSession();
       const session = await readApiEnvelope<{ authenticated?: boolean; csrf_token?: string }>(
         sessionResponse,
         prefLoadError,

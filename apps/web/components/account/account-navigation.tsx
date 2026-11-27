@@ -4,6 +4,8 @@ import { usePathname } from "next/navigation";
 
 const sections = [
   ["/account/profile", "Profile"],
+  ["/account/portfolio", "Portfolio"],
+  ["/account/succession", "Project succession"],
   ["/onboarding", "Campus verification"],
   ["/account/github", "GitHub connection"],
   ["/account/settings", "Security & appearance"],
@@ -26,7 +28,7 @@ export function AccountNavigation() {
   return (
     <nav aria-label="Account navigation">
       <details className="grid mb-2 md:hidden [&[open]]:bg-surface [&[open]]:border [&[open]]:border-hairline [&[open]]:rounded-lg [&[open]]:p-1.5">
-        <summary className="px-3.5 py-2.5 bg-surface border border-hairline rounded-lg text-sm font-semibold cursor-pointer">
+        <summary className="list-none [&::-webkit-details-marker]:hidden px-3.5 py-2.5 bg-surface border border-hairline rounded-lg text-sm font-semibold cursor-pointer">
           Account menu
         </summary>
         {links}

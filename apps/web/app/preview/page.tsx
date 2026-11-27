@@ -3,11 +3,7 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { PreviewBadge } from "@/components/layout/preview-banner";
 
 const previews = [
-  ["Student workspace", "/home", "Phase 5A–5C"],
-  ["Inbox and messages", "/inbox", "Phases 5B–5C"],
-  ["Tasks and milestones", "/projects/sample/work", "Phase 5A"],
-  ["Student portfolio", "/u/example-student", "Phase 5D"],
-  ["Campus overview", "/campus/overview", "Phases 6–8"],
+  ["Campus reporting preview", "/campus/overview", "Phases 6–8"],
   ["Cohorts and reports", "/campus/reports", "Phases 6–8"],
   ["PeerGit hosted repositories", "/preview/native", "Stage B1"],
 ];
@@ -38,8 +34,8 @@ export default function PreviewPage() {
           <PreviewBadge />
         </div>
         <p className="text-sm leading-[21px] text-muted m-0">
-          Will get implemented in a later phase. These screens use fictional examples to demonstrate
-          planned collaboration, institutional reporting, and qualified-pilot native hosting.
+          These screens use fictional examples to show planned institutional reporting and PeerGit
+          hosted repositories.
         </p>
 
         <div className="grid grid-cols-1 min-[900px]:grid-cols-3 gap-6">

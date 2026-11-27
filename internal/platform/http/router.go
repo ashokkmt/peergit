@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"peergit/internal/health"
 	"peergit/internal/platform/errormanager"
+	"peergit/internal/platform/logging"
 )
 
 type Router struct {
@@ -65,6 +66,8 @@ func (router *Router) requestID(next http.Handler) http.Handler {
 func (router *Router) accessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
+		ctx, logState := logging.WithRequestLogState(r.Context())
+		r = r.WithContext(ctx)
 		wrapped := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 		defer func() {
 			status := wrapped.Status()
@@ -75,14 +78,45 @@ func (router *Router) accessLog(next http.Handler) http.Handler {
 			if status >= http.StatusInternalServerError {
 				router.errors.Add(1)
 			}
-			router.logger.InfoContext(r.Context(), "http request completed",
+			route := "unmatched"
+			if ctx := chi.RouteContext(r.Context()); ctx != nil && ctx.RoutePattern() != "" {
+				route = ctx.RoutePattern()
+			}
+			failure, failed := logState.Failure()
+			if !failed && status < http.StatusBadRequest && r.Method == http.MethodGet {
+				switch r.URL.Path {
+				case "/healthz", "/readyz", "/metrics":
+					return
+				}
+			}
+			message := "http request completed"
+			if failed || status >= http.StatusBadRequest {
+				message = "http request failed"
+			}
+			attrs := []any{
 				"request_id", w.Header().Get("X-Request-ID"),
 				"method", r.Method,
-				"path", r.URL.Path,
+				"path", route,
 				"status", status,
 				"bytes", wrapped.BytesWritten(),
 				"duration", time.Since(started),
-			)
+			}
+			if failed && failure.Code != "" {
+				attrs = append(attrs, "code", failure.Code)
+			}
+			if failed && failure.Err != nil {
+				attrs = append(attrs, "error", failure.Err)
+			}
+			if failed && failure.AfterResponse {
+				attrs = append(attrs, "response_committed", true)
+			}
+			if (failed && failure.Status >= http.StatusInternalServerError) || status >= http.StatusInternalServerError {
+				router.logger.ErrorContext(r.Context(), message, attrs...)
+			} else if failed || status >= http.StatusBadRequest {
+				router.logger.WarnContext(r.Context(), message, attrs...)
+			} else {
+				router.logger.InfoContext(r.Context(), message, attrs...)
+			}
 		}()
 		next.ServeHTTP(wrapped, r)
 	})

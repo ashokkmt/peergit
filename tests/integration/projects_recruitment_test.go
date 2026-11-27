@@ -83,7 +83,7 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 	}))
 	defer archiveStore.Close()
 	repositoryHandler := repository.NewHandler(pool, auth, nil, storage.New(archiveStore.URL, "test", "us-east-1", "fixture-key", "fixture-secret"), repository.AppConfig{}, logger, errs)
-	router := httpserver.NewRouter(health.NewHandler(logger, errs, pool), logger, errs, auth.Register, campusHandler.Register, mediaHandler.Register, projectHandler.Register, recruitmentHandler.Register, repositoryHandler.Register)
+	router := httpserver.NewRouter(health.NewHandler(errs, pool), logger, errs, auth.Register, campusHandler.Register, mediaHandler.Register, projectHandler.Register, recruitmentHandler.Register, repositoryHandler.Register)
 	loadCSRF := func(actor string) {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, "http://peergit.test/api/v1/session", nil)

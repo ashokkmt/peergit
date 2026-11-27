@@ -6,7 +6,7 @@ import { RepositoryCode } from "./repository-code";
 import { LegacyRepositoryLink } from "./legacy-repository-link";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
-import { readApiEnvelope } from "@/lib/http";
+import { fetchSession, readApiEnvelope } from "@/lib/http";
 import { ConversationLaunchButton } from "@/components/collaboration/conversation-launch-button";
 
 type Project = {
@@ -146,7 +146,7 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
         }
         return result.data;
       }),
-      fetch("/api/v1/session", { cache: "no-store" }).then(async (response) => {
+      fetchSession().then(async (response) => {
         const result = await readApiEnvelope<{
           csrf_token?: string;
           user?: {
@@ -606,6 +606,27 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
 
             {tab === "settings" && manager && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-start">
+                {details.viewer_role === "owner" && (
+                  <section className={`${cardClass} gap-3 sm:col-span-2`}>
+                    <div>
+                      <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] m-0">
+                        Project succession
+                      </h2>
+                      <p className="text-sm leading-[21px] text-muted mt-1 mb-0">
+                        Hand ownership to a current member before you leave. The GitHub repository stays
+                        under its current GitHub owner.
+                      </p>
+                    </div>
+                    <div>
+                      <a
+                        className={compactSecondaryBtn}
+                        href={`/account/succession?resource=project:${encodeURIComponent(projectID)}`}
+                      >
+                        Review eligible successors
+                      </a>
+                    </div>
+                  </section>
+                )}
                 <section className={`${cardClass} gap-4`}>
                   <div>
                     <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] m-0">

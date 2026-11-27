@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { GitHubImports } from "./github-imports";
-import { readApiEnvelope } from "@/lib/http";
+import { fetchSession, readApiEnvelope } from "@/lib/http";
 
 export function GitHubConnectionsPage() {
   const [csrf, setCSRF] = useState("");
@@ -10,12 +10,13 @@ export function GitHubConnectionsPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetch("/api/v1/session", { cache: "no-store", signal: controller.signal })
+    void fetchSession()
       .then(async (response) => {
         const result = await readApiEnvelope<{ authenticated: boolean; csrf_token?: string }>(
           response,
           "Account session could not be loaded.",
         );
+        if (controller.signal.aborted) return;
         if (!result.data?.authenticated) throw new Error("Sign in to manage GitHub connections.");
         if (!result.data.csrf_token) throw new Error("Your session could not be verified.");
         setCSRF(result.data.csrf_token);

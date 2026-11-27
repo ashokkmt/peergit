@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"peergit/internal/platform/http/response"
+	"peergit/internal/platform/logging"
 )
 
 // Error carries a safe public response and the internal cause for diagnostics.
@@ -65,21 +66,30 @@ func NewManager(logger *slog.Logger) *Manager {
 	return &Manager{logger: logger}
 }
 
-// Handle writes a stable public error and logs the internal cause server-side.
+// Handle writes a stable public error and records diagnostics for the request log.
 func (m *Manager) Handle(w http.ResponseWriter, r *http.Request, err error) {
 	var apiErr *Error
 	if !errors.As(err, &apiErr) {
 		apiErr = New(http.StatusInternalServerError, "internal_error", "an unexpected error occurred", err)
 	}
 
-	requestID := w.Header().Get("X-Request-ID")
 	status, code, message := apiErr.Status, apiErr.Code, apiErr.Message
+	requestID := w.Header().Get("X-Request-ID")
+	state := logging.RequestLogStateFrom(r.Context())
 	if apiErr.Status >= 500 {
-		m.logger.ErrorContext(r.Context(), "request failed", "request_id", requestID, "error", err)
+		if state != nil {
+			state.RecordFailure(logging.RequestFailure{Status: status, Code: "internal_error", Err: err})
+		} else {
+			m.logger.ErrorContext(r.Context(), "request failed", "request_id", requestID, "error", err)
+		}
 		code = "internal_error"
 		message = "an unexpected error occurred"
 	} else {
-		m.logger.WarnContext(r.Context(), "request rejected", "request_id", requestID, "code", apiErr.Code)
+		if state != nil {
+			state.RecordFailure(logging.RequestFailure{Status: status, Code: code})
+		} else {
+			m.logger.WarnContext(r.Context(), "request rejected", "request_id", requestID, "code", apiErr.Code)
+		}
 	}
 
 	if committed, ok := w.(interface{ Status() int }); ok && committed.Status() != 0 {
@@ -88,7 +98,11 @@ func (m *Manager) Handle(w http.ResponseWriter, r *http.Request, err error) {
 	_ = response.WriteError(w, status, code, message)
 }
 
-// Report logs a failure that happened after an HTTP response was committed.
+// Report records a failure that happened after an HTTP response was committed.
 func (m *Manager) Report(r *http.Request, err error) {
+	if state := logging.RequestLogStateFrom(r.Context()); state != nil {
+		state.RecordFailure(logging.RequestFailure{Status: http.StatusInternalServerError, Code: "internal_error", Err: err, AfterResponse: true})
+		return
+	}
 	m.logger.ErrorContext(r.Context(), "request failed after response started", "request_id", r.Header.Get("X-Request-ID"), "error", err)
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"peergit/internal/platform/audit"
 	"peergit/internal/platform/errormanager"
 	"peergit/internal/platform/http/request"
 	"peergit/internal/platform/http/response"
@@ -91,7 +92,7 @@ func (h *Handler) loadSession(next http.Handler) http.Handler {
 			var s Session
 			var adminCount int
 			var mfaCount int
-			var fresh bool
+			var fresh, touchSession bool
 			var termsAccepted, privacyAccepted bool
 			err = h.pool.QueryRow(r.Context(), `SELECT s.id::text,u.id::text,COALESCE(CASE WHEN c.status='active' AND EXISTS(
 				SELECT 1 FROM campus_verifications v WHERE v.college_id=c.id AND v.user_id=u.id AND v.revoked_at IS NULL AND
@@ -102,15 +103,18 @@ func (h *Handler) loadSession(next http.Handler) http.Handler {
 				(SELECT count(*) FROM mfa_credentials mc WHERE mc.user_id=u.id AND mc.enabled_at IS NOT NULL),
 			COALESCE(s.mfa_verified_at > now()-interval '10 minutes',false),
 				EXISTS(SELECT 1 FROM consent_records co WHERE co.user_id=u.id AND co.purpose='terms' AND co.policy_version=$2 AND co.revoked_at IS NULL),
-				EXISTS(SELECT 1 FROM consent_records co WHERE co.user_id=u.id AND co.purpose='privacy' AND co.policy_version=$3 AND co.revoked_at IS NULL)
+				EXISTS(SELECT 1 FROM consent_records co WHERE co.user_id=u.id AND co.purpose='privacy' AND co.policy_version=$3 AND co.revoked_at IS NULL),
+				s.last_seen_at < now()-interval '5 minutes'
 			FROM sessions s JOIN users u ON u.id=s.user_id
 			LEFT JOIN colleges c ON c.id=CASE WHEN s.college_id IS NOT NULL THEN s.college_id ELSE u.college_id END
-				WHERE s.token_hash=$1 AND s.expires_at>now() AND u.status='active'`, tokenHash, termsPolicyVersion, privacyPolicyVersion).Scan(&s.ID, &s.UserID, &s.CollegeID, &s.Email, &s.DisplayName, &s.AccountType, &s.CSRFHash, &adminCount, &mfaCount, &fresh, &termsAccepted, &privacyAccepted)
+				WHERE s.token_hash=$1 AND s.expires_at>now() AND u.status='active'`, tokenHash, termsPolicyVersion, privacyPolicyVersion).Scan(&s.ID, &s.UserID, &s.CollegeID, &s.Email, &s.DisplayName, &s.AccountType, &s.CSRFHash, &adminCount, &mfaCount, &fresh, &termsAccepted, &privacyAccepted, &touchSession)
 			if err == nil {
 				s.CampusAdmin, s.MFAEnabled, s.MFAFresh = adminCount > 0, mfaCount > 0, fresh
 				s.TermsAccepted, s.PrivacyAccepted = termsAccepted, privacyAccepted
 				r = r.WithContext(context.WithValue(r.Context(), sessionKey{}, s))
-				_, _ = h.pool.Exec(r.Context(), `UPDATE sessions SET last_seen_at=now() WHERE id=$1 AND last_seen_at < now()-interval '5 minutes'`, s.ID)
+				if touchSession {
+					_, _ = h.pool.Exec(r.Context(), `UPDATE sessions SET last_seen_at=now() WHERE id=$1 AND last_seen_at < now()-interval '5 minutes'`, s.ID)
+				}
 			} else if !errors.Is(err, pgx.ErrNoRows) {
 				h.err.Handle(w, r, err)
 				return
@@ -395,7 +399,24 @@ func (h *Handler) updateConsent(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, http.StatusBadRequest, "consent_invalid", "consent request is invalid", nil)
 		return
 	}
-	if input.Granted {
+	if !input.Granted && input.Purpose == "portfolio" {
+		tx, beginErr := h.pool.Begin(r.Context())
+		if beginErr != nil {
+			h.err.Handle(w, r, beginErr)
+			return
+		}
+		defer tx.Rollback(r.Context())
+		_, err = tx.Exec(r.Context(), `UPDATE consent_records SET revoked_at=now() WHERE user_id=$1 AND purpose='portfolio' AND revoked_at IS NULL`, s.UserID)
+		if err == nil {
+			_, err = tx.Exec(r.Context(), `UPDATE portfolio_share_grants SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL`, s.UserID)
+		}
+		if err == nil && s.CollegeID != "" {
+			err = audit.Append(r.Context(), tx, audit.Entry{TenantID: s.CollegeID, ActorID: s.UserID, Action: "portfolio.consent.revoked", ResourceType: "portfolio", ResourceID: s.UserID})
+		}
+		if err == nil {
+			err = tx.Commit(r.Context())
+		}
+	} else if input.Granted {
 		_, err = h.pool.Exec(r.Context(), `INSERT INTO consent_records(user_id,purpose,policy_version)
 			SELECT $1,$2,$3 WHERE NOT EXISTS(SELECT 1 FROM consent_records WHERE user_id=$1 AND purpose=$2 AND policy_version=$3 AND revoked_at IS NULL)`, s.UserID, input.Purpose, input.PolicyVersion)
 	} else {

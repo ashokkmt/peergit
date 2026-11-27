@@ -2,7 +2,6 @@ package health
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -12,14 +11,12 @@ import (
 )
 
 type Handler struct {
-	logger       *slog.Logger
 	errorManager *errormanager.Manager
 	pool         *pgxpool.Pool
 }
 
-func NewHandler(logger *slog.Logger, errors *errormanager.Manager, pool *pgxpool.Pool) *Handler {
+func NewHandler(errors *errormanager.Manager, pool *pgxpool.Pool) *Handler {
 	return &Handler{
-		logger:       logger,
 		errorManager: errors,
 		pool:         pool,
 	}
@@ -42,8 +39,6 @@ func (h Handler) Readyz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) Healthz(w http.ResponseWriter, r *http.Request) {
-	h.logger.Debug("health check requested", "request_id", r.Header.Get("X-Request-ID"))
-
 	if err := response.OK(w, Response{
 		Status: "ok",
 	}); err != nil {
