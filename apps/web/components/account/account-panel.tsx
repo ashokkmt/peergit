@@ -11,6 +11,7 @@ type Me = {
   display_name: string;
   account_type: string;
   profile: { bio?: string; headline?: string; avatar_media_id?: string };
+  academic?: { course_of_study: string; year: number | null; semester: number | null; section: string };
   skills: string[];
   consents: string[];
   campus_admin: boolean;
@@ -48,6 +49,7 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
   const [displayName, setDisplayName] = useState("");
   const [headline, setHeadline] = useState("");
   const [bio, setBio] = useState("");
+  const [academic, setAcademic] = useState({ course_of_study: "", year: "", semester: "", section: "" });
   const [skills, setSkills] = useState("");
   const [avatarID, setAvatarID] = useState("");
   const [consents, setConsents] = useState<string[]>([]);
@@ -102,6 +104,12 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
       setDisplayName(value.display_name);
       setHeadline(value.profile?.headline ?? "");
       setBio(value.profile?.bio ?? "");
+      setAcademic({
+        course_of_study: value.academic?.course_of_study ?? "",
+        year: value.academic?.year?.toString() ?? "",
+        semester: value.academic?.semester?.toString() ?? "",
+        section: value.academic?.section ?? "",
+      });
       setSkills(value.skills.join(", "));
       setAvatarID(value.profile?.avatar_media_id ?? "");
       setConsents(value.consents ?? []);
@@ -132,6 +140,11 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
           display_name: displayName,
           headline,
           bio,
+          ...(me?.college_id ? { academic: {
+            ...academic,
+            year: academic.year ? Number(academic.year) : null,
+            semester: academic.semester ? Number(academic.semester) : null,
+          }} : {}),
           skills: skills
             .split(",")
             .map((s) => s.trim())
@@ -473,6 +486,27 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
               className={`${inputClass} min-h-24 resize-y leading-normal`}
             />
           </label>
+          {me?.college_id && (
+            <fieldset className="grid gap-3 rounded-lg border border-hairline p-3 sm:grid-cols-2">
+              <legend className="px-1 text-sm font-semibold">Academic details</legend>
+              <p className="m-0 text-sm text-muted sm:col-span-2">These details appear in campus search only with your profile discovery consent.</p>
+              {([
+                ["course_of_study", "Course of study", 120, 0],
+                ["year", "Current year", 0, 12],
+                ["semester", "Semester", 0, 24],
+                ["section", "Section", 40, 0],
+              ] as const).map(([key, label, length, max]) => (
+                <label className={fieldClass} key={key}>
+                  {label}
+                  <input className={inputClass} type={max ? "number" : "text"}
+                    min={max ? 1 : undefined} max={max || undefined} maxLength={length || undefined}
+                    value={academic[key]}
+                    onChange={(event) => setAcademic({ ...academic, [key]: event.target.value })}
+                  />
+                </label>
+              ))}
+            </fieldset>
+          )}
           <label className={fieldClass}>
             Skills, separated by commas
             <input
@@ -713,7 +747,6 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
                 ) : (
                   <>
                     <option value="mentor">Mentor</option>
-                    <option value="recruiter">Recruiter</option>
                     <option value="organization_guest">Organization guest</option>
                   </>
                 )}
@@ -761,7 +794,6 @@ export function AccountPanel({ section = "profile" }: { section?: "profile" | "s
                 <option value="club">Club</option>
                 <option value="department">Department</option>
                 <option value="innovation_cell">Innovation cell</option>
-                <option value="placement_cell">Placement cell</option>
                 <option value="event_body">Event body</option>
               </select>
             </label>

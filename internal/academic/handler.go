@@ -76,6 +76,7 @@ func (h *Handler) Register(r chi.Router) {
 		api.Get("/academic/exports/{id}", h.downloadExport)
 		api.Get("/academic/digest", h.academicDigest)
 		api.With(h.auth.RequireCSRF).Put("/me/academic-digest-preferences", h.saveDigestPreferences)
+		h.registerPBL(api)
 	})
 }
 

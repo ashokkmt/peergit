@@ -1,6 +1,6 @@
 # Local development
 
-The API, worker, and Next.js app run on the host. Docker Compose provides PostgreSQL 18, SeaweedFS (S3-compatible), Mailpit, and Caddy. No production data belongs in this environment. For the complete Windows setup and Phase 3 walkthrough, see [the local run guide](../plans/peergit-run.md) and [service guide](../plans/local-services.md).
+The API, worker and Next.js app run on the host. Compose provides PostgreSQL, SeaweedFS, Mailpit and Caddy. Use the `pbl` profile for the optional private Forgejo service. [Local run guide](../plans/peergit-run.md) · [Service guide](../plans/local-services.md).
 
 ## Start
 
@@ -12,7 +12,7 @@ docker compose -f deploy/compose/local.yml up -d --wait
 go run ./cmd/migrate
 ```
 
-The Go commands load `.env` from the repository root. The migration command is explicit and repeatable. The API never runs migrations on startup. In separate host terminals:
+The Go commands load `.env` from the repository root. For a Phase 6 migration checksum error, use the [disposable database reset](../plans/peergit-run.md#9-stop-inspect-and-reset). For optional Forgejo setup, follow [PBL Git development](../plans/peergit-run.md#pbl-git-development) before starting the Go processes. In separate host terminals:
 
 ```powershell
 go run ./cmd/api
@@ -22,39 +22,26 @@ go run ./cmd/api
 go run ./cmd/worker
 ```
 
-The worker currently starts both durable polling loops with no domain handlers registered; pending work stays durable until its owning feature adds a handler. Inspect or repair dead work with `go run ./cmd/jobctl`.
+The worker processes verification email, GitHub evidence, snapshots and configured PBL Git work. Inspect dead jobs with `go run ./cmd/jobctl`.
 
 ```powershell
 npm --prefix apps/web ci
 npm --prefix apps/web run dev
 ```
 
-Open `https://localhost` through Caddy or `http://127.0.0.1:3000` for the direct web development server. Caddy uses its local internal CA; trust that CA only on this development machine if the browser does not already trust it. API checks are `https://localhost/healthz`, `/readyz`, and `/metrics`; direct API checks use port 8080.
+Use `https://localhost` through Caddy for browser sign-in and the PeerGit Git remote. Follow the run guide for local CA trust. The API exposes `/healthz`, `/readyz` and `/metrics` through the same origin.
 
-Run the browser smoke checks after starting the web app. The browser test supplies local readiness responses, so it does not need a live API:
-
-```powershell
-npm --prefix tests/e2e ci
-npm --prefix tests/e2e test
-```
-
-They launch an isolated browser profile and cover keyboard navigation, responsive overflow, labeled search, readiness/request IDs, and the API-unavailable state.
+Use the [test guide](../plans/peergit-test.md) for the manual walkthrough and the shared runner. The runner starts its own API, worker, web server and Docker services, so stop the interactive stack first.
 
 ## Stop and reset
 
 Stop containers without deleting local database, object, or Caddy data:
 
 ```powershell
-docker compose -f deploy/compose/local.yml down
+docker compose -f deploy/compose/local.yml --profile tools --profile pbl down
 ```
 
-Deliberately erase local fixture data only when you want a blank environment:
-
-```powershell
-docker compose -f deploy/compose/local.yml down --volumes
-```
-
-That removes the local PostgreSQL and object-storage volumes. Restart with `up -d --wait`, then run `go run ./cmd/migrate` again. Never point this Compose stack at staging or production credentials or copy production data into it.
+The [run guide](../plans/peergit-run.md#9-stop-inspect-and-reset) documents exactly which volumes a disposable reset removes. PBL recovery pairs database, Forgejo, and snapshot data.
 
 ## Services
 
@@ -62,7 +49,8 @@ That removes the local PostgreSQL and object-storage volumes. Restart with `up -
 |---|---|---|
 | PostgreSQL | `127.0.0.1:5432` | Application state and durable jobs/outbox |
 | SeaweedFS S3 API | `127.0.0.1:8333` | Local object storage |
-| Mailpit SMTP/UI | `127.0.0.1:1025` / `127.0.0.1:8025` | Local email sink; current Phase 3 invitation links are shared manually because no sender is registered yet |
+| Mailpit SMTP/UI | `127.0.0.1:1025` / `127.0.0.1:8025` | Local sink for campus verification email |
 | Caddy | `https://localhost` | Same-origin local HTTPS proxy |
+| Forgejo (optional `pbl` profile) | `127.0.0.1:3031` | Private administrative endpoint for the PBL Git service |
 
 Compose files bind host ports to loopback. The PostgreSQL Compose credentials are development-only.

@@ -267,6 +267,19 @@ func (h *Handler) finishRepositoryAuthorization(w http.ResponseWriter, r *http.R
 		}
 		return
 	}
+	if auth.Purpose == "pbl_copy" && auth.ExternalRepositoryID != nil && auth.ProjectID != "" {
+		if err = h.completePBLCopy(ctx, s, auth, externalInstall, userToken); err != nil {
+			var appErr *errormanager.Error
+			if errors.As(err, &appErr) {
+				h.err.Handle(w, r, err)
+			} else {
+				h.providerFailure(w, r, err)
+			}
+			return
+		}
+		http.Redirect(w, r, h.app.Origin+"/academics/pbl", http.StatusSeeOther)
+		return
+	}
 	if auth.Purpose != "import" || auth.ExternalRepositoryID == nil {
 		h.fail(w, r, 400, "import_state_invalid", "repository import authorization is invalid", nil)
 		return
@@ -718,7 +731,8 @@ func (h *Handler) myProjects(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.pool.Query(r.Context(), `SELECT p.id::text,p.slug,p.title,p.summary,p.visibility,p.lifecycle,p.version,p.updated_at,b.owner_login,b.repository_name,b.external_repository_id,b.default_branch,b.access_state,b.sync_health
 		FROM project_members pm JOIN projects p ON p.id=pm.project_id AND p.college_id=pm.college_id LEFT JOIN repositories rp ON rp.project_id=p.id AND rp.college_id=p.college_id LEFT JOIN repository_bindings b ON b.repository_id=rp.id AND b.college_id=rp.college_id AND b.is_current
-		WHERE pm.user_id=$1 AND pm.college_id=$2 ORDER BY p.updated_at DESC,p.id DESC LIMIT 100`, s.UserID, s.CollegeID)
+		WHERE pm.user_id=$1 AND pm.college_id=$2 AND p.project_context='ordinary'
+		ORDER BY p.updated_at DESC,p.id DESC LIMIT 100`, s.UserID, s.CollegeID)
 	if err != nil {
 		h.err.Handle(w, r, err)
 		return

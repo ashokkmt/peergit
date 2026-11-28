@@ -36,6 +36,7 @@ type Repository struct {
 	Private       bool            `json:"private"`
 	Visibility    string          `json:"visibility"`
 	DefaultBranch string          `json:"default_branch"`
+	Size          int64           `json:"size"`
 	Topics        []string        `json:"topics"`
 	Language      string          `json:"language"`
 	Permissions   map[string]bool `json:"permissions"`

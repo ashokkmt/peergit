@@ -42,6 +42,43 @@ func (h *Handler) projectConversation(w http.ResponseWriter, r *http.Request) {
 	_ = response.Created(w, map[string]any{"id": conversation.ID, "context_type": conversation.Type, "project_id": conversation.ProjectID, "state": conversation.State})
 }
 
+func (h *Handler) pblConversation(w http.ResponseWriter, r *http.Request) {
+	s, ok := h.session(w, r)
+	if !ok {
+		return
+	}
+	team, scope := chi.URLParam(r, "team"), chi.URLParam(r, "scope")
+	if !uuidOK(team) || (scope != "team" && scope != "faculty") {
+		fail(w, http.StatusNotFound, "conversation_context_unavailable", "this PBL room is unavailable")
+		return
+	}
+	query := `INSERT INTO conversations(college_id,context_type,pbl_team_id)
+		SELECT t.college_id,'pbl_team',t.id FROM pbl_teams t WHERE t.id=$1 AND t.college_id=$2
+		AND (EXISTS(SELECT 1 FROM pbl_active_team_members p WHERE p.team_id=t.id AND p.user_id=$3)
+		     OR EXISTS(SELECT 1 FROM pbl_active_faculty f WHERE f.team_id=t.id AND f.user_id=$3))
+		ON CONFLICT(college_id,pbl_team_id) WHERE context_type='pbl_team'
+		DO UPDATE SET pbl_team_id=EXCLUDED.pbl_team_id RETURNING id::text`
+	if scope == "faculty" {
+		query = `INSERT INTO conversations(college_id,context_type,pbl_offering_id,pbl_faculty_id)
+			SELECT f.college_id,'pbl_faculty',f.offering_id,f.user_id FROM pbl_active_faculty f
+			WHERE f.team_id=$1 AND f.college_id=$2 AND (f.user_id=$3
+			  OR EXISTS(SELECT 1 FROM pbl_active_team_members p WHERE p.team_id=f.team_id AND p.user_id=$3))
+			ON CONFLICT(college_id,pbl_offering_id,pbl_faculty_id) WHERE context_type='pbl_faculty'
+			DO UPDATE SET pbl_faculty_id=EXCLUDED.pbl_faculty_id RETURNING id::text`
+	}
+	var id string
+	err := h.pool.QueryRow(r.Context(), query, team, s.CollegeID, s.UserID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		fail(w, http.StatusNotFound, "conversation_context_unavailable", "this PBL room is unavailable")
+		return
+	}
+	if err != nil {
+		h.err.Handle(w, r, err)
+		return
+	}
+	_ = response.Created(w, map[string]string{"id": id, "context_type": "pbl_" + scope})
+}
+
 func (h *Handler) applicationConversation(w http.ResponseWriter, r *http.Request) {
 	s, ok := h.session(w, r)
 	if !ok {
@@ -72,7 +109,7 @@ func (h *Handler) openConversation(ctx context.Context, s identity.Session, kind
 	switch kind {
 	case "project":
 		err = tx.QueryRow(ctx, `SELECT p.id::text FROM projects p JOIN project_members pm ON pm.project_id=p.id AND pm.college_id=p.college_id
-			WHERE p.id=$1 AND p.college_id=$2 AND pm.user_id=$3 AND p.lifecycle<>'archived' AND p.github_revoke_deadline IS NULL`, targetID, s.CollegeID, s.UserID).Scan(&conversation.ProjectID)
+			WHERE p.id=$1 AND p.college_id=$2 AND p.project_context='ordinary' AND pm.user_id=$3 AND p.lifecycle<>'archived' AND p.github_revoke_deadline IS NULL`, targetID, s.CollegeID, s.UserID).Scan(&conversation.ProjectID)
 		if err != nil {
 			return conversationContext{}, err
 		}
@@ -130,11 +167,17 @@ func (h *Handler) conversationForUser(ctx context.Context, s identity.Session, i
 			JOIN projects p ON p.id=rr.project_id AND p.college_id=rr.college_id
 			WHERE a.id=c.application_id AND a.college_id=c.college_id AND a.status='accepted' AND p.github_revoke_deadline IS NULL
 			AND (a.applicant_user_id=$3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=rr.project_id AND pm.college_id=rr.college_id AND pm.user_id=$3 AND pm.role IN ('owner','maintainer')))
-		)))`, id, s.CollegeID, s.UserID).Scan(&conversation.ID, &conversation.Type, &conversation.ProjectID, &conversation.ApplicationID, &conversation.State)
+		)) OR EXISTS(SELECT 1 FROM pbl_conversation_users v WHERE v.conversation_id=c.id AND v.college_id=c.college_id AND v.user_id=$3))`, id, s.CollegeID, s.UserID).Scan(&conversation.ID, &conversation.Type, &conversation.ProjectID, &conversation.ApplicationID, &conversation.State)
 	return conversation, err
 }
 
 func (h *Handler) syncConversationParticipants(ctx context.Context, conversation conversationContext, collegeID string) error {
+	if conversation.Type == "pbl_team" || conversation.Type == "pbl_faculty" {
+		_, err := h.pool.Exec(ctx, `INSERT INTO conversation_participants(college_id,conversation_id,user_id)
+			SELECT college_id,conversation_id,user_id FROM pbl_conversation_users WHERE conversation_id=$1 AND college_id=$2
+			ON CONFLICT DO NOTHING`, conversation.ID, collegeID)
+		return err
+	}
 	if conversation.Type == "project" {
 		_, err := h.pool.Exec(ctx, `DELETE FROM conversation_participants cp WHERE cp.conversation_id=$1 AND NOT EXISTS (
 			SELECT 1 FROM project_members pm WHERE pm.project_id=$2 AND pm.college_id=$3 AND pm.user_id=cp.user_id
@@ -165,13 +208,15 @@ func (h *Handler) listConversations(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := h.pool.Query(r.Context(), `SELECT c.id::text,c.context_type,COALESCE(c.project_id::text,''),COALESCE(c.application_id::text,''),p.title,
+	rows, err := h.pool.Query(r.Context(), `SELECT c.id::text,c.context_type,COALESCE(c.project_id::text,''),COALESCE(c.application_id::text,''),COALESCE(p.title,t.title,'PBL faculty group'),
 		COALESCE((SELECT max(m.created_at) FROM conversation_messages m WHERE m.conversation_id=c.id),c.created_at)
-		FROM conversations c JOIN conversation_participants cp ON cp.conversation_id=c.id AND cp.college_id=c.college_id
+		FROM conversations c LEFT JOIN conversation_participants cp ON cp.conversation_id=c.id AND cp.college_id=c.college_id AND cp.user_id=$2
 		LEFT JOIN projects p ON p.id=c.project_id AND p.college_id=c.college_id
-		WHERE c.college_id=$1 AND c.state='open' AND cp.user_id=$2 AND (
-			(c.context_type='project' AND EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=c.project_id AND pm.college_id=c.college_id AND pm.user_id=$2)) OR
-			(c.context_type='application' AND EXISTS(SELECT 1 FROM applications a JOIN project_roles rr ON rr.id=a.project_role_id AND rr.college_id=a.college_id WHERE a.id=c.application_id AND a.college_id=c.college_id AND a.status='accepted' AND (a.applicant_user_id=$2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=rr.project_id AND pm.college_id=rr.college_id AND pm.user_id=$2 AND pm.role IN ('owner','maintainer')))))
+		LEFT JOIN pbl_teams t ON t.id=c.pbl_team_id AND t.college_id=c.college_id
+		WHERE c.college_id=$1 AND c.state='open' AND (
+			(c.context_type='project' AND cp.user_id IS NOT NULL AND EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=c.project_id AND pm.college_id=c.college_id AND pm.user_id=$2)) OR
+			(c.context_type='application' AND cp.user_id IS NOT NULL AND EXISTS(SELECT 1 FROM applications a JOIN project_roles rr ON rr.id=a.project_role_id AND rr.college_id=a.college_id WHERE a.id=c.application_id AND a.college_id=c.college_id AND a.status='accepted' AND (a.applicant_user_id=$2 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=rr.project_id AND pm.college_id=rr.college_id AND pm.user_id=$2 AND pm.role IN ('owner','maintainer'))))) OR
+			EXISTS(SELECT 1 FROM pbl_conversation_users v WHERE v.conversation_id=c.id AND v.college_id=c.college_id AND v.user_id=$2)
 		) ORDER BY 6 DESC,c.id DESC LIMIT 100`, s.CollegeID, s.UserID)
 	if err != nil {
 		h.err.Handle(w, r, err)
@@ -240,7 +285,7 @@ func (h *Handler) listMessages(w http.ResponseWriter, r *http.Request) {
 			WHEN 'application' THEN EXISTS(SELECT 1 FROM applications a JOIN project_roles rr ON rr.id=a.project_role_id AND rr.college_id=a.college_id
 				WHERE a.id=c.application_id AND a.college_id=c.college_id AND a.status='accepted'
 				AND (a.applicant_user_id=$3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=rr.project_id AND pm.college_id=rr.college_id AND pm.user_id=$3 AND pm.role IN ('owner','maintainer'))))
-			ELSE false
+			ELSE EXISTS(SELECT 1 FROM pbl_conversation_users v WHERE v.conversation_id=c.id AND v.college_id=c.college_id AND v.user_id=$3)
 		END
 		AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE b.college_id=$1 AND ((b.blocker_id=$3 AND b.blocked_id=m.sender_id) OR (b.blocker_id=m.sender_id AND b.blocked_id=$3)))
 		ORDER BY m.created_at DESC,m.id DESC LIMIT $6`, s.CollegeID, id, s.UserID, nullableTimePoint(point), nullableIDPoint(point), discoveryPageSize+1)
@@ -286,7 +331,10 @@ func (h *Handler) listMessages(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) conversationParticipants(ctx context.Context, conversationID string, s identity.Session) ([]map[string]string, error) {
 	rows, err := h.pool.Query(ctx, `SELECT u.id::text,u.handle,u.display_name FROM conversation_participants cp
 		JOIN users u ON u.id=cp.user_id AND u.college_id=cp.college_id AND u.status='active'
+		JOIN conversations c ON c.id=cp.conversation_id AND c.college_id=cp.college_id
 		WHERE cp.conversation_id=$1 AND cp.college_id=$2
+		AND (c.context_type IN ('project','application') OR EXISTS(SELECT 1 FROM pbl_conversation_users v
+			WHERE v.conversation_id=c.id AND v.college_id=c.college_id AND v.user_id=cp.user_id))
 		AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE b.college_id=$2 AND ((b.blocker_id=$3 AND b.blocked_id=cp.user_id) OR (b.blocker_id=cp.user_id AND b.blocked_id=$3)))
 		ORDER BY (cp.user_id=$3) DESC,u.display_name`, conversationID, s.CollegeID, s.UserID)
 	if err != nil {
@@ -351,7 +399,7 @@ func (h *Handler) createMessage(w http.ResponseWriter, r *http.Request) {
 			WHEN 'application' THEN EXISTS(SELECT 1 FROM applications a JOIN project_roles rr ON rr.id=a.project_role_id AND rr.college_id=a.college_id
 				WHERE a.id=c.application_id AND a.college_id=c.college_id AND a.status='accepted'
 				AND (a.applicant_user_id=$3 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=rr.project_id AND pm.college_id=rr.college_id AND pm.user_id=$3 AND pm.role IN ('owner','maintainer'))))
-			ELSE false
+			ELSE EXISTS(SELECT 1 FROM pbl_conversation_users v WHERE v.conversation_id=c.id AND v.college_id=c.college_id AND v.user_id=$3)
 		END
 		ON CONFLICT(conversation_id,sender_id,client_message_id) DO NOTHING RETURNING id::text`, s.CollegeID, id, s.UserID, in.ClientMessageID, in.Body).Scan(&messageID)
 	if errors.Is(err, pgx.ErrNoRows) {

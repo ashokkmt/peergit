@@ -123,7 +123,7 @@ func notificationRecipients(ctx context.Context, pool *pgxpool.Pool, d outbox.De
 				WHEN 'application' THEN EXISTS(SELECT 1 FROM applications a JOIN project_roles rr ON rr.id=a.project_role_id AND rr.college_id=a.college_id
 					WHERE a.id=c.application_id AND a.college_id=c.college_id AND a.status='accepted'
 					AND (a.applicant_user_id=cp.user_id OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=rr.project_id AND pm.college_id=rr.college_id AND pm.user_id=cp.user_id AND pm.role IN ('owner','maintainer'))))
-				ELSE false
+				ELSE EXISTS(SELECT 1 FROM pbl_conversation_users v WHERE v.conversation_id=c.id AND v.college_id=c.college_id AND v.user_id=cp.user_id)
 			END`, p.ConversationID, d.TenantID, p.ActorID)
 		if err != nil {
 			return nil, err

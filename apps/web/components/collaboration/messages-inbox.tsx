@@ -5,7 +5,7 @@ import { readApiEnvelope } from "@/lib/http";
 
 type Conversation = {
   id: string;
-  context_type: "project" | "application";
+  context_type: "project" | "application" | "pbl_team" | "pbl_faculty";
   project_id: string;
   application_id?: string;
   project_title: string;
@@ -188,6 +188,8 @@ export function MessagesInbox() {
                       >
                         {item.context_type === "application"
                           ? "Accepted application"
+                          : item.context_type === "pbl_team" ? "PBL team"
+                          : item.context_type === "pbl_faculty" ? "PBL faculty"
                           : "Project team"}
                       </span>
                       <time className="text-xs text-muted" dateTime={item.last_message_at}>

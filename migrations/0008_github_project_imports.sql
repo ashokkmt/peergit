@@ -26,7 +26,7 @@ CREATE TABLE github_repository_authorization_states (
     state_hash bytea PRIMARY KEY CHECK (octet_length(state_hash)=32),
     college_id uuid NOT NULL,
     user_id uuid NOT NULL,
-    purpose text NOT NULL CHECK (purpose IN ('connect','import','link')),
+    purpose text NOT NULL CHECK (purpose IN ('connect','import','link','pbl_copy')),
     installation_id uuid NOT NULL,
     project_id uuid,
     external_repository_id bigint CHECK (external_repository_id>0),
@@ -36,7 +36,7 @@ CREATE TABLE github_repository_authorization_states (
     FOREIGN KEY (user_id,college_id) REFERENCES users(id,college_id) ON DELETE CASCADE,
     FOREIGN KEY (installation_id,college_id) REFERENCES github_installations(id,college_id) ON DELETE CASCADE,
     FOREIGN KEY (project_id,college_id) REFERENCES projects(id,college_id) ON DELETE CASCADE,
-    CHECK ((purpose='connect' AND external_repository_id IS NULL AND project_id IS NULL) OR (purpose='import' AND external_repository_id IS NOT NULL AND project_id IS NULL) OR (purpose='link' AND external_repository_id IS NULL AND project_id IS NOT NULL))
+    CHECK ((purpose='connect' AND external_repository_id IS NULL AND project_id IS NULL) OR (purpose='import' AND external_repository_id IS NOT NULL AND project_id IS NULL) OR (purpose='link' AND external_repository_id IS NULL AND project_id IS NOT NULL) OR (purpose='pbl_copy' AND external_repository_id IS NOT NULL AND project_id IS NOT NULL))
 );
 CREATE INDEX github_repository_authorization_states_expiry_idx ON github_repository_authorization_states(expires_at);
 
@@ -67,16 +67,5 @@ ALTER TABLE repository_bindings
     ADD COLUMN readme_markdown text NOT NULL DEFAULT '' CHECK (length(readme_markdown)<=1048576),
     ADD COLUMN overview_checked_at timestamptz;
 
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1 FROM repository_bindings
-        GROUP BY college_id,provider,external_repository_id HAVING count(*)>1
-    ) THEN
-        RAISE EXCEPTION 'duplicate GitHub repository bindings within a campus; review repository_bindings before applying migration 0008';
-    END IF;
-END $$;
-
-DROP INDEX repository_bindings_provider_current_idx;
 CREATE UNIQUE INDEX repository_bindings_campus_repository_idx
-    ON repository_bindings(college_id,provider,external_repository_id);
+    ON repository_bindings(college_id,provider,external_repository_id) WHERE provider='github';

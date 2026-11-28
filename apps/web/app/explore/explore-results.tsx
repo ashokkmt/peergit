@@ -29,11 +29,16 @@ type Person = {
   handle: string;
   display_name: string;
   headline: string;
+  course_of_study?: string;
+  year?: number;
+  semester?: number;
+  section?: string;
   skills: string[];
 };
 
 const apiLoadError =
   "Couldn't load projects right now. Check that the backend API is running and try again.";
+const emptyAcademicFilters = { course_of_study: "", year: "", semester: "", section: "" };
 
 export function ExploreResults() {
   const [items, setItems] = useState<Project[]>([]);
@@ -42,7 +47,8 @@ export function ExploreResults() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [recruitingOnly, setRecruitingOnly] = useState(false);
-  const [request, setRequest] = useState({ term: "", scope: "public" });
+  const [academic, setAcademic] = useState(emptyAcademicFilters);
+  const [request, setRequest] = useState({ term: "", scope: "public", academic: emptyAcademicFilters });
   const [scope, setScope] = useState("public");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -55,6 +61,11 @@ export function ExploreResults() {
     );
     if (request.scope === "public") url.searchParams.set("scope", "public");
     if (request.term) url.searchParams.set("q", request.term);
+    if (request.scope === "campus") {
+      for (const [name, value] of Object.entries(request.academic)) {
+        if (value.trim()) url.searchParams.set(name, value.trim());
+      }
+    }
     fetch(url, { cache: "no-store" })
       .then(async (response) => {
         const result = await readApiEnvelope<{
@@ -110,13 +121,13 @@ export function ExploreResults() {
     return () => window.removeEventListener("focus", revalidate);
   }, [scope]);
 
-  function runSearch(nextScope = scope, nextTerm = query.trim()) {
+  function runSearch(nextScope = scope, nextTerm = query.trim(), nextAcademic = academic) {
     setLoading(true);
     setError("");
     setItems([]);
     setRoles([]);
     setPeople([]);
-    setRequest({ term: nextTerm, scope: nextScope });
+    setRequest({ term: nextTerm, scope: nextScope, academic: nextAcademic });
   }
 
   function resetFilters() {
@@ -124,7 +135,8 @@ export function ExploreResults() {
     setCategory("all");
     setRecruitingOnly(false);
     setScope("public");
-    runSearch("public", "");
+    setAcademic(emptyAcademicFilters);
+    runSearch("public", "", emptyAcademicFilters);
   }
 
   const filtered = items.filter((item) => {
@@ -195,6 +207,26 @@ export function ExploreResults() {
             runSearch();
           }}
         >
+          {scope === "campus" && (
+            <fieldset className="grid gap-3 rounded-lg border border-hairline p-3 sm:grid-cols-2 lg:grid-cols-4">
+              <legend className="px-1 text-sm font-semibold">Filter campus profiles</legend>
+              {([
+                ["course_of_study", "Course of study", 0],
+                ["year", "Year", 12],
+                ["semester", "Semester", 24],
+                ["section", "Section", 0],
+              ] as const).map(([key, label, max]) => (
+                <label className="grid gap-1.5 text-sm" key={key}>
+                  {label}
+                  <input className="min-h-11 min-w-0 rounded-lg border border-control bg-surface px-3 text-on-surface"
+                    type={max ? "number" : "text"} min={max ? 1 : undefined} max={max || undefined}
+                    maxLength={key === "section" ? 40 : 120} value={academic[key]}
+                    onChange={(event) => setAcademic({ ...academic, [key]: event.target.value })}
+                  />
+                </label>
+              ))}
+            </fieldset>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-[minmax(280px,3fr)_minmax(170px,1.2fr)_auto_auto] gap-3.5 items-end">
             <label className="grid gap-1.5 text-[13px] font-medium text-on-surface" htmlFor="explore-search">
               {scope === "public" ? "Search projects" : "Search campus work and people"}
@@ -463,6 +495,13 @@ export function ExploreResults() {
                     {person.headline && (
                       <p className="mt-1 mb-0 text-sm leading-[20px] text-muted">
                         {person.headline}
+                      </p>
+                    )}
+                    {(person.course_of_study || person.year || person.semester || person.section) && (
+                      <p className="mt-1 mb-0 text-sm text-muted">
+                        {[person.course_of_study, person.year ? `Year ${person.year}` : "",
+                          person.semester ? `Semester ${person.semester}` : "",
+                          person.section ? `Section ${person.section}` : ""].filter(Boolean).join(" · ")}
                       </p>
                     )}
                   </div>

@@ -33,24 +33,29 @@ type AppConfig struct {
 	OAuthClientID, OAuthClientSecret, OAuthRedirectURL string
 	OAuthAuthorizeURL, OAuthTokenURL, APIURL           string
 	PrivateKey                                         []byte
+	Forge                                              ForgeConfig
 }
 
 type Handler struct {
-	pool  *pgxpool.Pool
-	auth  *identity.Handler
-	api   *github.Client
-	store *storage.Store
-	app   AppConfig
-	log   *slog.Logger
-	err   *errormanager.Manager
+	pool         *pgxpool.Pool
+	auth         *identity.Handler
+	api          *github.Client
+	store        *storage.Store
+	app          AppConfig
+	forge        ForgeConfig
+	pblTransfers chan struct{}
+	log          *slog.Logger
+	err          *errormanager.Manager
 }
 
 func NewHandler(pool *pgxpool.Pool, auth *identity.Handler, api *github.Client, store *storage.Store, app AppConfig, logger *slog.Logger, errors *errormanager.Manager) *Handler {
-	return &Handler{pool: pool, auth: auth, api: api, store: store, app: app, log: logger, err: errors}
+	return &Handler{pool: pool, auth: auth, api: api, store: store, app: app, forge: app.Forge, pblTransfers: make(chan struct{}, 4), log: logger, err: errors}
 }
 
 func (h *Handler) Register(r chi.Router) {
 	r.Post("/github/webhooks", h.webhook)
+	r.HandleFunc("/pbl/git/{repository}/*", h.pblGit)
+	r.Post("/pbl/forgejo/webhooks", h.pblWebhook)
 	r.Group(func(private chi.Router) {
 		private.Use(h.auth.Middleware)
 		private.With(h.auth.RequireCSRF).Post("/github/installations/start", h.startAccountInstallation)
@@ -76,6 +81,7 @@ func (h *Handler) Register(r chi.Router) {
 		private.Get("/projects/{id}/repository/snapshots/{snapshotID}", h.snapshotStatus)
 		private.With(h.auth.RequireCSRF).Post("/projects/{id}/repository/snapshots/{snapshotID}/retry", h.retrySnapshot)
 		private.Get("/projects/{id}/repository/snapshots/{snapshotID}/download", h.downloadSnapshot)
+		h.registerPBL(private)
 	})
 }
 
@@ -410,6 +416,10 @@ func (h *Handler) downloadSnapshot(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, 404, "snapshot_not_found", "verified snapshot is no longer available", err)
 		return
 	}
+	h.serveSnapshotFile(w, r, key, sha)
+}
+
+func (h *Handler) serveSnapshotFile(w http.ResponseWriter, r *http.Request, key, sha string) {
 	body, err := h.store.Open(r.Context(), key)
 	if err != nil {
 		h.err.Handle(w, r, err)

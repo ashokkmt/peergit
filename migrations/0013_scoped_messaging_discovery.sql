@@ -29,24 +29,35 @@ CREATE INDEX project_roles_title_trgm_idx ON project_roles USING gin(title publi
 CREATE TABLE conversations (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     college_id uuid NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
-    context_type text NOT NULL CHECK (context_type IN ('project', 'application')),
+    context_type text NOT NULL CHECK (context_type IN ('project', 'application', 'pbl_team', 'pbl_faculty')),
     project_id uuid,
     application_id uuid,
+    pbl_team_id uuid,
+    pbl_offering_id uuid,
+    pbl_faculty_id uuid,
     state text NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'closed')),
     created_at timestamptz NOT NULL DEFAULT now(),
     closed_at timestamptz,
     UNIQUE (id, college_id),
-    CHECK (project_id IS NOT NULL AND
-           ((context_type = 'project' AND application_id IS NULL) OR
-            (context_type = 'application' AND application_id IS NOT NULL))),
+    CHECK ((context_type = 'project' AND project_id IS NOT NULL AND application_id IS NULL
+                AND pbl_team_id IS NULL AND pbl_offering_id IS NULL AND pbl_faculty_id IS NULL) OR
+           (context_type = 'application' AND project_id IS NOT NULL AND application_id IS NOT NULL
+                AND pbl_team_id IS NULL AND pbl_offering_id IS NULL AND pbl_faculty_id IS NULL) OR
+           (context_type = 'pbl_team' AND pbl_team_id IS NOT NULL AND project_id IS NULL
+                AND application_id IS NULL AND pbl_offering_id IS NULL AND pbl_faculty_id IS NULL) OR
+           (context_type = 'pbl_faculty' AND pbl_offering_id IS NOT NULL AND pbl_faculty_id IS NOT NULL
+                AND project_id IS NULL AND application_id IS NULL AND pbl_team_id IS NULL)),
     FOREIGN KEY (project_id, college_id) REFERENCES projects(id, college_id) ON DELETE CASCADE,
     FOREIGN KEY (application_id, college_id) REFERENCES applications(id, college_id) ON DELETE CASCADE,
+    FOREIGN KEY (pbl_faculty_id,college_id) REFERENCES users(id,college_id) ON DELETE CASCADE,
     CHECK ((state = 'open' AND closed_at IS NULL) OR (state = 'closed' AND closed_at IS NOT NULL))
 );
 CREATE UNIQUE INDEX conversations_project_uidx
     ON conversations(college_id, project_id) WHERE context_type = 'project';
 CREATE UNIQUE INDEX conversations_application_uidx
     ON conversations(college_id, application_id) WHERE context_type = 'application';
+CREATE UNIQUE INDEX conversations_pbl_team_uidx ON conversations(college_id,pbl_team_id) WHERE context_type='pbl_team';
+CREATE UNIQUE INDEX conversations_pbl_faculty_uidx ON conversations(college_id,pbl_offering_id,pbl_faculty_id) WHERE context_type='pbl_faculty';
 
 CREATE TABLE conversation_participants (
     college_id uuid NOT NULL,

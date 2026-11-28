@@ -42,7 +42,7 @@ export default function PrivacyPage() {
           </h2>
           <p>
             Campus profiles and project information are access-controlled. Optional profile
-            discovery and any portfolio or recruiter visibility require separate consent. Private
+            discovery and portfolio visibility require separate consent. Private
             repository source is not sent to search, analytics, logs, email, or recommendations.
             Repository evidence is fetched only under the GitHub permissions granted to PeerGit.
           </p>

@@ -102,6 +102,7 @@ func run() error {
 		ID: cfg.GitHubAppID, Slug: cfg.GitHubAppSlug, PrivateKey: githubKey, WebhookSecret: cfg.GitHubWebhookSecret, Origin: cfg.AppOrigin,
 		OAuthClientID: cfg.GitHubRepositoryClientID, OAuthClientSecret: cfg.GitHubRepositoryClientSecret, OAuthRedirectURL: cfg.GitHubRepositoryRedirectURL,
 		OAuthAuthorizeURL: cfg.GitHubAuthorizeURL, OAuthTokenURL: cfg.GitHubTokenURL, APIURL: cfg.GitHubAPIURL,
+		Forge: repository.ForgeConfig{URL: cfg.PBLForgeURL, Owner: cfg.PBLForgeOwner, Token: cfg.PBLForgeToken, WebhookURL: cfg.PBLWebhookURL, WebhookSecret: cfg.PBLWebhookSecret},
 	}, logger, errorManager)
 	webhookHandler := campus.NewResendWebhookHandler(pool, cfg.ResendWebhookSecret, cfg.VerificationHashKey, logger)
 	router := httpserver.NewRouter(healthHandler, logger, errorManager, webhookHandler.Register, identityHandler.Register, campusHandler.Register, mediaHandler.Register, projectHandler.Register, recruitmentHandler.Register, collaborationHandler.Register, notificationHandler.Register, repositoryHandler.Register, portfolioHandler.Register, academicHandler.Register)

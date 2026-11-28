@@ -12,9 +12,93 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
+	"peergit/internal/platform/audit"
 	"peergit/internal/platform/http/request"
 	"peergit/internal/platform/http/response"
 )
+
+func (h *Handler) exportPBLAudit(w http.ResponseWriter, r *http.Request) {
+	s, ok := h.pblSession(w, r)
+	if !ok {
+		return
+	}
+	team := chi.URLParam(r, "team")
+	if !pblID(team) {
+		h.pblFailure(w, r, pgx.ErrNoRows)
+		return
+	}
+	ctx := r.Context()
+	tx, err := h.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		h.pblFailure(w, r, err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	var confirmedTeam string
+	err = tx.QueryRow(ctx, `SELECT t.id::text FROM pbl_teams t WHERE t.id=$1 AND t.college_id=$2 AND t.confirmed_at IS NOT NULL AND
+		($4 OR EXISTS(SELECT 1 FROM pbl_active_faculty f WHERE f.team_id=t.id AND f.user_id=$3))`,
+		team, s.CollegeID, s.UserID, s.CampusAdmin && s.MFAEnabled && s.MFAFresh).Scan(&confirmedTeam)
+	if err != nil {
+		h.pblFailure(w, r, err)
+		return
+	}
+	rows, err := tx.Query(ctx, `SELECT category,person,stage,result,revision,COALESCE(happened::text,''),checksum FROM (
+		SELECT 'idea' AS category,'' AS person,'0' AS stage,t.idea_state AS result,'' AS revision,NULL::timestamptz AS happened,'' AS checksum FROM pbl_teams t WHERE t.id=$1
+		UNION ALL SELECT 'attendance',u.display_name,a.stage::text,CASE WHEN a.present THEN 'present' ELSE 'absent' END,'',NULL,''
+			FROM pbl_attendance a JOIN users u ON u.id=a.student_id AND u.college_id=a.college_id WHERE a.team_id=$1
+		UNION ALL SELECT 'checkpoint',u.display_name,c.stage::text,s.state,s.commit_sha,s.receipt_at,COALESCE(s.archive_sha256,'')
+			FROM pbl_checkpoints c JOIN repository_snapshots s ON s.id=c.snapshot_id AND s.college_id=c.college_id
+			JOIN users u ON u.id=s.requested_by AND u.college_id=s.college_id WHERE c.team_id=$1
+		UNION ALL SELECT 'authenticated_push',p.display_name,'',g.ref,g.oid,g.observed_at,''
+			FROM (SELECT * FROM pbl_git_pushes WHERE team_id=$1 ORDER BY observed_at DESC,id DESC LIMIT 500) g
+			JOIN users p ON p.id=g.user_id AND p.college_id=g.college_id
+		UNION ALL SELECT CASE WHEN u.id IS NOT NULL THEN 'verified_author' ELSE 'unattributed_commit' END,
+			COALESCE(u.display_name,a.author_name),'',a.title,a.canonical_id,a.occurred_at,''
+			FROM (SELECT x.* FROM pbl_provisions n JOIN repositories p ON p.project_id=n.project_id AND p.college_id=n.college_id
+				JOIN contributions x ON x.repository_id=p.id AND x.college_id=p.college_id AND x.kind='commit'
+				WHERE n.team_id=$1 ORDER BY x.occurred_at DESC,x.id DESC LIMIT 500) a
+			LEFT JOIN users u ON u.college_id=a.college_id AND u.id=NULLIF(a.canonical_data->>'verified_author_id','')::uuid
+		) evidence ORDER BY category,stage,happened,person`, confirmedTeam)
+	if err != nil {
+		h.pblFailure(w, r, err)
+		return
+	}
+	var out strings.Builder
+	writer := csv.NewWriter(&out)
+	_ = writer.Write([]string{"category", "person", "stage", "result", "revision", "timestamp", "archive_sha256"})
+	for rows.Next() {
+		record := make([]string, 7)
+		if err = rows.Scan(&record[0], &record[1], &record[2], &record[3], &record[4], &record[5], &record[6]); err != nil {
+			break
+		}
+		for i := range record {
+			record[i] = safeCSV(record[i])
+		}
+		_ = writer.Write(record)
+	}
+	rows.Close()
+	if err == nil {
+		err = rows.Err()
+	}
+	writer.Flush()
+	if err == nil {
+		err = writer.Error()
+	}
+	if err == nil {
+		err = audit.Append(ctx, tx, audit.Entry{TenantID: s.CollegeID, ActorID: s.UserID, Action: "pbl.audit_exported", ResourceType: "pbl_team", ResourceID: team})
+	}
+	if err == nil {
+		err = tx.Commit(ctx)
+	}
+	if err != nil {
+		h.pblFailure(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="pbl-audit.csv"`)
+	_, _ = w.Write([]byte(out.String()))
+}
 
 func (h *Handler) createExport(w http.ResponseWriter, r *http.Request) {
 	s, ok := h.faculty(w, r)

@@ -192,10 +192,25 @@ const { chromium } = require('playwright');
         },
       },
     }));
+    await phase6.route('**/api/v1/academic/pbl', route => route.fulfill({ json: {
+      data: {
+        coordinator: false,
+        offerings: [{ id: 'offering', course: 'Databases', course_code: 'DBMS', term: 'Term 1', closes_at: '2099-12-01', eligible: true }],
+        teams: [{ id: 'fixture-team', offering_id: 'offering', title: 'Coursework team', confirmed: true, is_leader: true, can_review: false,
+          faculty_name: 'Fixture instructor', idea: '', idea_state: 'draft', idea_feedback: '', attendance: [], checkpoints: [], members: [] }],
+      },
+    } }));
+    await phase6.route('**/api/v1/academic/pbl/teams/fixture-team/repository', route => route.fulfill({ json: {
+      data: { state: 'ready', mode: 'empty', can_provision: true, can_git: true, storage_limit_kib: 256000, clone_url: baseURL + '/api/v1/pbl/git/fixture-team.git' },
+    } }));
+    await phase6.route('**/api/v1/academic/pbl/teams/fixture-team/work', route => route.fulfill({ json: {
+      data: { issues: [], pulls: [], members: {}, labels: [] },
+    } }));
     for (const [path, title] of [
       ['/faculty', 'Guide campus research and project work'],
       ['/mentorship', 'Make a useful connection around a project'],
       ['/academics', 'Connect assignments to immutable project evidence'],
+      ['/academics/pbl', 'Project-based learning'],
       ['/programs', 'Run a call from application to outcome'],
       ['/admin/academic-reviews', 'Review faculty and mentor access'],
     ]) {
@@ -213,6 +228,14 @@ const { chromium } = require('playwright');
       await phase6.waitForFunction(
         () => document.documentElement.getAttribute('data-resolved-theme') === 'dark',
       );
+    }
+    await phase6.goto(baseURL + '/academics/pbl');
+    await phase6.getByLabel('PeerGit clone URL').waitFor();
+    await phase6.getByRole('button', { name: 'Issues', exact: true }).click();
+    await phase6.getByLabel('Issue title').waitFor();
+    for (const width of [320, 390, 1440]) {
+      await phase6.setViewportSize({ width, height: 780 });
+      assert(await phase6.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `PBL work overflows at ${width}px`);
     }
     await phase6.close();
 

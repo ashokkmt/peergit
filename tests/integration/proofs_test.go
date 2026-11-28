@@ -39,6 +39,12 @@ func TestPlatformMigrationsAndDurableWork(t *testing.T) {
 	if err := migrations.Apply(ctx, pool, migrations.Files); err != nil {
 		t.Fatalf("repeat migrations: %v", err)
 	}
+	if _, err := pool.Exec(ctx, `UPDATE schema_migrations SET checksum=repeat('0',64) WHERE version='0004_identity_campus_media.sql'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrations.Apply(ctx, pool, migrations.Files); err == nil || !strings.Contains(err.Error(), "checksum changed") {
+		t.Fatalf("rewritten baseline accepted an incompatible applied checksum: %v", err)
+	}
 	migrationFiles, err := fs.Glob(migrations.Files, "*.sql")
 	if err != nil {
 		t.Fatal(err)

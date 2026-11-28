@@ -54,7 +54,7 @@ export default function TermsPage() {
           <h2 className="mt-7 mb-2.5 text-[18px] font-semibold">Account and data choices</h2>
           <p>
             You are responsible for keeping your account secure and for choosing whether optional
-            profile, portfolio, and recruiter discovery is enabled. You can change optional consent
+            profile or portfolio discovery is enabled. You can change optional consent
             in your account settings.
           </p>
           <p>

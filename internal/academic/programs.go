@@ -170,7 +170,7 @@ func (h *Handler) applyToCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var id string
-	err = h.pool.QueryRow(r.Context(), `INSERT INTO academic_call_applications(college_id,call_id,project_id,applicant_id,statement) SELECT c.college_id,c.id,p.id,$4,$5 FROM academic_calls c JOIN projects p ON p.id=$3 AND p.college_id=c.college_id JOIN project_members pm ON pm.project_id=p.id AND pm.user_id=$4 WHERE c.id=$1 AND c.college_id=$2 AND c.status='open' AND c.kind IN ('research','program') AND (c.closes_at IS NULL OR c.closes_at>now()) RETURNING id::text`, chi.URLParam(r, "id"), s.CollegeID, in.ProjectID, s.UserID, strings.TrimSpace(in.Statement)).Scan(&id)
+	err = h.pool.QueryRow(r.Context(), `INSERT INTO academic_call_applications(college_id,call_id,project_id,applicant_id,statement) SELECT c.college_id,c.id,p.id,$4,$5 FROM academic_calls c JOIN projects p ON p.id=$3 AND p.college_id=c.college_id AND p.project_context='ordinary' JOIN project_members pm ON pm.project_id=p.id AND pm.user_id=$4 WHERE c.id=$1 AND c.college_id=$2 AND c.status='open' AND c.kind IN ('research','program') AND (c.closes_at IS NULL OR c.closes_at>now()) RETURNING id::text`, chi.URLParam(r, "id"), s.CollegeID, in.ProjectID, s.UserID, strings.TrimSpace(in.Statement)).Scan(&id)
 	if err == pgx.ErrNoRows {
 		h.fail(w, r, http.StatusForbidden, "application_scope_denied", "an open call and project membership in this campus scope are required", nil)
 		return

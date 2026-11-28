@@ -28,6 +28,7 @@ func JobHandlers(pool *pgxpool.Pool, api *github.Client, appID string, privateKe
 }
 
 type worker struct {
+	forge      ForgeConfig
 	pool       *pgxpool.Pool
 	api        *github.Client
 	appID      string

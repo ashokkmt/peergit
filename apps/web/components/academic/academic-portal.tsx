@@ -12,6 +12,7 @@ const links = [
   ["/faculty", "Faculty"],
   ["/mentorship", "Mentorship"],
   ["/academics", "Courses & PBL"],
+  ["/academics/pbl", "PBL teams"],
   ["/programs", "Programs"],
   ["/admin/academic-reviews", "Review queue"],
 ] as const;
