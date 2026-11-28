@@ -4,7 +4,7 @@ import { WACPSummary } from "@/components/campus/wacp-summary";
 const cohortMetrics = [
   ["Verified participation", "72 / 76", "Enrolled students in sample cohort", ""],
   ["Recent observed activity", "16 / 18", "Linked projects in 14d window", ""],
-  ["Snapshots verified", "14 / 18", "Milestone 2 due Nov 28", "text-success"],
+  ["PBL checkpoints verified", "14 / 18", "Milestone 2 due Nov 28", "text-success"],
   ["Verification backlog", "6", "Manual affiliation requests", "text-warning"],
 ] as const;
 

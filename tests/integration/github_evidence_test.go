@@ -22,10 +22,10 @@ import (
 	"peergit/migrations"
 )
 
-func TestPhase4RepositorySnapshotTenantContracts(t *testing.T) {
+func TestPhase6BSnapshotBoundaryAndRepositoryTenantContracts(t *testing.T) {
 	databaseURL := os.Getenv("TEST_DATABASE_URL")
 	if databaseURL == "" {
-		t.Skip("set TEST_DATABASE_URL to run Phase 4 repository and snapshot constraints")
+		t.Skip("set TEST_DATABASE_URL to run Phase 6B repository authority constraints")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -74,8 +74,8 @@ func TestPhase4RepositorySnapshotTenantContracts(t *testing.T) {
 	if err := pool.QueryRow(ctx, `INSERT INTO repository_bindings(college_id,repository_id,installation_id,external_repository_id,owner_login,repository_name,default_branch,visibility,linked_by) VALUES($1,$2,$3,41003,'fixture','repo','main','private',$4) RETURNING id::text`, college, repository, installation, user).Scan(&binding); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO repository_snapshots(college_id,project_id,repository_id,binding_id,requested_by,idempotency_key,request_hash,requested_ref,commit_sha,membership_snapshot) VALUES($1,$2,$3,$4,$5,'receipt-1',decode(repeat('00',32),'hex'),'main',repeat('a',40),'[]'::jsonb)`, college, project, repository, binding, user); err != nil {
-		t.Fatalf("valid project-scoped snapshot receipt rejected: %v", err)
+	if _, err := pool.Exec(ctx, `INSERT INTO repository_snapshots(college_id,team_id,project_id,repository_id,binding_id,binding_provider,requested_by,idempotency_key,request_hash,requested_ref,commit_sha,membership_snapshot) VALUES($1,uuidv7(),$2,$3,$4,'forgejo',$5,'ordinary-receipt',decode(repeat('00',32),'hex'),'main',repeat('a',40),'[]'::jsonb)`, college, project, repository, binding, user); err == nil {
+		t.Fatal("ordinary GitHub binding created a PBL snapshot")
 	}
 	var otherCollege, otherUser, otherInstallation string
 	if err := pool.QueryRow(ctx, `INSERT INTO colleges(slug,name) VALUES('phase4-other-test','Phase 4 Other Test') RETURNING id::text`).Scan(&otherCollege); err != nil {
@@ -92,9 +92,6 @@ func TestPhase4RepositorySnapshotTenantContracts(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO repository_bindings(college_id,repository_id,installation_id,external_repository_id,owner_login,repository_name,linked_by) VALUES($1,$2,$3,41004,'fixture','second',$4)`, college, repository, installation, user); err == nil {
 		t.Fatal("second current binding for a logical repository was accepted")
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO repository_snapshots(college_id,project_id,repository_id,binding_id,requested_by,idempotency_key,request_hash,requested_ref,commit_sha,membership_snapshot) VALUES($1,$2,$3,$4,$5,'receipt-1',decode(repeat('00',32),'hex'),'main',repeat('b',40),'[]'::jsonb)`, college, project, repository, binding, user); err == nil {
-		t.Fatal("same actor's duplicate idempotency key was accepted")
 	}
 	if _, err := pool.Exec(ctx, `UPDATE projects SET github_revoke_deadline=now()+interval '30 days',github_revoke_owner=$2,github_revoke_installation=$3,github_revoke_previous_visibility=visibility,github_revoke_previous_lifecycle=lifecycle,visibility='private',lifecycle='archived' WHERE id=$1`, project, user, installation); err != nil {
 		t.Fatalf("30-day recovery state rejected: %v", err)

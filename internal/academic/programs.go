@@ -357,21 +357,16 @@ func (h *Handler) saveOutcome(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in, err := request.Decode[struct {
-		ProjectID    string `json:"project_id"`
-		Summary      string `json:"summary"`
-		Result       string `json:"result"`
-		SubmissionID string `json:"submission_id"`
+		ProjectID string `json:"project_id"`
+		Summary   string `json:"summary"`
+		Result    string `json:"result"`
 	}](r)
 	if err != nil {
 		h.err.Handle(w, r, err)
 		return
 	}
-	var evidence any
-	if in.SubmissionID != "" {
-		evidence = in.SubmissionID
-	}
 	var id string
-	err = h.pool.QueryRow(r.Context(), `INSERT INTO academic_program_outcomes(college_id,cohort_id,project_id,summary,result,evidence_submission_id,updated_by) SELECT pc.college_id,pc.id,$3,$4,$5,$6,$7 FROM academic_program_cohorts pc JOIN academic_program_cohort_projects cp ON cp.cohort_id=pc.id AND cp.project_id=$3 WHERE pc.id=$1 AND pc.college_id=$2 AND EXISTS(SELECT 1 FROM academic_call_reviewers cr WHERE cr.call_id=pc.call_id AND cr.reviewer_id=$7) ON CONFLICT(cohort_id,project_id) DO UPDATE SET summary=EXCLUDED.summary,result=EXCLUDED.result,evidence_submission_id=EXCLUDED.evidence_submission_id,updated_by=EXCLUDED.updated_by,updated_at=now() RETURNING id::text`, chi.URLParam(r, "id"), s.CollegeID, in.ProjectID, strings.TrimSpace(in.Summary), strings.TrimSpace(in.Result), evidence, s.UserID).Scan(&id)
+	err = h.pool.QueryRow(r.Context(), `INSERT INTO academic_program_outcomes(college_id,cohort_id,project_id,summary,result,updated_by) SELECT pc.college_id,pc.id,$3,$4,$5,$6 FROM academic_program_cohorts pc JOIN academic_program_cohort_projects cp ON cp.cohort_id=pc.id AND cp.project_id=$3 WHERE pc.id=$1 AND pc.college_id=$2 AND EXISTS(SELECT 1 FROM academic_call_reviewers cr WHERE cr.call_id=pc.call_id AND cr.reviewer_id=$6) ON CONFLICT(cohort_id,project_id) DO UPDATE SET summary=EXCLUDED.summary,result=EXCLUDED.result,updated_by=EXCLUDED.updated_by,updated_at=now() RETURNING id::text`, chi.URLParam(r, "id"), s.CollegeID, in.ProjectID, strings.TrimSpace(in.Summary), strings.TrimSpace(in.Result), s.UserID).Scan(&id)
 	if err != nil {
 		h.err.Handle(w, r, err)
 		return

@@ -42,8 +42,8 @@ export default function TermsPage() {
           <p>
             Git hosting remains with GitHub for the first release. A repository connection does not
             transfer ownership of a project or grant access to private code beyond the permissions
-            the member and repository owner approved. Submitted snapshots follow the retention
-            notice shown for that submission.
+            the member and repository owner approved. Immutable repository snapshots are created
+            only for PBL checkpoints and follow the retention notice shown for that submission.
           </p>
           <h2 className="mt-7 mb-2.5 text-[18px] font-semibold">Safety and enforcement</h2>
           <p>

@@ -305,8 +305,16 @@ CREATE TABLE pbl_checkpoints (
     feedback text NOT NULL DEFAULT '' CHECK (length(feedback)<=2000),
     PRIMARY KEY (team_id,stage),
     FOREIGN KEY (team_id,project_id,college_id) REFERENCES pbl_teams(id,project_id,college_id),
-    FOREIGN KEY (snapshot_id,project_id,college_id) REFERENCES repository_snapshots(id,project_id,college_id)
+    FOREIGN KEY (snapshot_id,team_id,project_id,college_id) REFERENCES repository_snapshots(id,team_id,project_id,college_id)
 );
+
+ALTER TABLE repository_snapshots
+    ADD CONSTRAINT repository_snapshots_pbl_team_fk
+        FOREIGN KEY (team_id,project_id,college_id)
+        REFERENCES pbl_teams(id,project_id,college_id) ON DELETE CASCADE,
+    ADD CONSTRAINT repository_snapshots_pbl_checkpoint_fk
+        FOREIGN KEY (id) REFERENCES pbl_checkpoints(snapshot_id)
+        DEFERRABLE INITIALLY DEFERRED;
 
 CREATE VIEW pbl_active_team_members AS
     SELECT tm.college_id,tm.team_id,tm.offering_id,tm.user_id
@@ -359,7 +367,6 @@ CREATE TABLE academic_assignments (
     title text NOT NULL CHECK (length(btrim(title)) BETWEEN 3 AND 160),
     brief text NOT NULL CHECK (length(btrim(brief)) BETWEEN 1 AND 8000),
     due_at timestamptz NOT NULL,
-    late_policy text NOT NULL DEFAULT 'accept' CHECK (late_policy IN ('accept', 'reject')),
     status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
     version integer NOT NULL DEFAULT 1 CHECK (version > 0),
     created_by uuid NOT NULL,
@@ -370,54 +377,6 @@ CREATE TABLE academic_assignments (
 );
 CREATE INDEX academic_assignments_cohort_due_idx
     ON academic_assignments(college_id, cohort_id, due_at, id);
-
-CREATE TABLE academic_assignment_evaluators (
-    college_id uuid NOT NULL,
-    assignment_id uuid NOT NULL,
-    user_id uuid NOT NULL,
-    assigned_by uuid NOT NULL,
-    assigned_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (assignment_id, user_id),
-    FOREIGN KEY (assignment_id, college_id) REFERENCES academic_assignments(id, college_id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id, college_id) REFERENCES users(id, college_id) ON DELETE CASCADE,
-    FOREIGN KEY (assigned_by, college_id) REFERENCES users(id, college_id)
-);
-
-CREATE TABLE academic_submissions (
-    id uuid PRIMARY KEY DEFAULT uuidv7(),
-    college_id uuid NOT NULL,
-    assignment_id uuid NOT NULL,
-    project_id uuid NOT NULL,
-    submitted_by uuid NOT NULL,
-    snapshot_id uuid NOT NULL,
-    received_at timestamptz NOT NULL DEFAULT now(),
-    due_at_receipt timestamptz NOT NULL,
-    late boolean NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (id, college_id),
-    UNIQUE (assignment_id, project_id),
-    UNIQUE (snapshot_id),
-    UNIQUE (id, project_id, college_id),
-    FOREIGN KEY (assignment_id, college_id) REFERENCES academic_assignments(id, college_id) ON DELETE CASCADE,
-    FOREIGN KEY (project_id, college_id) REFERENCES projects(id, college_id) ON DELETE CASCADE,
-    FOREIGN KEY (submitted_by, college_id) REFERENCES users(id, college_id) ON DELETE CASCADE,
-    FOREIGN KEY (snapshot_id, college_id) REFERENCES repository_snapshots(id, college_id) ON DELETE RESTRICT
-);
-CREATE INDEX academic_submissions_assignment_idx
-    ON academic_submissions(college_id, assignment_id, received_at DESC, id DESC);
-
-CREATE TABLE academic_evaluations (
-    college_id uuid NOT NULL,
-    submission_id uuid NOT NULL,
-    evaluator_id uuid NOT NULL,
-    outcome text NOT NULL CHECK (outcome IN ('complete', 'revise', 'not_assessed')),
-    feedback text NOT NULL CHECK (length(btrim(feedback)) BETWEEN 1 AND 4000),
-    version integer NOT NULL DEFAULT 1 CHECK (version > 0),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (submission_id, evaluator_id),
-    FOREIGN KEY (submission_id, college_id) REFERENCES academic_submissions(id, college_id) ON DELETE CASCADE,
-    FOREIGN KEY (evaluator_id, college_id) REFERENCES users(id, college_id) ON DELETE CASCADE
-);
 
 CREATE TABLE project_endorsements (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
@@ -568,7 +527,6 @@ CREATE TABLE academic_program_outcomes (
     project_id uuid NOT NULL,
     summary text NOT NULL CHECK (length(btrim(summary)) BETWEEN 1 AND 4000),
     result text NOT NULL DEFAULT '' CHECK (length(result) <= 1000),
-    evidence_submission_id uuid,
     updated_by uuid NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
@@ -576,7 +534,6 @@ CREATE TABLE academic_program_outcomes (
     UNIQUE (cohort_id, project_id),
     FOREIGN KEY (cohort_id, college_id) REFERENCES academic_program_cohorts(id, college_id) ON DELETE CASCADE,
     FOREIGN KEY (project_id, college_id) REFERENCES projects(id, college_id) ON DELETE CASCADE,
-    FOREIGN KEY (evidence_submission_id, project_id, college_id) REFERENCES academic_submissions(id, project_id, college_id),
     FOREIGN KEY (updated_by, college_id) REFERENCES users(id, college_id)
 );
 

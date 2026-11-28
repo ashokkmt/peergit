@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 
 	"peergit/internal/platform/http/request"
 	"peergit/internal/platform/http/response"
@@ -164,7 +163,7 @@ func (h *Handler) listProjects(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := h.pool.Query(r.Context(), `SELECT DISTINCT p.id::text,p.title,p.slug FROM projects p WHERE p.college_id=$1 AND p.project_context='ordinary' AND (EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$2) OR EXISTS(SELECT 1 FROM academic_submissions sub JOIN academic_assignments a ON a.id=sub.assignment_id AND a.college_id=sub.college_id JOIN academic_cohorts co ON co.id=a.cohort_id AND co.college_id=a.college_id WHERE sub.project_id=p.id AND sub.college_id=p.college_id AND (EXISTS(SELECT 1 FROM academic_assignment_evaluators ae JOIN faculty_profiles fp ON fp.user_id=ae.user_id AND fp.college_id=ae.college_id AND fp.status='active' WHERE ae.assignment_id=a.id AND ae.user_id=$2) OR EXISTS(SELECT 1 FROM academic_course_staff cs JOIN faculty_profiles fp ON fp.user_id=cs.user_id AND fp.college_id=cs.college_id AND fp.status='active' WHERE cs.course_id=co.course_id AND cs.user_id=$2))) OR $3) ORDER BY p.title,p.id LIMIT 500`, s.CollegeID, s.UserID, s.CampusAdmin)
+	rows, err := h.pool.Query(r.Context(), `SELECT DISTINCT p.id::text,p.title,p.slug FROM projects p WHERE p.college_id=$1 AND p.project_context='ordinary' AND (EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$2) OR EXISTS(SELECT 1 FROM project_members pm JOIN academic_enrollments e ON e.user_id=pm.user_id AND e.college_id=pm.college_id AND e.status='active' JOIN academic_cohorts co ON co.id=e.cohort_id AND co.college_id=e.college_id JOIN academic_course_staff cs ON cs.course_id=co.course_id AND cs.user_id=$2 WHERE pm.project_id=p.id AND pm.college_id=p.college_id) OR $3) ORDER BY p.title,p.id LIMIT 500`, s.CollegeID, s.UserID, s.CampusAdmin)
 	if err != nil {
 		h.err.Handle(w, r, err)
 		return
@@ -265,20 +264,16 @@ func (h *Handler) createAssignment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in, err := request.Decode[struct {
-		Title      string `json:"title"`
-		Brief      string `json:"brief"`
-		DueAt      string `json:"due_at"`
-		LatePolicy string `json:"late_policy"`
+		Title string `json:"title"`
+		Brief string `json:"brief"`
+		DueAt string `json:"due_at"`
 	}](r)
 	if err != nil {
 		h.err.Handle(w, r, err)
 		return
 	}
-	if in.LatePolicy == "" {
-		in.LatePolicy = "accept"
-	}
 	var id string
-	err = h.pool.QueryRow(r.Context(), `INSERT INTO academic_assignments(college_id,cohort_id,title,brief,due_at,late_policy,created_by) SELECT co.college_id,co.id,$3,$4,$5,$6,$7 FROM academic_cohorts co JOIN academic_courses c ON c.id=co.course_id AND c.college_id=co.college_id JOIN academic_course_staff cs ON cs.course_id=c.id AND cs.user_id=$7 WHERE co.id=$1 AND co.college_id=$2 RETURNING id::text`, chi.URLParam(r, "id"), s.CollegeID, strings.TrimSpace(in.Title), strings.TrimSpace(in.Brief), in.DueAt, in.LatePolicy, s.UserID).Scan(&id)
+	err = h.pool.QueryRow(r.Context(), `INSERT INTO academic_assignments(college_id,cohort_id,title,brief,due_at,created_by) SELECT co.college_id,co.id,$3,$4,$5,$6 FROM academic_cohorts co JOIN academic_courses c ON c.id=co.course_id AND c.college_id=co.college_id JOIN academic_course_staff cs ON cs.course_id=c.id AND cs.user_id=$6 WHERE co.id=$1 AND co.college_id=$2 RETURNING id::text`, chi.URLParam(r, "id"), s.CollegeID, strings.TrimSpace(in.Title), strings.TrimSpace(in.Brief), in.DueAt, s.UserID).Scan(&id)
 	if err != nil {
 		h.err.Handle(w, r, err)
 		return
@@ -291,7 +286,7 @@ func (h *Handler) listAssignments(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := h.pool.Query(r.Context(), `SELECT a.id::text,a.title,a.brief,a.due_at,a.status,c.course_code,co.label,EXISTS(SELECT 1 FROM academic_submissions sub WHERE sub.assignment_id=a.id AND sub.submitted_by=$2) FROM academic_assignments a JOIN academic_cohorts co ON co.id=a.cohort_id AND co.college_id=a.college_id JOIN academic_courses c ON c.id=co.course_id AND c.college_id=co.college_id WHERE a.college_id=$1 AND (EXISTS(SELECT 1 FROM academic_enrollments e WHERE e.cohort_id=co.id AND e.user_id=$2 AND e.status='active') OR EXISTS(SELECT 1 FROM academic_course_staff cs JOIN faculty_profiles fp ON fp.college_id=cs.college_id AND fp.user_id=cs.user_id AND fp.status='active' WHERE cs.course_id=c.id AND cs.user_id=$2) OR $3) ORDER BY a.due_at,a.id`, s.CollegeID, s.UserID, s.CampusAdmin)
+	rows, err := h.pool.Query(r.Context(), `SELECT a.id::text,a.title,a.brief,a.due_at,a.status,c.course_code,co.label FROM academic_assignments a JOIN academic_cohorts co ON co.id=a.cohort_id AND co.college_id=a.college_id JOIN academic_courses c ON c.id=co.course_id AND c.college_id=co.college_id WHERE a.college_id=$1 AND (EXISTS(SELECT 1 FROM academic_enrollments e WHERE e.cohort_id=co.id AND e.user_id=$2 AND e.status='active') OR EXISTS(SELECT 1 FROM academic_course_staff cs JOIN faculty_profiles fp ON fp.college_id=cs.college_id AND fp.user_id=cs.user_id AND fp.status='active' WHERE cs.course_id=c.id AND cs.user_id=$2) OR $3) ORDER BY a.due_at,a.id`, s.CollegeID, s.UserID, s.CampusAdmin)
 	if err != nil {
 		h.err.Handle(w, r, err)
 		return
@@ -301,133 +296,17 @@ func (h *Handler) listAssignments(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id, title, brief, code, cohort, status string
 		var due time.Time
-		var submitted bool
-		if err = rows.Scan(&id, &title, &brief, &due, &status, &code, &cohort, &submitted); err != nil {
+		if err = rows.Scan(&id, &title, &brief, &due, &status, &code, &cohort); err != nil {
 			h.err.Handle(w, r, err)
 			return
 		}
-		items = append(items, map[string]any{"id": id, "title": title, "brief": brief, "due_at": due, "status": status, "course_code": code, "cohort": cohort, "submitted": submitted})
+		items = append(items, map[string]any{"id": id, "title": title, "brief": brief, "due_at": due, "status": status, "course_code": code, "cohort": cohort})
 	}
 	if err = rows.Err(); err != nil {
 		h.err.Handle(w, r, err)
 		return
 	}
 	_ = response.OK(w, map[string]any{"items": items})
-}
-
-func (h *Handler) listSubmissions(w http.ResponseWriter, r *http.Request) {
-	s, ok := h.session(w, r)
-	if !ok {
-		return
-	}
-	rows, err := h.pool.Query(r.Context(), `SELECT sub.id::text,sub.project_id::text,p.title,sub.submitted_by::text,u.display_name,sub.snapshot_id::text,rs.commit_sha,rs.state,sub.received_at,sub.due_at_receipt,sub.late,COALESCE(ev.outcome,''),COALESCE(ev.feedback,''),EXISTS(SELECT 1 FROM academic_assignment_evaluators ae JOIN faculty_profiles fp ON fp.user_id=ae.user_id AND fp.college_id=ae.college_id AND fp.status='active' WHERE ae.assignment_id=sub.assignment_id AND ae.user_id=$3) OR EXISTS(SELECT 1 FROM academic_assignments a JOIN academic_cohorts co ON co.id=a.cohort_id AND co.college_id=a.college_id JOIN academic_course_staff cs ON cs.course_id=co.course_id AND cs.user_id=$3 JOIN faculty_profiles fp ON fp.user_id=cs.user_id AND fp.college_id=cs.college_id AND fp.status='active' WHERE a.id=sub.assignment_id) FROM academic_submissions sub JOIN projects p ON p.id=sub.project_id AND p.college_id=sub.college_id JOIN users u ON u.id=sub.submitted_by JOIN repository_snapshots rs ON rs.id=sub.snapshot_id AND rs.college_id=sub.college_id LEFT JOIN academic_evaluations ev ON ev.submission_id=sub.id AND ev.evaluator_id=$3 WHERE sub.assignment_id=$1 AND sub.college_id=$2 AND (sub.submitted_by=$3 OR EXISTS(SELECT 1 FROM academic_assignment_evaluators ae JOIN faculty_profiles fp ON fp.user_id=ae.user_id AND fp.college_id=ae.college_id AND fp.status='active' WHERE ae.assignment_id=sub.assignment_id AND ae.user_id=$3) OR EXISTS(SELECT 1 FROM academic_assignments a JOIN academic_cohorts co ON co.id=a.cohort_id AND co.college_id=a.college_id JOIN academic_course_staff cs ON cs.course_id=co.course_id AND cs.user_id=$3 JOIN faculty_profiles fp ON fp.user_id=cs.user_id AND fp.college_id=cs.college_id AND fp.status='active' WHERE a.id=sub.assignment_id) OR $4) ORDER BY sub.received_at,sub.id LIMIT 200`, chi.URLParam(r, "id"), s.CollegeID, s.UserID, s.CampusAdmin)
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	defer rows.Close()
-	items := make([]map[string]any, 0)
-	for rows.Next() {
-		var id, projectID, project, studentID, student, snapshotID, sha, capture, outcome, feedback string
-		var received, due time.Time
-		var late bool
-		var canEvaluate bool
-		if err = rows.Scan(&id, &projectID, &project, &studentID, &student, &snapshotID, &sha, &capture, &received, &due, &late, &outcome, &feedback, &canEvaluate); err != nil {
-			h.err.Handle(w, r, err)
-			return
-		}
-		items = append(items, map[string]any{"id": id, "project_id": projectID, "project": project, "student_id": studentID, "student": student, "snapshot_id": snapshotID, "commit_sha": sha, "capture_state": capture, "received_at": received, "due_at_receipt": due, "late": late, "can_evaluate": canEvaluate, "evaluation": map[string]string{"outcome": outcome, "feedback": feedback}})
-	}
-	if err = rows.Err(); err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	_ = response.OK(w, map[string]any{"items": items})
-}
-
-func (h *Handler) assignEvaluator(w http.ResponseWriter, r *http.Request) {
-	s, ok := h.faculty(w, r)
-	if !ok {
-		return
-	}
-	in, err := request.Decode[struct {
-		UserID string `json:"user_id"`
-	}](r)
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	tag, err := h.pool.Exec(r.Context(), `INSERT INTO academic_assignment_evaluators(college_id,assignment_id,user_id,assigned_by) SELECT a.college_id,a.id,$3,$4 FROM academic_assignments a JOIN academic_cohorts co ON co.id=a.cohort_id AND co.college_id=a.college_id JOIN academic_course_staff cs ON cs.course_id=co.course_id AND cs.user_id=$4 WHERE a.id=$1 AND a.college_id=$2 AND EXISTS(SELECT 1 FROM faculty_profiles fp WHERE fp.college_id=a.college_id AND fp.user_id=$3 AND fp.status='active') ON CONFLICT DO NOTHING`, chi.URLParam(r, "id"), s.CollegeID, in.UserID, s.UserID)
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	if tag.RowsAffected() == 0 {
-		h.fail(w, r, http.StatusForbidden, "evaluator_scope_invalid", "evaluator must be verified faculty and assignment staff must authorize the assignment", nil)
-		return
-	}
-	response.NoContent(w)
-}
-
-func (h *Handler) submitSnapshot(w http.ResponseWriter, r *http.Request) {
-	s, ok := h.session(w, r)
-	if !ok {
-		return
-	}
-	in, err := request.Decode[struct {
-		SnapshotID string `json:"snapshot_id"`
-		ProjectID  string `json:"project_id"`
-	}](r)
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	var id string
-	err = h.pool.QueryRow(r.Context(), `INSERT INTO academic_submissions(college_id,assignment_id,project_id,submitted_by,snapshot_id,due_at_receipt,late) SELECT a.college_id,a.id,p.id,$4,rs.id,a.due_at,now()>a.due_at FROM academic_assignments a JOIN academic_cohorts co ON co.id=a.cohort_id AND co.college_id=a.college_id JOIN academic_enrollments e ON e.cohort_id=co.id AND e.user_id=$4 AND e.status='active' JOIN project_members pm ON pm.user_id=$4 AND pm.project_id=$5 AND pm.college_id=a.college_id JOIN projects p ON p.id=$5 AND p.college_id=a.college_id AND p.project_context='ordinary' JOIN repository_snapshots rs ON rs.id=$3 AND rs.project_id=p.id AND rs.college_id=p.college_id AND rs.requested_by=$4 WHERE a.id=$1 AND a.college_id=$2 AND a.status='open' AND (a.late_policy='accept' OR now()<=a.due_at) ON CONFLICT(assignment_id,project_id) DO UPDATE SET snapshot_id=academic_submissions.snapshot_id RETURNING id::text`, chi.URLParam(r, "id"), s.CollegeID, in.SnapshotID, s.UserID, in.ProjectID).Scan(&id)
-	if err == pgx.ErrNoRows {
-		h.fail(w, r, http.StatusForbidden, "submission_scope_denied", "enrollment, project membership, eligible assignment, and a project snapshot are required", nil)
-		return
-	}
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	var captureState string
-	err = h.pool.QueryRow(r.Context(), `SELECT rs.state FROM academic_submissions sub JOIN repository_snapshots rs ON rs.id=sub.snapshot_id AND rs.college_id=sub.college_id WHERE sub.id=$1`, id).Scan(&captureState)
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	_ = response.Created(w, map[string]string{"id": id, "capture_state": captureState})
-}
-
-func (h *Handler) evaluateSubmission(w http.ResponseWriter, r *http.Request) {
-	s, ok := h.faculty(w, r)
-	if !ok {
-		return
-	}
-	in, err := request.Decode[struct {
-		Outcome  string `json:"outcome"`
-		Feedback string `json:"feedback"`
-	}](r)
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	if in.Outcome != "complete" && in.Outcome != "revise" && in.Outcome != "not_assessed" || len(strings.TrimSpace(in.Feedback)) == 0 || len(in.Feedback) > 4000 {
-		h.fail(w, r, http.StatusBadRequest, "evaluation_invalid", "evaluation outcome or feedback is invalid", nil)
-		return
-	}
-	result, err := h.pool.Exec(r.Context(), `INSERT INTO academic_evaluations(college_id,submission_id,evaluator_id,outcome,feedback) SELECT sub.college_id,sub.id,$3,$4,$5 FROM academic_submissions sub JOIN academic_assignments a ON a.id=sub.assignment_id AND a.college_id=sub.college_id WHERE sub.id=$1 AND sub.college_id=$2 AND (EXISTS(SELECT 1 FROM academic_assignment_evaluators ae WHERE ae.assignment_id=a.id AND ae.user_id=$3) OR EXISTS(SELECT 1 FROM academic_course_staff cs JOIN academic_cohorts co ON co.course_id=cs.course_id WHERE co.id=a.cohort_id AND cs.user_id=$3)) ON CONFLICT(submission_id,evaluator_id) DO UPDATE SET outcome=EXCLUDED.outcome,feedback=EXCLUDED.feedback,version=academic_evaluations.version+1,updated_at=now()`, chi.URLParam(r, "id"), s.CollegeID, s.UserID, in.Outcome, strings.TrimSpace(in.Feedback))
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	if result.RowsAffected() == 0 {
-		h.fail(w, r, http.StatusForbidden, "evaluation_scope_denied", "evaluator is not assigned to this submission", nil)
-		return
-	}
-	response.NoContent(w)
 }
 
 func (h *Handler) endorseProject(w http.ResponseWriter, r *http.Request) {
@@ -460,7 +339,7 @@ func (h *Handler) endorseProject(w http.ResponseWriter, r *http.Request) {
 		cohort = in.CohortID
 	}
 	var id string
-	err = h.pool.QueryRow(r.Context(), `INSERT INTO project_endorsements(college_id,project_id,faculty_id,course_id,cohort_id,statement,audience) SELECT $1,p.id,$3,$4,$5,$6,$7 FROM projects p WHERE p.id=$2 AND p.college_id=$1 AND p.project_context='ordinary' AND ((($4::uuid IS NULL AND $5::uuid IS NULL) AND EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$3)) OR ($4::uuid IS NOT NULL AND EXISTS(SELECT 1 FROM academic_course_staff cs JOIN academic_cohorts co ON co.course_id=cs.course_id AND co.college_id=cs.college_id JOIN academic_assignments a ON a.cohort_id=co.id AND a.college_id=co.college_id JOIN academic_submissions sub ON sub.assignment_id=a.id AND sub.college_id=a.college_id WHERE cs.course_id=$4 AND cs.user_id=$3 AND sub.project_id=p.id)) OR ($5::uuid IS NOT NULL AND EXISTS(SELECT 1 FROM academic_course_staff cs JOIN academic_cohorts co ON co.course_id=cs.course_id AND co.college_id=cs.college_id JOIN academic_assignments a ON a.cohort_id=co.id AND a.college_id=co.college_id JOIN academic_submissions sub ON sub.assignment_id=a.id AND sub.college_id=a.college_id WHERE co.id=$5 AND cs.user_id=$3 AND sub.project_id=p.id))) RETURNING id::text`, s.CollegeID, chi.URLParam(r, "id"), s.UserID, course, cohort, strings.TrimSpace(in.Statement), in.Audience).Scan(&id)
+	err = h.pool.QueryRow(r.Context(), `INSERT INTO project_endorsements(college_id,project_id,faculty_id,course_id,cohort_id,statement,audience) SELECT $1,p.id,$3,$4,$5,$6,$7 FROM projects p WHERE p.id=$2 AND p.college_id=$1 AND p.project_context='ordinary' AND ((($4::uuid IS NULL AND $5::uuid IS NULL) AND EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$3)) OR ($4::uuid IS NOT NULL AND EXISTS(SELECT 1 FROM academic_course_staff cs JOIN academic_cohorts co ON co.course_id=cs.course_id AND co.college_id=cs.college_id JOIN academic_enrollments e ON e.cohort_id=co.id AND e.college_id=co.college_id AND e.status='active' JOIN project_members pm ON pm.user_id=e.user_id AND pm.college_id=e.college_id AND pm.project_id=p.id WHERE cs.course_id=$4 AND cs.user_id=$3)) OR ($5::uuid IS NOT NULL AND EXISTS(SELECT 1 FROM academic_course_staff cs JOIN academic_cohorts co ON co.course_id=cs.course_id AND co.college_id=cs.college_id JOIN academic_enrollments e ON e.cohort_id=co.id AND e.college_id=co.college_id AND e.status='active' JOIN project_members pm ON pm.user_id=e.user_id AND pm.college_id=e.college_id AND pm.project_id=p.id WHERE co.id=$5 AND cs.user_id=$3))) RETURNING id::text`, s.CollegeID, chi.URLParam(r, "id"), s.UserID, course, cohort, strings.TrimSpace(in.Statement), in.Audience).Scan(&id)
 	if err != nil {
 		h.err.Handle(w, r, err)
 		return

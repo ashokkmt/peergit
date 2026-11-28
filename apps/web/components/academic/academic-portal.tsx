@@ -35,9 +35,9 @@ const heading: Record<
   },
   academics: {
     eyebrow: "Academic contexts",
-    title: "Connect assignments to immutable project evidence",
+    title: "Course schedules and assignments",
     description:
-      "Courses, terms, cohorts, assignments, receipts, and evaluations stay inside your verified campus context.",
+      "Courses, terms, cohorts, and assignment deadlines stay inside your verified campus context.",
   },
   programs: {
     eyebrow: "Programs & research",
@@ -1001,50 +1001,12 @@ export function AcademicPortal({ section }: { section: Section }) {
                 </div>
               </Panel>
 
-              <Panel
-                title="Submit project snapshot"
-                description="Record an immutable repository snapshot SHA against an academic assignment deadline."
-              >
-                <form
-                  className="grid gap-3"
-                  onSubmit={(event) =>
-                    void submit(event, "/academic/assignments/ASSIGNMENT_ID/submissions")
-                  }
-                >
-                  <SelectField
-                    name="assignment_id"
-                    label="Assignment"
-                    options={assignments.map((assignment) => ({
-                      value: text(assignment, "id"),
-                      label: `${text(assignment, "course_code")} · ${text(assignment, "title")}`,
-                    }))}
-                  />
-                  <SelectField
-                    name="project_id"
-                    label="Project"
-                    options={projects.map((project) => ({
-                      value: text(project, "id"),
-                      label: text(project, "title") || text(project, "name"),
-                    }))}
-                  />
-                  <Field
-                    name="snapshot_id"
-                    label="Snapshot ID"
-                    placeholder="Exact immutable repository snapshot"
-                    required
-                  />
-                  <div>
-                    <Button variant="secondary" disabled={busy}>
-                      Submit snapshot
-                    </Button>
-                  </div>
-                </form>
-              </Panel>
+
             </div>
 
             <Panel
-              title="Assignments and receipts"
-              description="Submissions record the immutable snapshot SHA and server receipt time. Pending capture remains visible as pending."
+              title="Course assignments"
+              description="Review assignment briefs and deadlines. Repository snapshots and assessment receipts are reserved for PBL checkpoints."
             >
               {canTeach && (
                 <form
@@ -1082,52 +1044,9 @@ export function AcademicPortal({ section }: { section: Section }) {
                       type="datetime-local"
                       required
                     />
-                    <SelectField
-                      name="late_policy"
-                      label="Late policy"
-                      options={[
-                        { value: "accept", label: "Accept late submissions" },
-                        { value: "reject", label: "Reject after deadline" },
-                      ]}
-                    />
                   </div>
                   <div>
                     <Button disabled={busy}>Create assignment</Button>
-                  </div>
-                </form>
-              )}
-
-              {canTeach && (
-                <form
-                  className="grid gap-3 border-b border-hairline pb-4"
-                  onSubmit={(event) =>
-                    void submit(event, "/academic/assignments/ASSIGNMENT_ID/evaluators")
-                  }
-                >
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <SelectField
-                      name="assignment_id"
-                      label="Assignment"
-                      options={assignments.map((assignment) => ({
-                        value: text(assignment, "id"),
-                        label: text(assignment, "title"),
-                      }))}
-                    />
-                    <SelectField
-                      name="user_id"
-                      label="Verified faculty evaluator"
-                      options={facultyDirectory
-                        .filter((faculty) => text(faculty, "id") !== userID)
-                        .map((faculty) => ({
-                          value: text(faculty, "id"),
-                          label: `${text(faculty, "name")} · ${text(faculty, "title")}`,
-                        }))}
-                    />
-                  </div>
-                  <div>
-                    <Button variant="secondary" disabled={busy}>
-                      Assign evaluator
-                    </Button>
                   </div>
                 </form>
               )}
@@ -1145,11 +1064,7 @@ export function AcademicPortal({ section }: { section: Section }) {
                           {formatDateTime(text(assignment, "due_at"))}
                         </span>
                       </div>
-                      {text(assignment, "late_policy") && (
-                        <State value={text(assignment, "late_policy")} />
-                      )}
                     </div>
-                    <AssignmentSubmissions assignment={assignment} />
                   </div>
                 )}
               />
@@ -1441,10 +1356,6 @@ export function AcademicPortal({ section }: { section: Section }) {
                         />
                         <div className="grid gap-3 sm:grid-cols-2">
                           <Field name="result" label="Result" maxLength={1000} />
-                          <Field
-                            name="submission_id"
-                            label="Optional evidence submission ID"
-                          />
                         </div>
                         <div>
                           <Button variant="secondary" disabled={busy}>
@@ -1998,145 +1909,5 @@ function CallCard({
         />
       )}
     </article>
-  );
-}
-
-function AssignmentSubmissions({ assignment }: { assignment: Item }) {
-  const [items, setItems] = useState<Item[]>([]);
-  const [opened, setOpened] = useState(false);
-  const [message, setMessage] = useState("");
-
-  async function load() {
-    setOpened(true);
-    setMessage("Loading submission records…");
-    try {
-      const response = await fetch(
-        `/api/v1/academic/assignments/${text(assignment, "id")}/submissions`,
-        { cache: "no-store" },
-      );
-      const envelope = await readApiEnvelope<{ items?: Item[] }>(
-        response,
-        "Submission records are unavailable.",
-      );
-      if (!response.ok) {
-        throw new Error(envelope.error?.message ?? "Submission records are unavailable.");
-      }
-      setItems(envelope.data?.items ?? []);
-      setMessage("");
-    } catch (cause) {
-      setItems([]);
-      setMessage(cause instanceof Error ? cause.message : "Submission records are unavailable.");
-    }
-  }
-
-  async function evaluate(event: FormEvent<HTMLFormElement>, submissionID: string) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const values = Object.fromEntries(new FormData(form).entries());
-    setMessage("");
-    try {
-      const sessionResponse = await fetch("/api/v1/session", { cache: "no-store" });
-      const session = await readApiEnvelope<{ csrf_token?: string }>(
-        sessionResponse,
-        "Session expired.",
-      );
-      const response = await fetch(`/api/v1/academic/submissions/${submissionID}/evaluation`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRF-Token": session.data?.csrf_token ?? "",
-        },
-        body: JSON.stringify(values),
-      });
-      const envelope = await readApiEnvelope(response, "Evaluation could not be saved.");
-      if (!response.ok) {
-        throw new Error(envelope.error?.message ?? "Evaluation could not be saved.");
-      }
-      await load();
-    } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "Evaluation could not be saved.");
-    }
-  }
-
-  return (
-    <div className="grid gap-2.5 border-t border-hairline pt-2.5">
-      <button
-        type="button"
-        onClick={() => void load()}
-        aria-expanded={opened}
-        className="cursor-pointer justify-self-start border-0 bg-transparent p-0 text-left text-[13px] font-semibold text-link underline underline-offset-2"
-      >
-        {opened
-          ? "Refresh linked submissions"
-          : `View submissions for ${text(assignment, "title")}`}
-      </button>
-      {message && (
-        <p
-          role={message.includes("Loading") ? "status" : "alert"}
-          className="m-0 text-[13px] text-muted"
-        >
-          {message}
-        </p>
-      )}
-      {opened && (
-        <ItemList
-          items={items}
-          empty="No submission has been recorded in this assignment scope."
-          render={(submission) => (
-            <>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <strong>
-                  {text(submission, "project")} · {text(submission, "student")}
-                </strong>
-                <State value={submission.late === true ? "late" : "on_time"} />
-              </div>
-              <span className="font-mono text-xs text-muted">
-                SHA {text(submission, "commit_sha")}
-              </span>
-              <span className="text-xs text-muted">
-                Received {formatDateTime(text(submission, "received_at"))} · snapshot{" "}
-                {text(submission, "capture_state")}
-              </span>
-              <a
-                className="text-xs font-medium text-link no-underline hover:underline"
-                href={`/api/v1/projects/${text(submission, "project_id")}/repository/snapshots/${text(submission, "snapshot_id")}/download`}
-              >
-                Download linked snapshot archive →
-              </a>
-              {submission.can_evaluate === true && (
-                <form
-                  className="grid gap-2 border-t border-hairline pt-3"
-                  onSubmit={(event) => void evaluate(event, text(submission, "id"))}
-                >
-                  <SelectField
-                    name="outcome"
-                    label="Evaluation"
-                    defaultValue="complete"
-                    options={[
-                      { value: "complete", label: "Complete" },
-                      { value: "revise", label: "Needs revision" },
-                      { value: "not_assessed", label: "Not assessed" },
-                    ]}
-                  />
-                  <TextField
-                    name="feedback"
-                    label="Feedback"
-                    required
-                    minLength={1}
-                    maxLength={4000}
-                    defaultValue={String(
-                      (submission.evaluation as Item | undefined)?.feedback ?? "",
-                    )}
-                  />
-                  <div>
-                    <Button variant="secondary">Save evaluation</Button>
-                  </div>
-                </form>
-              )}
-            </>
-          )}
-        />
-      )}
-    </div>
   );
 }

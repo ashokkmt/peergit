@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PreviewBadge } from "@/components/layout/preview-banner";
 import { readApiEnvelope } from "@/lib/http";
 
@@ -34,21 +34,9 @@ type Contribution = {
   observed_at?: string | null;
   provider_updated_at?: string | null;
 };
-type Snapshot = {
-  id: string;
-  ref: string;
-  commit_sha: string;
-  state: string;
-  receipt_at: string;
-  archive_sha256?: string | null;
-  archive_bytes?: number | null;
-  failure_code?: string | null;
-  retry_available?: boolean;
-};
 type Data = {
   repository: Binding | null;
   contributions: Contribution[];
-  snapshots: Snapshot[];
 };
 
 const cardClass = "min-w-0 max-w-full bg-surface border border-hairline rounded-2xl p-6 flex flex-col";
@@ -100,13 +88,9 @@ export function RepositoryOverview({
   const [data, setData] = useState<Data>({
     repository: null,
     contributions: [],
-    snapshots: [],
   });
-  const [ref, setRef] = useState("main");
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
-  const [message, setMessage] = useState("");
   const [diff, setDiff] = useState<{
     sha: string;
     files: { filename: string; patch?: string; status: string }[];
@@ -137,10 +121,10 @@ export function RepositoryOverview({
       setData(await api<Data>(`/api/v1/projects/${projectID}/repository`));
       setProblem("");
     } catch (e) {
-      setData({ repository: null, contributions: [], snapshots: [] });
+      setData({ repository: null, contributions: [] });
       setDiff(null);
       setProblem(
-        e instanceof Error ? e.message : "Repository evidence could not be loaded.",
+        e instanceof Error ? e.message : "Repository activity could not be loaded.",
       );
     } finally {
       setLoading(false);
@@ -199,42 +183,6 @@ export function RepositoryOverview({
     );
   }, [tab]);
 
-  async function capture(e: FormEvent) {
-    e.preventDefault();
-    if (!data.repository) return;
-    setBusy(true);
-    setProblem("");
-    try {
-      await api(`/api/v1/projects/${projectID}/repository/snapshots`, {
-        method: "POST",
-        headers: { "Idempotency-Key": crypto.randomUUID() },
-        body: JSON.stringify({ binding_id: data.repository.id, ref }),
-      });
-      setMessage("Exact commit receipt recorded; archive capture is running.");
-      await refresh();
-    } catch (x) {
-      setProblem(x instanceof Error ? x.message : "Snapshot request failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function retry(id: string) {
-    setBusy(true);
-    try {
-      await api(`/api/v1/projects/${projectID}/repository/snapshots/${id}/retry`, {
-        method: "POST",
-        body: "{}",
-      });
-      setMessage("Snapshot retry queued for the same commit.");
-      await refresh();
-    } catch (e) {
-      setProblem(e instanceof Error ? e.message : "Retry failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   useEffect(() => {
     if (tab !== "activity" || !selection || !/^[a-f0-9]{40}$/.test(selection)) return;
     const controller = new AbortController();
@@ -271,15 +219,6 @@ export function RepositoryOverview({
           {problem}
         </p>
       )}
-      {message && (
-        <p
-          className="rounded-lg px-4 py-3 text-sm font-medium bg-success/12 border border-success/35 text-success m-0"
-          role="status"
-        >
-          {message}
-        </p>
-      )}
-
       {loading ? (
         <p role="status" className="m-0">
           Loading repository…
@@ -335,7 +274,7 @@ export function RepositoryOverview({
               <button
                 className={compactSecondaryBtn}
                 type="button"
-                disabled={loading || busy}
+                disabled={loading}
                 onClick={() => void refresh()}
               >
                 Refresh
@@ -703,112 +642,7 @@ export function RepositoryOverview({
             </div>
           )}
 
-          {tab === "snapshots" && (
-            <div className="flex flex-col gap-5">
-              <div className={`${cardClass} gap-4`}>
-                <div>
-                  <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] m-0">
-                    Immutable snapshots
-                  </h2>
-                  <p className="text-[13px] leading-[19px] text-muted mt-1 mb-0">
-                    Snapshots pin an exact 40-character SHA. Timing (receipt) and integrity (archive
-                    verified) are tracked separately.
-                  </p>
-                </div>
 
-                <form className="grid gap-2 max-w-[520px]" onSubmit={capture}>
-                  <label htmlFor="snapshot-ref" className="text-[13px] font-medium text-on-surface">
-                    Record a snapshot of a branch, tag, or commit
-                  </label>
-                  <div className="flex flex-wrap gap-2.5">
-                    <input
-                      id="snapshot-ref"
-                      value={ref}
-                      onChange={(e) => setRef(e.target.value)}
-                      maxLength={255}
-                      required
-                      className="flex-[1_1_200px] min-h-11 px-3 py-2 border border-control rounded-lg bg-surface text-on-surface"
-                    />
-                    <button
-                      className="inline-flex min-h-11 items-center justify-center rounded-lg px-[18px] py-2 text-sm font-medium border border-primary bg-primary text-on-primary cursor-pointer hover:opacity-90 disabled:opacity-55 disabled:cursor-not-allowed"
-                      disabled={busy || data.repository.access_state !== "active"}
-                    >
-                      Capture
-                    </button>
-                  </div>
-                </form>
-
-                {data.snapshots.length ? (
-                  <ul className="list-none m-0 p-0 grid gap-3">
-                    {data.snapshots.map((s) => (
-                      <li
-                        key={s.id}
-                        className="flex flex-wrap items-center justify-between gap-3.5 p-4 bg-canvas border border-hairline rounded-xl"
-                      >
-                        <div className="flex flex-col gap-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <strong className="text-base font-semibold leading-[22px]">
-                              {s.state.replaceAll("_", " ")}
-                            </strong>
-                            <span
-                              className={`inline-flex items-center px-2.5 py-1 rounded-full bg-surface border text-xs font-medium leading-4 ${
-                                s.state === "verified"
-                                  ? "border-success text-success"
-                                  : "border-warning text-warning"
-                              }`}
-                            >
-                              {s.state === "verified"
-                                ? "Archive verified"
-                                : s.state.replaceAll("_", " ")}
-                            </span>
-                          </div>
-                          <p className="text-[13px] leading-[19px] text-muted m-0">
-                            {s.ref} →{" "}
-                            <code className="font-mono text-[13px] leading-[19px]">
-                              {s.commit_sha}
-                            </code>{" "}
-                            · {new Date(s.receipt_at).toLocaleString()}
-                            {s.failure_code ? ` · ${s.failure_code}` : ""}
-                          </p>
-                          {s.archive_sha256 && (
-                            <p className="text-[13px] leading-[19px] text-muted [overflow-wrap:anywhere] whitespace-pre-wrap m-0">
-                              Archive SHA-256{" "}
-                              <code className="font-mono text-[13px] leading-[19px]">
-                                {s.archive_sha256}
-                              </code>
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {s.state === "verified" &&
-                            data.repository?.source_access !== false && (
-                              <a
-                                className={compactSecondaryBtn}
-                                href={`/api/v1/projects/${projectID}/repository/snapshots/${s.id}/download`}
-                              >
-                                Download
-                              </a>
-                            )}
-                          {s.retry_available && (
-                            <button
-                              className={compactSecondaryBtn}
-                              type="button"
-                              onClick={() => void retry(s.id)}
-                              disabled={busy}
-                            >
-                              Retry same SHA
-                            </button>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-sm leading-[21px] text-muted m-0">No snapshots yet.</p>
-                )}
-              </div>
-            </div>
-          )}
         </>
       )}
     </section>

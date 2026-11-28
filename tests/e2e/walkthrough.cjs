@@ -209,7 +209,7 @@ const { chromium } = require('playwright');
     for (const [path, title] of [
       ['/faculty', 'Guide campus research and project work'],
       ['/mentorship', 'Make a useful connection around a project'],
-      ['/academics', 'Connect assignments to immutable project evidence'],
+      ['/academics', 'Course schedules and assignments'],
       ['/academics/pbl', 'Project-based learning'],
       ['/programs', 'Run a call from application to outcome'],
       ['/admin/academic-reviews', 'Review faculty and mentor access'],
@@ -733,7 +733,7 @@ const { chromium } = require('playwright');
     projectPage.on('pageerror', error => console.error(`Project detail browser error: ${error.message}`));
     projectPage.on('console', message => { if (message.type() === 'error') console.error(`Project detail console error: ${message.text()}`); });
     await projectPage.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: true, csrf_token: 'project-csrf', user: { display_name: 'Test Owner', college_id: 'campus-1', terms_accepted: true, privacy_accepted: true } } }) }));
-    await projectPage.route('**/api/v1/projects/imported-project/repository', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { repository: { id: 'binding-1', full_name: 'test-owner/imported-project', html_url: 'https://github.com/test-owner/imported-project', description: 'Synthetic repo', default_branch: 'main', topics: [], languages: {}, readme_markdown: '', access_state: 'active', sync_health: 'current', limitations: 'LFS and submodule content is not captured.' }, contributions: [{id:'commit-1',kind:'commit',canonical_id:'git:sha1:0123456789abcdef0123456789abcdef01234567',title:'Initial commit',summary:'Initial commit',author_name:'Test Owner',author_login:'test-owner'}, {id:'issue-19',kind:'issue',number:19,state:'open',title:'Example issue',summary:'Synchronized issue detail'}, {id:'pr-14',kind:'pull_request',number:14,state:'open',title:'Example pull request',summary:'Synchronized pull request detail'}], snapshots: [] } }) }));
+    await projectPage.route('**/api/v1/projects/imported-project/repository', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { repository: { id: 'binding-1', full_name: 'test-owner/imported-project', html_url: 'https://github.com/test-owner/imported-project', description: 'Synthetic repo', default_branch: 'main', topics: [], languages: {}, readme_markdown: '', access_state: 'active', sync_health: 'current', limitations: 'LFS and submodule contents are not rendered in file views.' }, contributions: [{id:'commit-1',kind:'commit',canonical_id:'git:sha1:0123456789abcdef0123456789abcdef01234567',title:'Initial commit',summary:'Initial commit',author_name:'Test Owner',author_login:'test-owner'}, {id:'issue-19',kind:'issue',number:19,state:'open',title:'Example issue',summary:'Synchronized issue detail'}, {id:'pr-14',kind:'pull_request',number:14,state:'open',title:'Example pull request',summary:'Synchronized pull request detail'}] } }) }));
     await projectPage.route('**/api/v1/projects/imported-project/repository/branches', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { default_branch:'main',items:[{name:'main',commit:{sha:'0123456789abcdef0123456789abcdef01234567'}}] } }) }));
     const fixtureSHA = '0123456789abcdef0123456789abcdef01234567';
     let treeRateLimited = true;
@@ -777,6 +777,7 @@ const { chromium } = require('playwright');
     const projectResponse = await projectPage.goto(`${baseURL}/projects/imported-project`);
     try { await projectPage.getByRole('heading', { name: 'Imported project' }).waitFor({ timeout: 5000 }); }
     catch { throw new Error(`Imported project page did not render (HTTP ${projectResponse?.status()}): ${await projectPage.locator('body').innerText()}`); }
+    assert.equal(await projectPage.getByRole('link', { name: 'Snapshots', exact: true }).count(), 0, 'ordinary GitHub projects must not expose a snapshots tab');
     await projectPage.getByRole('alert').filter({ hasText: 'GitHub rate limit reached' }).waitFor();
     await projectPage.getByRole('button', { name: 'Retry' }).click();
     await projectPage.getByRole('button', { name: 'README.md' }).click();

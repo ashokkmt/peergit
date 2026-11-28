@@ -12,7 +12,6 @@ import (
 	"peergit/internal/platform/audit"
 	"peergit/internal/platform/http/response"
 	"peergit/internal/platform/jobs"
-	"peergit/internal/platform/storage"
 )
 
 func (h *Handler) refreshGitHubInstallation(w http.ResponseWriter, r *http.Request) {
@@ -222,12 +221,12 @@ func bindingJobForProject(ctx context.Context, h *Handler, pid, tenant string) m
 	return map[string]string{"binding_id": id}
 }
 
-// CleanupExpiredGitHubImports removes expired project records only after their stored archives are deleted.
+// CleanupExpiredGitHubImports purges expired ordinary GitHub project records and synchronized activity.
 func CleanupExpiredGitHubImports(ctx context.Context, pool interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 	Begin(context.Context) (pgx.Tx, error)
-}, store *storage.Store) error {
-	rows, err := pool.Query(ctx, `SELECT p.id::text,p.college_id::text,p.github_revoke_owner::text FROM projects p WHERE p.github_revoke_deadline<=clock_timestamp() ORDER BY p.github_revoke_deadline LIMIT 50`)
+}) error {
+	rows, err := pool.Query(ctx, `SELECT p.id::text,p.college_id::text,p.github_revoke_owner::text FROM projects p WHERE p.project_context='ordinary' AND p.github_revoke_deadline<=clock_timestamp() ORDER BY p.github_revoke_deadline LIMIT 50`)
 	if err != nil {
 		return err
 	}
@@ -247,40 +246,11 @@ func CleanupExpiredGitHubImports(ctx context.Context, pool interface {
 		return err
 	}
 	for _, t := range targets {
-		keys, err := pool.Query(ctx, `SELECT object_key FROM repository_snapshots WHERE project_id=$1 AND college_id=$2 AND object_key IS NOT NULL`, t.id, t.tenant)
-		if err != nil {
-			return err
-		}
-		var objects []string
-		for keys.Next() {
-			var key string
-			if err = keys.Scan(&key); err != nil {
-				keys.Close()
-				return err
-			}
-			objects = append(objects, key)
-		}
-		err = keys.Err()
-		keys.Close()
-		if err != nil {
-			return err
-		}
-		for _, key := range objects {
-			if store == nil {
-				return errors.New("object storage is required to purge expired GitHub imports")
-			}
-			if err = store.Delete(ctx, key); err != nil {
-				return err
-			}
-		}
 		tx, err := pool.Begin(ctx)
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `DELETE FROM repository_snapshots WHERE project_id=$1 AND college_id=$2`, t.id, t.tenant)
-		if err == nil {
-			err = audit.Append(ctx, tx, audit.Entry{TenantID: t.tenant, ActorID: t.owner, Action: "github.project.import_retention_expired", ResourceType: "project", ResourceID: t.id})
-		}
+		err = audit.Append(ctx, tx, audit.Entry{TenantID: t.tenant, ActorID: t.owner, Action: "github.project.import_retention_expired", ResourceType: "project", ResourceID: t.id})
 		if err == nil {
 			_, err = tx.Exec(ctx, `DELETE FROM projects WHERE id=$1 AND college_id=$2 AND github_revoke_deadline<=clock_timestamp()`, t.id, t.tenant)
 		}

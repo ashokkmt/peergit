@@ -87,7 +87,7 @@ func run() error {
 		results <- (jobs.Queue{Pool: pool}).RunConcurrentTypes(workerCtx, workerName+"-email", jobHandlers, logger, 2, []string{"campus_verification_email"})
 	}()
 	go func() {
-		results <- (jobs.Queue{Pool: pool}).RunConcurrentTypes(workerCtx, workerName+"-general", jobHandlers, logger, 8, []string{"github_webhook", "github_reconcile", "github_overview", "snapshot"})
+		results <- (jobs.Queue{Pool: pool}).RunConcurrentTypes(workerCtx, workerName+"-general", jobHandlers, logger, 8, []string{"github_webhook", "github_reconcile", "github_overview"})
 	}()
 	go func() {
 		results <- (jobs.Queue{Pool: pool}).RunConcurrentTypes(workerCtx, workerName+"-notification-email", jobHandlers, logger, 1, []string{"notification_email"})
@@ -120,7 +120,7 @@ func run() error {
 					logger.ErrorContext(workerCtx, "PBL reconciliation schedule failed", "error", err)
 				}
 			}
-			if err := repository.CleanupExpiredGitHubImports(workerCtx, pool, objectStore); err != nil {
+			if err := repository.CleanupExpiredGitHubImports(workerCtx, pool); err != nil {
 				logger.ErrorContext(workerCtx, "expired GitHub import cleanup failed", "error", err)
 			}
 			select {

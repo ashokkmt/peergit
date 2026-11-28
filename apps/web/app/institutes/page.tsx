@@ -14,8 +14,8 @@ const workflowCards = [
   ],
   [
     "3 · Review evidence",
-    "Exact-SHA receipts",
-    "Inspect authorized snapshots with coverage and freshness labels.",
+    "PBL checkpoint receipts",
+    "Inspect authorized PBL snapshots with coverage and freshness labels.",
   ],
   [
     "4 · Share outcomes",
@@ -65,7 +65,7 @@ export default function InstitutesPage() {
           </h1>
           <p className="text-base leading-6 text-muted m-0">
             Colleges operate a separate workspace scoped strictly to their tenant. PeerGit surfaces
-            verifiable snapshots and coverage gaps without productivity scores or automatic grades.
+            PBL checkpoint evidence and coverage gaps without productivity scores or automatic grades.
           </p>
           <div className="pt-1.5">
             <a
@@ -123,8 +123,8 @@ export default function InstitutesPage() {
           </div>
           <p className="text-[13px] leading-[19px] text-muted m-0">
             Signals support a conversation; they do not grade a student. Authorized reviewers
-            consider off-platform work and context alongside recorded commits, reviews, and
-            snapshots.
+            consider off-platform work and context alongside current GitHub activity and PBL
+            checkpoint snapshots.
           </p>
         </section>
       </main>

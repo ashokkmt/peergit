@@ -109,9 +109,9 @@ func (h *Handler) submitPBLCheckpoint(w http.ResponseWriter, r *http.Request) {
 	}
 	key := "pbl:" + team + ":" + strconv.Itoa(stage)
 	hash := sha256.Sum256([]byte(key + ":" + in.SHA))
-	err = tx.QueryRow(ctx, `INSERT INTO repository_snapshots(college_id,project_id,repository_id,binding_id,requested_by,idempotency_key,request_hash,
+	err = tx.QueryRow(ctx, `INSERT INTO repository_snapshots(college_id,team_id,project_id,repository_id,binding_id,requested_by,idempotency_key,request_hash,
 		requested_ref,commit_sha,receipt_at,membership_snapshot)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$8,clock_timestamp(),
+		VALUES($1,$9,$2,$3,$4,$5,$6,$7,$8,$8,clock_timestamp(),
 		(SELECT jsonb_agg(jsonb_build_object('user_id',m.user_id) ORDER BY m.user_id) FROM pbl_active_team_members m WHERE m.team_id=$9))
 		RETURNING id::text,receipt_at`, s.CollegeID, project, repository, binding, s.UserID, key, hash[:], in.SHA, team).Scan(&id, &receipt)
 	if err == nil {

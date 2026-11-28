@@ -179,7 +179,7 @@ func (h *Handler) buildCSV(r *http.Request, kind, callID, cohortID, collegeID st
 	if kind == "call" {
 		rows, err = h.pool.Query(r.Context(), `SELECT p.slug,a.state,COALESCE(u.display_name,''),to_char(a.submitted_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') FROM academic_call_applications a JOIN projects p ON p.id=a.project_id AND p.college_id=a.college_id JOIN users u ON u.id=a.applicant_id WHERE a.call_id=$1 AND a.college_id=$2 ORDER BY a.submitted_at,a.id LIMIT 500`, callID, collegeID)
 	} else {
-		rows, err = h.pool.Query(r.Context(), `SELECT p.slug,o.summary,o.result,COALESCE(s.snapshot_id::text,'') FROM academic_program_outcomes o JOIN projects p ON p.id=o.project_id AND p.college_id=o.college_id LEFT JOIN academic_submissions s ON s.id=o.evidence_submission_id AND s.college_id=o.college_id WHERE o.cohort_id=$1 AND o.college_id=$2 ORDER BY p.slug LIMIT 500`, cohortID, collegeID)
+		rows, err = h.pool.Query(r.Context(), `SELECT p.slug,o.summary,o.result,to_char(o.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') FROM academic_program_outcomes o JOIN projects p ON p.id=o.project_id AND p.college_id=o.college_id WHERE o.cohort_id=$1 AND o.college_id=$2 ORDER BY p.slug LIMIT 500`, cohortID, collegeID)
 	}
 	if err != nil {
 		return nil, err
@@ -190,7 +190,7 @@ func (h *Handler) buildCSV(r *http.Request, kind, callID, cohortID, collegeID st
 	if kind == "call" {
 		_ = writer.Write([]string{"project_slug", "application_state", "applicant_name", "submitted_at"})
 	} else {
-		_ = writer.Write([]string{"project_slug", "outcome_summary", "result", "submission_id"})
+		_ = writer.Write([]string{"project_slug", "outcome_summary", "result", "updated_at"})
 	}
 	for rows.Next() {
 		var a, b, c string

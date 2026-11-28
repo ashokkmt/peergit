@@ -22,7 +22,7 @@ go run ./cmd/api
 go run ./cmd/worker
 ```
 
-The worker processes verification email, GitHub evidence, snapshots and configured PBL Git work. Inspect dead jobs with `go run ./cmd/jobctl`.
+The worker processes verification email, current GitHub activity sync, PBL checkpoint snapshots and configured PBL Git work. Ordinary GitHub projects do not create snapshot jobs or archive objects. Inspect dead jobs with `go run ./cmd/jobctl`.
 
 ```powershell
 npm --prefix apps/web ci
@@ -41,7 +41,7 @@ Stop containers without deleting local database, object, or Caddy data:
 docker compose -f deploy/compose/local.yml --profile tools --profile pbl down
 ```
 
-The [run guide](../plans/peergit-run.md#9-stop-inspect-and-reset) documents exactly which volumes a disposable reset removes. PBL recovery pairs database, Forgejo, and snapshot data.
+The [run guide](../plans/peergit-run.md#9-stop-inspect-and-reset) documents exactly which volumes a disposable reset removes. PBL recovery pairs database, Forgejo, and PBL checkpoint snapshot data; ordinary GitHub activity is fetched again from its upstream after restore.
 
 ## Services
 

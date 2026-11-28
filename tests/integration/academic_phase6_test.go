@@ -33,6 +33,15 @@ func TestPhase6MentorshipCapacityAndRevocation(t *testing.T) {
 	if err := migrations.Apply(ctx, pool, migrations.Files); err != nil {
 		t.Fatal(err)
 	}
+	var retiredAcademicSchema int
+	if err := pool.QueryRow(ctx, `SELECT
+		(SELECT count(*) FROM information_schema.tables WHERE table_schema=current_schema() AND table_name IN ('academic_submissions','academic_evaluations','academic_assignment_evaluators'))+
+		+ (SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='academic_program_outcomes' AND column_name='evidence_submission_id')`).Scan(&retiredAcademicSchema); err != nil {
+		t.Fatal(err)
+	}
+	if retiredAcademicSchema != 0 {
+		t.Fatalf("obsolete non-PBL snapshot submission schema remains: %d objects", retiredAcademicSchema)
+	}
 	stamp := fmt.Sprintf("%d", time.Now().UnixNano())
 	var college string
 	if err := pool.QueryRow(ctx, `INSERT INTO colleges(slug,name) VALUES($1,$2) RETURNING id::text`, "phase6-"+stamp, "Phase 6 Test Campus").Scan(&college); err != nil {
@@ -262,38 +271,16 @@ func TestPhase6MentorshipCapacityAndRevocation(t *testing.T) {
 		t.Fatalf("course enrollment status=%d body=%s", enrollment.Code, enrollment.Body.String())
 	}
 	assignment := do("admin", http.MethodPost, "/academic/cohorts/"+cohortID+"/assignments", map[string]any{
-		"title":       "Snapshot checkpoint",
-		"brief":       "Submit the exact repository snapshot used for review.",
-		"due_at":      time.Now().Add(24 * time.Hour).UTC(),
-		"late_policy": "accept",
+		"title":  "Course assignment",
+		"brief":  "An assignment brief without Git snapshot submissions.",
+		"due_at": time.Now().Add(24 * time.Hour).UTC(),
 	})
 	assignmentID := phase6ResponseID(t, assignment)
-
-	var installationID, repositoryID, snapshotID string
-	externalID := time.Now().UnixNano() % 1000000000000
-	if err := pool.QueryRow(ctx, `INSERT INTO github_installations(college_id,external_installation_id,account_external_id,account_login,target_type,repository_selection,permissions,status,added_by) VALUES($1,$2,$3,'phase6-fixture','User','selected','{"contents":"read"}','active',$4) RETURNING id::text`, college, externalID, externalID+1000, users["student"]).Scan(&installationID); err != nil {
-		t.Fatal(err)
+	if submission := do("student", http.MethodPost, "/academic/assignments/"+assignmentID+"/submissions", map[string]string{"project_id": projectIDs[0]}); submission.Code != http.StatusNotFound {
+		t.Fatalf("non-PBL submission route status=%d body=%s", submission.Code, submission.Body.String())
 	}
-	if err := pool.QueryRow(ctx, `INSERT INTO repositories(college_id,project_id,created_by) VALUES($1,$2,$3) RETURNING id::text`, college, projectIDs[0], users["student"]).Scan(&repositoryID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO repository_bindings(college_id,repository_id,installation_id,external_repository_id,owner_login,repository_name,default_branch,visibility,access_state,linked_by) VALUES($1,$2,$3,$4,'phase6-fixture','submission','main','private','active',$5)`, college, repositoryID, installationID, externalID+2000, users["student"]); err != nil {
-		t.Fatal(err)
-	}
-	if err := pool.QueryRow(ctx, `INSERT INTO repository_snapshots(college_id,project_id,repository_id,binding_id,requested_by,idempotency_key,request_hash,requested_ref,commit_sha,membership_snapshot) SELECT $1,$2,$3,b.id,$4,$5,decode(repeat('11',32),'hex'),'main',repeat('b',40),'[]'::jsonb FROM repository_bindings b WHERE b.repository_id=$3 RETURNING id::text`, college, projectIDs[0], repositoryID, users["student"], "phase6-"+stamp).Scan(&snapshotID); err != nil {
-		t.Fatal(err)
-	}
-	submission := do("student", http.MethodPost, "/academic/assignments/"+assignmentID+"/submissions", map[string]string{
-		"project_id":  projectIDs[0],
-		"snapshot_id": snapshotID,
-	})
-	submissionID := phase6ResponseID(t, submission)
-	evaluation := do("admin", http.MethodPost, "/academic/submissions/"+submissionID+"/evaluation", map[string]string{
-		"outcome":  "revise",
-		"feedback": "Add one more test for the route handler.",
-	})
-	if evaluation.Code != http.StatusNoContent {
-		t.Fatalf("snapshot-linked evaluation status=%d body=%s", evaluation.Code, evaluation.Body.String())
+	if evaluation := do("admin", http.MethodPost, "/academic/submissions/00000000-0000-7000-8000-000000000000/evaluation", map[string]string{"outcome": "revise"}); evaluation.Code != http.StatusNotFound {
+		t.Fatalf("non-PBL evaluation route status=%d body=%s", evaluation.Code, evaluation.Body.String())
 	}
 
 	programProject := fmt.Sprintf("phase6-program-%s", stamp)

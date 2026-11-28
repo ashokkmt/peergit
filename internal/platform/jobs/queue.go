@@ -29,8 +29,8 @@ type Claim struct {
 	Payload             json.RawMessage
 }
 
-func (q Queue) Enqueue(ctx context.Context, tenant, actor, key, hash string) (string, error) {
-	return q.EnqueueJob(ctx, tenant, actor, "snapshot", key, hash, "snapshot", json.RawMessage(`{}`))
+func (q Queue) EnqueueProof(ctx context.Context, tenant, actor, key, hash string) (string, error) {
+	return q.EnqueueJob(ctx, tenant, actor, "proof", key, hash, "proof", json.RawMessage(`{}`))
 }
 
 // EnqueueJob preserves the original queue API; new request handlers should use

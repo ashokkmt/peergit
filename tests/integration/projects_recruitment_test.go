@@ -216,24 +216,11 @@ func TestPhase3ProjectRecruitmentAndOwnershipFlows(t *testing.T) {
 		t.Fatalf("authorized repository projection omitted the observed issue or access status: %s", repositoryView.Body.String())
 	}
 	call("applicant", http.MethodGet, repositoryPath, "", http.StatusNotFound)
-	var snapshotID string
-	if err := pool.QueryRow(ctx, `
-		INSERT INTO repository_snapshots(college_id,project_id,repository_id,binding_id,requested_by,idempotency_key,request_hash,requested_ref,commit_sha,membership_snapshot,state,object_key,archive_bytes,archive_sha256,verified_at)
-		SELECT r.college_id,r.project_id,r.id,b.id,$2,'sample-download',decode(repeat('00',32),'hex'),'main',repeat('a',40),'[]','verified','example.tar.gz',21,repeat('b',64),now()
-		FROM repositories r JOIN repository_bindings b ON b.repository_id=r.id AND b.college_id=r.college_id AND b.is_current
-		WHERE r.project_id=$1 RETURNING id::text`, publicProjectID, users["lead"]).Scan(&snapshotID); err != nil {
-		t.Fatal(err)
-	}
-	downloadPath := repositoryPath + "/snapshots/" + snapshotID + "/download"
-	download := call("lead", http.MethodGet, downloadPath, "", http.StatusOK)
-	if download.Body.String() != "fixture archive bytes" || !strings.Contains(download.Header().Get("Content-Disposition"), "peergit-aaaaaaaaaaaa.tar.gz") {
-		t.Fatalf("unexpected snapshot download: %s", download.Body.String())
-	}
-	call("applicant", http.MethodGet, downloadPath, "", http.StatusNotFound)
+	call("lead", http.MethodPost, repositoryPath+"/snapshots", `{}`, http.StatusNotFound)
+	call("lead", http.MethodGet, repositoryPath+"/snapshots/00000000-0000-7000-8000-000000000000/download", "", http.StatusNotFound)
 	if _, err := pool.Exec(ctx, `UPDATE repository_bindings SET access_state='permission_lost' WHERE external_repository_id=930003 AND college_id=$1`, college); err != nil {
 		t.Fatal(err)
 	}
-	call("lead", http.MethodGet, downloadPath, "", http.StatusNotFound)
 	deniedSource := call("lead", http.MethodGet, repositoryPath, "", http.StatusOK)
 	if strings.Contains(deniedSource.Body.String(), "Example observed issue") || !strings.Contains(deniedSource.Body.String(), `"source_access":false`) {
 		t.Fatalf("repository without source access exposed evidence: %s", deniedSource.Body.String())

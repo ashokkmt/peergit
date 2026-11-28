@@ -267,7 +267,7 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
           ? "Project made private."
           : `Project published to ${
               visibility === "campus" ? "your campus" : "the public discovery page"
-            }. GitHub source files and private snapshots keep their existing access rules.`;
+            }. This does not change the repository's GitHub access rules.`;
       const result = await mutate(
         `/api/v1/projects/${projectID}`,
         {
@@ -516,15 +516,6 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                 >
                   Open roles
                 </a>
-                {details.viewer_role && hasRepository && (
-                  <a
-                    className={tabLinkClass}
-                    href={`/projects/${projectID}?tab=snapshots`}
-                    aria-current={tab === "snapshots" ? "page" : undefined}
-                  >
-                    Snapshots
-                  </a>
-                )}
                 <a className={tabLinkClass} href={`/projects/${projectID}/work`}>
                   Project work
                 </a>
@@ -578,7 +569,6 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
               "issues",
               "pull-requests",
               "security",
-              "snapshots",
               "settings",
             ].includes(tab) &&
               (!details.viewer_role || (tab === "settings" && !manager)) && (
@@ -606,7 +596,7 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
               />
             )}
 
-            {["activity", "issues", "pull-requests", "security", "snapshots"].includes(tab) &&
+            {["activity", "issues", "pull-requests", "security"].includes(tab) &&
               details.viewer_role &&
               hasRepository && (
                 <RepositoryOverview
@@ -686,8 +676,7 @@ export function ProjectDetail({ projectID }: { projectID: string }) {
                     </h3>
                     <p className="text-[13px] leading-[19px] text-muted m-0">
                       Project publication shares its PeerGit presentation. GitHub visibility does
-                      not change, and private source, evidence, and snapshots remain restricted to
-                      project members.
+                      not change, and GitHub source access remains governed by GitHub.
                     </p>
                     <div className="flex flex-wrap gap-2.5 items-center">
                       {hasRepository && details.project.lifecycle !== "archived" && (

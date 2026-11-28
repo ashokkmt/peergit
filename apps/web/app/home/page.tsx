@@ -23,7 +23,7 @@ const actionItems = [
   },
   {
     title: "Courses & PBL",
-    description: "Review academic assignments and link a repository snapshot to a course deliverable.",
+    description: "Review academic assignments and manage PBL checkpoint evidence.",
     href: "/academics",
     cta: "Open academic work →",
   },

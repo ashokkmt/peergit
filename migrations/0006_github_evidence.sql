@@ -67,6 +67,7 @@ CREATE TABLE repository_bindings (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (id,repository_id,college_id),
+    UNIQUE (id,repository_id,college_id,provider),
     FOREIGN KEY (repository_id,college_id,project_context) REFERENCES repositories(id,college_id,project_context) ON DELETE CASCADE,
     FOREIGN KEY (installation_id,college_id) REFERENCES github_installations(id,college_id) ON DELETE CASCADE,
     FOREIGN KEY (linked_by,college_id) REFERENCES users(id,college_id),
@@ -148,9 +149,11 @@ CREATE INDEX contribution_observations_recent_idx ON contribution_observations(c
 CREATE TABLE repository_snapshots (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     college_id uuid NOT NULL,
+    team_id uuid NOT NULL,
     project_id uuid NOT NULL,
     repository_id uuid NOT NULL,
     binding_id uuid NOT NULL,
+    binding_provider text NOT NULL DEFAULT 'forgejo' CHECK (binding_provider='forgejo'),
     requested_by uuid NOT NULL,
     idempotency_key text NOT NULL CHECK (length(idempotency_key) BETWEEN 1 AND 200),
     request_hash bytea NOT NULL CHECK (octet_length(request_hash)=32),
@@ -172,15 +175,13 @@ CREATE TABLE repository_snapshots (
     UNIQUE (college_id,requested_by,idempotency_key),
     UNIQUE (id,college_id),
     UNIQUE (id,project_id,college_id),
+    UNIQUE (id,team_id,project_id,college_id),
     FOREIGN KEY (project_id,college_id) REFERENCES projects(id,college_id) ON DELETE CASCADE,
     FOREIGN KEY (repository_id,college_id) REFERENCES repositories(id,college_id) ON DELETE CASCADE,
-    FOREIGN KEY (binding_id,repository_id,college_id) REFERENCES repository_bindings(id,repository_id,college_id) ON DELETE RESTRICT,
+    FOREIGN KEY (binding_id,repository_id,college_id,binding_provider) REFERENCES repository_bindings(id,repository_id,college_id,provider) ON DELETE RESTRICT,
     FOREIGN KEY (requested_by,college_id) REFERENCES users(id,college_id),
     CHECK ((state='verified')=(object_key IS NOT NULL AND archive_bytes IS NOT NULL AND archive_sha256 IS NOT NULL AND verified_at IS NOT NULL))
 );
-CREATE INDEX repository_snapshots_project_idx ON repository_snapshots(college_id,project_id,created_at DESC,id DESC);
-CREATE INDEX repository_snapshots_binding_sha_idx ON repository_snapshots(binding_id,commit_sha,created_at DESC);
-
 CREATE FUNCTION touch_updated_at() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     NEW.updated_at=clock_timestamp();

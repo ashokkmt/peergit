@@ -15,9 +15,9 @@ const pillars = [
     example: "Example: PR #14 on feature/route-alerts linked to Milestone 2.",
   },
   {
-    title: "Share milestones and submitted work when you choose.",
-    body: "Capture immutable repository snapshots pinned to an exact 40-character SHA with separate project publication controls.",
-    example: "Example: Receipt rec_84f19a verified at exact commit 7c1a9de.",
+    title: "Discover campus work and learn together.",
+    body: "Share ordinary project cards and collaborate through GitHub. PBL teams submit PeerGit checkpoints for faculty review.",
+    example: "Example: A PBL checkpoint is pinned to the exact pushed commit.",
   },
 ] as const;
 
@@ -30,7 +30,7 @@ const workflowSteps = [
   [
     "Step 2",
     "Start or join a project",
-    "Import a selected GitHub repository as a private draft or apply to an open campus role.",
+    "Link a GitHub project to PeerGit or join an open campus role.",
   ],
   [
     "Step 3",
@@ -40,7 +40,7 @@ const workflowSteps = [
   [
     "Step 4",
     "Share the outcome",
-    "Capture a verifiable snapshot receipt and publish your project card when ready.",
+    "Publish your project card when ready; PBL teams submit checkpoints in their course workspace.",
   ],
 ] as const;
 
@@ -194,8 +194,8 @@ export default function Home() {
                 How Campus Shuttle Tracker moves from idea to record
               </h2>
               <p className="text-base leading-6 text-muted mt-2.5 mb-0">
-                GitHub import is the live creation route. Students keep their Git remote while
-                PeerGit records authorized evidence.
+                GitHub remains the remote for ordinary projects. PeerGit records current activity
+                for discovery; immutable code receipts are limited to PBL checkpoints.
               </p>
             </div>
 
@@ -233,7 +233,7 @@ export default function Home() {
               <div className="bg-canvas border border-hairline rounded-xl p-5 flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-medium leading-4 text-muted m-0">
-                    Immutable snapshot receipt
+                    PBL checkpoint receipt
                   </p>
                   <p className="text-base font-semibold leading-[22px] mt-1 mb-0">
                     Demo build rec_84f19a
@@ -312,7 +312,7 @@ export default function Home() {
                   </strong>
                 </div>
                 <div className="min-w-0 max-w-full bg-surface border border-hairline rounded-xl p-4">
-                  <span className="block text-muted text-xs font-medium">Snapshots verified</span>
+                  <span className="block text-muted text-xs font-medium">PBL checkpoints verified</span>
                   <strong className="block font-display text-[32px] leading-[38px] font-semibold mt-1 tabular-nums">
                     14
                   </strong>
@@ -338,9 +338,8 @@ export default function Home() {
                 </h2>
                 <p className="text-sm leading-[21px] text-muted m-0">
                   Goal: Publish live campus shuttle arrival boards across 4 stops. Outcome: Deployed
-                  to 1,200 daily riders with verified snapshot{" "}
-                  <code className="font-mono text-[13px] leading-[19px]">rec_84f19a</code> and full
-                  commit attribution.
+                  to 1,200 daily riders. Students can share this ordinary GitHub project on their
+                  campus profile; PBL checkpoints are reviewed separately by faculty.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2.5 lg:justify-end">
