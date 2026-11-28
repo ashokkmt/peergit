@@ -11,6 +11,7 @@ const windows = process.platform === 'win32';
 const npm = windows ? 'npm.cmd' : 'npm';
 const npmCLI = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
 const composeFile = 'deploy/compose/local.yml';
+const compose = ['compose', '-p', 'peergit-test-' + process.pid, '-f', composeFile, '--profile', 'pbl'];
 const localDatabase = 'postgres://peergit:local-development-only@127.0.0.1:5432/peergit?sslmode=disable';
 const env = { ...process.env, CI: 'true', API_ORIGIN: 'http://127.0.0.1:8080', API_PROXY_ORIGIN: 'http://127.0.0.1:8080', DATABASE_URL: localDatabase, TEST_DATABASE_URL: localDatabase };
 const temporary = mkdtempSync(join(tmpdir(), 'peergit-test-'));
@@ -23,8 +24,7 @@ const workerBinary = join(root, `.peergit-worker-${process.pid}${windows ? '.exe
 let webProcess;
 let apiProcess;
 let workerProcess;
-let composeServicesBefore = [];
-let composeStateCaptured = false;
+let composeStarted = false;
 
 function display(command, args) {
   return [command, ...args].join(' ');
@@ -223,7 +223,7 @@ function assertTestPortFree(url) {
 
 async function startTestAPIAndWorker() {
   assertTestPortFree('http://127.0.0.1:8080/healthz');
-  await run('docker', ['compose', '-f', composeFile, 'exec', '-T', 'postgres', 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'peergit', '-d', 'peergit', '-c', "INSERT INTO colleges(slug,name) VALUES('local-campus','Local Test Campus') ON CONFLICT(slug) DO NOTHING; INSERT INTO college_domains(college_id,domain,verified_at) SELECT id,'local.edu',now() FROM colleges WHERE slug='local-campus' ON CONFLICT(college_id,domain) DO UPDATE SET verified_at=COALESCE(college_domains.verified_at,EXCLUDED.verified_at);"]);
+  await run('docker', [...compose, 'exec', '-T', 'postgres', 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'peergit', '-d', 'peergit', '-c', "INSERT INTO colleges(slug,name) VALUES('local-campus','Local Test Campus') ON CONFLICT(slug) DO NOTHING; INSERT INTO college_domains(college_id,domain,verified_at) SELECT id,'local.edu',now() FROM colleges WHERE slug='local-campus' ON CONFLICT(college_id,domain) DO UPDATE SET verified_at=COALESCE(college_domains.verified_at,EXCLUDED.verified_at);"]);
   await run('go', ['build', '-o', apiBinary, './cmd/api']);
   await run('go', ['build', '-o', workerBinary, './cmd/worker']);
   const childEnv = testApplicationEnv();
@@ -233,15 +233,7 @@ async function startTestAPIAndWorker() {
 }
 
 async function cleanupCompose() {
-  if (!composeStateCaptured) return;
-  const now = capture('docker', ['compose', '-f', composeFile, 'ps', '--services', '--status', 'running']);
-  const initial = new Set(composeServicesBefore);
-  const startedHere = now.split(/\r?\n/).filter((service) => service && !initial.has(service));
-  if (process.env.CI && composeServicesBefore.length === 0) {
-    await run('docker', ['compose', '-f', composeFile, 'down']);
-  } else if (startedHere.length > 0) {
-    await run('docker', ['compose', '-f', composeFile, 'stop', ...startedHere]);
-  }
+  if (composeStarted) await run('docker', [...compose, 'down', '--volumes']);
 }
 
 let webLog;
@@ -254,10 +246,18 @@ try {
   if (unformatted) throw new Error(`Go files need formatting:\n${unformatted}`);
 
   await staticcheckPath();
-  composeServicesBefore = capture('docker', ['compose', '-f', composeFile, 'ps', '--services', '--status', 'running'])
-    .split(/\r?\n/).filter(Boolean);
-  composeStateCaptured = true;
-  await run('docker', ['compose', '-f', composeFile, 'up', '-d', '--wait']);
+  const existing = capture('docker', ['volume', 'ls', '--filter', 'label=com.docker.compose.project=peergit-test-' + process.pid, '--format', '{{.Name}}']);
+  if (existing || capture('docker', [...compose, 'ps', '--all', '--quiet'])) throw new Error('The disposable test project name is already in use.');
+  composeStarted = true;
+  await run('docker', [...compose, 'up', '-d', '--wait', 'postgres', 'objects', 'mailpit', 'forgejo']);
+  const forge = [...compose, 'exec', '-T', 'forgejo', 'forgejo', 'admin', 'user'];
+  env.TEST_PBL_FORGE_URL = 'http://127.0.0.1:' + (env.PEERGIT_FORGEJO_PORT || '3031');
+  env.TEST_PBL_FORGE_OWNER = 'phase6afixture';
+  await run('docker', [...forge, 'create', '--admin', '--random-password', '--must-change-password=false',
+    '--username', env.TEST_PBL_FORGE_OWNER, '--email', 'phase6afixture@fixtures.test'], { capture: true });
+  env.TEST_PBL_FORGE_TOKEN = await run('docker', [...forge, 'generate-access-token', '--raw', '--username',
+    env.TEST_PBL_FORGE_OWNER, '--token-name', 'test-fixture', '--scopes', 'all'], { capture: true });
+  if (!/^[a-f0-9]{40}$/.test(env.TEST_PBL_FORGE_TOKEN)) throw new Error('Forgejo did not issue the fixture token.');
 
   if (windows) {
     // Some Windows Application Control policies block Go's %TEMP% go-run executable.
@@ -273,7 +273,7 @@ try {
   const webDirectory = join(root, 'apps', 'web');
   await installNodePackages(webDirectory);
   await run(npm, ['run', 'typecheck'], { cwd: webDirectory });
-  await run(npm, ['run', 'build'], { cwd: webDirectory });
+  await run(npm, ['run', 'build', ...(windows ? ['--', '--webpack'] : [])], { cwd: webDirectory });
 
   const e2eDirectory = join(root, 'tests', 'e2e');
   await installNodePackages(e2eDirectory);
@@ -294,7 +294,7 @@ try {
   webLog = startWeb();
   await waitForWeb();
   await run(npm, ['test'], { cwd: e2eDirectory });
-  await run('docker', ['compose', '-f', composeFile, 'config', '--quiet']);
+  await run('docker', [...compose, 'config', '--quiet']);
   await run('git', ['diff', '--check']);
   console.log('\nAll PeerGit checks passed.');
 } catch (error) {

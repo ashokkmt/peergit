@@ -58,7 +58,7 @@ export default function CampusReportsPage() {
               <tr className="border-b border-hairline">
                 <td className="py-3 px-3.5 align-top text-sm font-medium">Example student</td>
                 <td className="py-3 px-3.5 align-top text-sm">Campus Shuttle Tracker</td>
-                <td className="py-3 px-3.5 align-top text-sm">Commits, PR reviews, snapshots</td>
+                <td className="py-3 px-3.5 align-top text-sm">Commits, PR reviews, PBL checkpoints</td>
                 <td className="py-3 px-3.5 align-top text-sm text-muted">2 hours ago (sample)</td>
               </tr>
               <tr>

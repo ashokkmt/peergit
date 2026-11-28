@@ -53,10 +53,6 @@ func (h *Handler) Register(r chi.Router) {
 		api.With(h.auth.RequireCSRF).Post("/academic/cohorts/{id}/enrollments", h.enrollStudent)
 		api.With(h.auth.RequireCSRF).Post("/academic/cohorts/{id}/assignments", h.createAssignment)
 		api.Get("/academic/assignments", h.listAssignments)
-		api.Get("/academic/assignments/{id}/submissions", h.listSubmissions)
-		api.With(h.auth.RequireCSRF).Post("/academic/assignments/{id}/evaluators", h.assignEvaluator)
-		api.With(h.auth.RequireCSRF).Post("/academic/assignments/{id}/submissions", h.submitSnapshot)
-		api.With(h.auth.RequireCSRF).Post("/academic/submissions/{id}/evaluation", h.evaluateSubmission)
 		api.With(h.auth.RequireCSRF).Post("/academic/projects/{id}/endorsements", h.endorseProject)
 		api.Get("/academic/projects/{id}/endorsements", h.listEndorsements)
 		api.With(h.auth.RequireCSRF).Post("/academic/endorsements/{id}/revoke", h.revokeEndorsement)
@@ -76,6 +72,7 @@ func (h *Handler) Register(r chi.Router) {
 		api.Get("/academic/exports/{id}", h.downloadExport)
 		api.Get("/academic/digest", h.academicDigest)
 		api.With(h.auth.RequireCSRF).Put("/me/academic-digest-preferences", h.saveDigestPreferences)
+		h.registerPBL(api)
 	})
 }
 

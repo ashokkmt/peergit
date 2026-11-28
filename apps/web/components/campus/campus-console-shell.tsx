@@ -9,6 +9,7 @@ const consoleLinks = [
   ["/admin/campus-reviews", "Verification"],
   ["/admin/academic-reviews", "Faculty & mentor access"],
   ["/faculty", "Academic workspace"],
+  ["/academics/pbl", "PBL teams and audit"],
   ["/campus/reports", "Cohorts & reports"],
   ["/preview", "Design previews"],
 ] as const;

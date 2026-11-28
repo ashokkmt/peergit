@@ -192,10 +192,25 @@ const { chromium } = require('playwright');
         },
       },
     }));
+    await phase6.route('**/api/v1/academic/pbl', route => route.fulfill({ json: {
+      data: {
+        coordinator: false,
+        offerings: [{ id: 'offering', course: 'Databases', course_code: 'DBMS', term: 'Term 1', closes_at: '2099-12-01', eligible: true }],
+        teams: [{ id: 'fixture-team', offering_id: 'offering', title: 'Coursework team', confirmed: true, is_leader: true, can_review: false,
+          faculty_name: 'Fixture instructor', idea: '', idea_state: 'draft', idea_feedback: '', attendance: [], checkpoints: [], members: [] }],
+      },
+    } }));
+    await phase6.route('**/api/v1/academic/pbl/teams/fixture-team/repository', route => route.fulfill({ json: {
+      data: { state: 'ready', mode: 'empty', can_provision: true, can_git: true, storage_limit_kib: 256000, clone_url: baseURL + '/api/v1/pbl/git/fixture-team.git' },
+    } }));
+    await phase6.route('**/api/v1/academic/pbl/teams/fixture-team/work', route => route.fulfill({ json: {
+      data: { issues: [], pulls: [], members: {}, labels: [] },
+    } }));
     for (const [path, title] of [
       ['/faculty', 'Guide campus research and project work'],
       ['/mentorship', 'Make a useful connection around a project'],
-      ['/academics', 'Connect assignments to immutable project evidence'],
+      ['/academics', 'Course schedules and assignments'],
+      ['/academics/pbl', 'Project-based learning'],
       ['/programs', 'Run a call from application to outcome'],
       ['/admin/academic-reviews', 'Review faculty and mentor access'],
     ]) {
@@ -213,6 +228,14 @@ const { chromium } = require('playwright');
       await phase6.waitForFunction(
         () => document.documentElement.getAttribute('data-resolved-theme') === 'dark',
       );
+    }
+    await phase6.goto(baseURL + '/academics/pbl');
+    await phase6.getByLabel('PeerGit clone URL').waitFor();
+    await phase6.getByRole('button', { name: 'Issues', exact: true }).click();
+    await phase6.getByLabel('Issue title').waitFor();
+    for (const width of [320, 390, 1440]) {
+      await phase6.setViewportSize({ width, height: 780 });
+      assert(await phase6.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `PBL work overflows at ${width}px`);
     }
     await phase6.close();
 
@@ -710,7 +733,7 @@ const { chromium } = require('playwright');
     projectPage.on('pageerror', error => console.error(`Project detail browser error: ${error.message}`));
     projectPage.on('console', message => { if (message.type() === 'error') console.error(`Project detail console error: ${message.text()}`); });
     await projectPage.route('**/api/v1/session', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { authenticated: true, csrf_token: 'project-csrf', user: { display_name: 'Test Owner', college_id: 'campus-1', terms_accepted: true, privacy_accepted: true } } }) }));
-    await projectPage.route('**/api/v1/projects/imported-project/repository', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { repository: { id: 'binding-1', full_name: 'test-owner/imported-project', html_url: 'https://github.com/test-owner/imported-project', description: 'Synthetic repo', default_branch: 'main', topics: [], languages: {}, readme_markdown: '', access_state: 'active', sync_health: 'current', limitations: 'LFS and submodule content is not captured.' }, contributions: [{id:'commit-1',kind:'commit',canonical_id:'git:sha1:0123456789abcdef0123456789abcdef01234567',title:'Initial commit',summary:'Initial commit',author_name:'Test Owner',author_login:'test-owner'}, {id:'issue-19',kind:'issue',number:19,state:'open',title:'Example issue',summary:'Synchronized issue detail'}, {id:'pr-14',kind:'pull_request',number:14,state:'open',title:'Example pull request',summary:'Synchronized pull request detail'}], snapshots: [] } }) }));
+    await projectPage.route('**/api/v1/projects/imported-project/repository', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { repository: { id: 'binding-1', full_name: 'test-owner/imported-project', html_url: 'https://github.com/test-owner/imported-project', description: 'Synthetic repo', default_branch: 'main', topics: [], languages: {}, readme_markdown: '', access_state: 'active', sync_health: 'current', limitations: 'LFS and submodule contents are not rendered in file views.' }, contributions: [{id:'commit-1',kind:'commit',canonical_id:'git:sha1:0123456789abcdef0123456789abcdef01234567',title:'Initial commit',summary:'Initial commit',author_name:'Test Owner',author_login:'test-owner'}, {id:'issue-19',kind:'issue',number:19,state:'open',title:'Example issue',summary:'Synchronized issue detail'}, {id:'pr-14',kind:'pull_request',number:14,state:'open',title:'Example pull request',summary:'Synchronized pull request detail'}] } }) }));
     await projectPage.route('**/api/v1/projects/imported-project/repository/branches', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { default_branch:'main',items:[{name:'main',commit:{sha:'0123456789abcdef0123456789abcdef01234567'}}] } }) }));
     const fixtureSHA = '0123456789abcdef0123456789abcdef01234567';
     let treeRateLimited = true;
@@ -754,6 +777,7 @@ const { chromium } = require('playwright');
     const projectResponse = await projectPage.goto(`${baseURL}/projects/imported-project`);
     try { await projectPage.getByRole('heading', { name: 'Imported project' }).waitFor({ timeout: 5000 }); }
     catch { throw new Error(`Imported project page did not render (HTTP ${projectResponse?.status()}): ${await projectPage.locator('body').innerText()}`); }
+    assert.equal(await projectPage.getByRole('link', { name: 'Snapshots', exact: true }).count(), 0, 'ordinary GitHub projects must not expose a snapshots tab');
     await projectPage.getByRole('alert').filter({ hasText: 'GitHub rate limit reached' }).waitFor();
     await projectPage.getByRole('button', { name: 'Retry' }).click();
     await projectPage.getByRole('button', { name: 'README.md' }).click();

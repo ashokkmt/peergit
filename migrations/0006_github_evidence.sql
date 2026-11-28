@@ -35,11 +35,13 @@ CREATE TABLE repositories (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     college_id uuid NOT NULL,
     project_id uuid NOT NULL UNIQUE,
+    project_context text NOT NULL DEFAULT 'ordinary',
     created_by uuid NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (id,college_id),
-    FOREIGN KEY (project_id,college_id) REFERENCES projects(id,college_id) ON DELETE CASCADE,
+    UNIQUE (id,college_id,project_context),
+    FOREIGN KEY (project_id,college_id,project_context) REFERENCES projects(id,college_id,project_context) ON DELETE CASCADE,
     FOREIGN KEY (created_by,college_id) REFERENCES users(id,college_id)
 );
 
@@ -47,8 +49,10 @@ CREATE TABLE repository_bindings (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     college_id uuid NOT NULL,
     repository_id uuid NOT NULL,
-    installation_id uuid NOT NULL,
-    provider text NOT NULL DEFAULT 'github' CHECK (provider='github'),
+    installation_id uuid,
+    provider text NOT NULL DEFAULT 'github' CHECK (provider IN ('github','forgejo')),
+    forge_instance text,
+    project_context text GENERATED ALWAYS AS (CASE WHEN provider='forgejo' THEN 'pbl' ELSE 'ordinary' END) STORED,
     external_repository_id bigint NOT NULL CHECK (external_repository_id>0),
     owner_login text NOT NULL CHECK (length(owner_login) BETWEEN 1 AND 100),
     repository_name text NOT NULL CHECK (length(repository_name) BETWEEN 1 AND 100),
@@ -63,12 +67,15 @@ CREATE TABLE repository_bindings (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (id,repository_id,college_id),
-    FOREIGN KEY (repository_id,college_id) REFERENCES repositories(id,college_id) ON DELETE CASCADE,
+    UNIQUE (id,repository_id,college_id,provider),
+    FOREIGN KEY (repository_id,college_id,project_context) REFERENCES repositories(id,college_id,project_context) ON DELETE CASCADE,
     FOREIGN KEY (installation_id,college_id) REFERENCES github_installations(id,college_id) ON DELETE CASCADE,
-    FOREIGN KEY (linked_by,college_id) REFERENCES users(id,college_id)
+    FOREIGN KEY (linked_by,college_id) REFERENCES users(id,college_id),
+    CHECK ((provider='github' AND installation_id IS NOT NULL AND forge_instance IS NULL) OR
+           (provider='forgejo' AND installation_id IS NULL AND forge_instance IS NOT NULL AND visibility='private'))
 );
 CREATE UNIQUE INDEX repository_bindings_one_current_idx ON repository_bindings(repository_id) WHERE is_current;
-CREATE UNIQUE INDEX repository_bindings_provider_current_idx ON repository_bindings(provider,external_repository_id) WHERE is_current AND access_state IN ('active','stale');
+CREATE UNIQUE INDEX repository_bindings_forge_uidx ON repository_bindings(forge_instance,external_repository_id) WHERE provider='forgejo';
 CREATE INDEX repository_bindings_tenant_idx ON repository_bindings(college_id,repository_id,access_state);
 
 CREATE TABLE github_webhook_deliveries (
@@ -142,9 +149,11 @@ CREATE INDEX contribution_observations_recent_idx ON contribution_observations(c
 CREATE TABLE repository_snapshots (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     college_id uuid NOT NULL,
+    team_id uuid NOT NULL,
     project_id uuid NOT NULL,
     repository_id uuid NOT NULL,
     binding_id uuid NOT NULL,
+    binding_provider text NOT NULL DEFAULT 'forgejo' CHECK (binding_provider='forgejo'),
     requested_by uuid NOT NULL,
     idempotency_key text NOT NULL CHECK (length(idempotency_key) BETWEEN 1 AND 200),
     request_hash bytea NOT NULL CHECK (octet_length(request_hash)=32),
@@ -165,15 +174,14 @@ CREATE TABLE repository_snapshots (
     updated_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (college_id,requested_by,idempotency_key),
     UNIQUE (id,college_id),
+    UNIQUE (id,project_id,college_id),
+    UNIQUE (id,team_id,project_id,college_id),
     FOREIGN KEY (project_id,college_id) REFERENCES projects(id,college_id) ON DELETE CASCADE,
     FOREIGN KEY (repository_id,college_id) REFERENCES repositories(id,college_id) ON DELETE CASCADE,
-    FOREIGN KEY (binding_id,repository_id,college_id) REFERENCES repository_bindings(id,repository_id,college_id) ON DELETE RESTRICT,
+    FOREIGN KEY (binding_id,repository_id,college_id,binding_provider) REFERENCES repository_bindings(id,repository_id,college_id,provider) ON DELETE RESTRICT,
     FOREIGN KEY (requested_by,college_id) REFERENCES users(id,college_id),
     CHECK ((state='verified')=(object_key IS NOT NULL AND archive_bytes IS NOT NULL AND archive_sha256 IS NOT NULL AND verified_at IS NOT NULL))
 );
-CREATE INDEX repository_snapshots_project_idx ON repository_snapshots(college_id,project_id,created_at DESC,id DESC);
-CREATE INDEX repository_snapshots_binding_sha_idx ON repository_snapshots(binding_id,commit_sha,created_at DESC);
-
 CREATE FUNCTION touch_updated_at() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     NEW.updated_at=clock_timestamp();

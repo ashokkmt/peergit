@@ -136,9 +136,6 @@ func (q Queue) runClaim(ctx context.Context, claim Claim, handler Handler, logge
 		logger.WarnContext(ctx, "job lease lost", "job_id", claim.ID, "job_type", claim.Type)
 		return
 	}
-	if err == nil && claim.Type == "snapshot" && objectKey == "" {
-		err = errors.New("snapshot handler completed without an object key")
-	}
 	if err != nil {
 		var permanent *PermanentError
 		if errors.As(err, &permanent) {

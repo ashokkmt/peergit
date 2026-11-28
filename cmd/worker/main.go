@@ -78,6 +78,8 @@ func run() error {
 	resendSender := campus.NewResendSender(workerResendKey(cfg.AppEnv, cfg.ResendAPIKey))
 	defer resendSender.CloseIdleConnections()
 	jobHandlers := repository.JobHandlers(pool, githubClient, cfg.GitHubAppID, githubKey, objectStore, logger)
+	pblHandlers := repository.PBLJobHandlers(pool, githubClient, cfg.GitHubAppID, githubKey, objectStore, logger,
+		repository.ForgeConfig{URL: cfg.PBLForgeURL, Owner: cfg.PBLForgeOwner, Token: cfg.PBLForgeToken, WebhookURL: cfg.PBLWebhookURL, WebhookSecret: cfg.PBLWebhookSecret})
 	jobHandlers["campus_verification_email"] = campus.DeliveryHandler(pool, cfg.VerificationEmailKey, campus.MailConfig{Host: cfg.SMTPHost, From: cfg.SMTPFrom, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword, TLSMode: cfg.SMTPTLSMode, Resend: resendSender, SuppressionKey: cfg.VerificationHashKey})
 	notificationMail := notification.Mail{Sender: resendSender, From: cfg.SMTPFrom, AppOrigin: cfg.AppOrigin, SuppressionKey: cfg.VerificationHashKey}
 	jobHandlers["notification_email"] = notification.EmailJobHandler(pool, notificationMail, campus.MailConfig{Host: cfg.SMTPHost, From: cfg.SMTPFrom, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword, TLSMode: cfg.SMTPTLSMode, SuppressionKey: cfg.VerificationHashKey})
@@ -85,11 +87,18 @@ func run() error {
 		results <- (jobs.Queue{Pool: pool}).RunConcurrentTypes(workerCtx, workerName+"-email", jobHandlers, logger, 2, []string{"campus_verification_email"})
 	}()
 	go func() {
-		results <- (jobs.Queue{Pool: pool}).RunConcurrentTypes(workerCtx, workerName+"-general", jobHandlers, logger, 8, []string{"github_webhook", "github_reconcile", "github_overview", "snapshot"})
+		results <- (jobs.Queue{Pool: pool}).RunConcurrentTypes(workerCtx, workerName+"-general", jobHandlers, logger, 8, []string{"github_webhook", "github_reconcile", "github_overview"})
 	}()
 	go func() {
 		results <- (jobs.Queue{Pool: pool}).RunConcurrentTypes(workerCtx, workerName+"-notification-email", jobHandlers, logger, 1, []string{"notification_email"})
 	}()
+	taskCount := 8
+	if cfg.PBLForgeURL != "" {
+		taskCount++
+		go func() {
+			results <- (jobs.Queue{Pool: pool}).RunConcurrentTypes(workerCtx, workerName+"-pbl", pblHandlers, logger, 1, repository.PBLJobTypes)
+		}()
+	}
 	go func() {
 		results <- (outbox.Queue{Pool: pool}).Run(workerCtx, workerName, map[string]outbox.Handler{"project.activity": notification.OutboxHandler(pool, notificationMail)}, logger)
 	}()
@@ -106,7 +115,12 @@ func run() error {
 			if err := repository.ScheduleReconciliation(workerCtx, pool, logger); err != nil {
 				logger.ErrorContext(workerCtx, "repository reconciliation schedule failed", "error", err)
 			}
-			if err := repository.CleanupExpiredGitHubImports(workerCtx, pool, objectStore); err != nil {
+			if cfg.PBLForgeURL != "" {
+				if err := repository.SchedulePBLReconciliation(workerCtx, pool, cfg.PBLForgeURL); err != nil {
+					logger.ErrorContext(workerCtx, "PBL reconciliation schedule failed", "error", err)
+				}
+			}
+			if err := repository.CleanupExpiredGitHubImports(workerCtx, pool); err != nil {
 				logger.ErrorContext(workerCtx, "expired GitHub import cleanup failed", "error", err)
 			}
 			select {
@@ -118,7 +132,7 @@ func run() error {
 		}
 		results <- nil
 	}()
-	for range 8 {
+	for range taskCount {
 		if err := <-results; err != nil {
 			cancelWorker()
 			return err

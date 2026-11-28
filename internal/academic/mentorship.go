@@ -244,7 +244,7 @@ func (h *Handler) requestMentorship(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var member, active bool
-	err = h.pool.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM project_members pm JOIN projects p ON p.id=pm.project_id AND p.college_id=pm.college_id WHERE pm.project_id=$1 AND pm.user_id=$2 AND p.lifecycle='active' AND p.github_revoke_deadline IS NULL), EXISTS(SELECT 1 FROM mentor_profiles mp WHERE mp.id=$3 AND mp.college_id=$4 AND mp.user_id<>$2 AND mp.status='active' AND (mp.college_id=(SELECT college_id FROM users WHERE id=mp.user_id) OR EXISTS(SELECT 1 FROM external_college_access ea WHERE ea.user_id=mp.user_id AND ea.college_id=mp.college_id AND ea.access_kind='mentor' AND ea.revoked_at IS NULL)))`, chi.URLParam(r, "id"), s.UserID, in.MentorID, s.CollegeID).Scan(&member, &active)
+	err = h.pool.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM project_members pm JOIN projects p ON p.id=pm.project_id AND p.college_id=pm.college_id WHERE pm.project_id=$1 AND pm.user_id=$2 AND p.project_context='ordinary' AND p.lifecycle='active' AND p.github_revoke_deadline IS NULL), EXISTS(SELECT 1 FROM mentor_profiles mp WHERE mp.id=$3 AND mp.college_id=$4 AND mp.user_id<>$2 AND mp.status='active' AND (mp.college_id=(SELECT college_id FROM users WHERE id=mp.user_id) OR EXISTS(SELECT 1 FROM external_college_access ea WHERE ea.user_id=mp.user_id AND ea.college_id=mp.college_id AND ea.access_kind='mentor' AND ea.revoked_at IS NULL)))`, chi.URLParam(r, "id"), s.UserID, in.MentorID, s.CollegeID).Scan(&member, &active)
 	if err != nil {
 		h.err.Handle(w, r, err)
 		return

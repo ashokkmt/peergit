@@ -135,7 +135,7 @@ export function GitHubImports({ csrf }: { csrf: string }) {
         : "";
       if (
         !window.confirm(
-          `Revoke this PeerGit connection? Its imported projects will disappear immediately. Their project, team, evidence, and snapshots remain recoverable for 30 days, then are permanently deleted.${titles}\n\nThis does not uninstall the GitHub App.`,
+          `Revoke this PeerGit connection? Its ordinary imported projects will disappear immediately. Their project details and synchronized GitHub activity remain recoverable for 30 days, then are permanently deleted. PBL copies hosted on PeerGit are independent of this connection.${titles}\n\nThis does not uninstall the GitHub App.`,
         )
       ) {
         setBusy(false);

@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: PeerGit Platform API
   version: 0.1.0
-  description: Health endpoints, identity and campus administration, media, and Phase 3 project/team/recruitment workflows.
+  description: Health, campus identity, ordinary project collaboration, and private project-based learning workflows.
 servers:
   - url: https://peergit.localhost
 paths:
@@ -511,6 +511,421 @@ paths:
         - { in: query, name: q, required: true, schema: { type: string, minLength: 2, maxLength: 80 } }
       responses:
         '200': { description: Up to 20 eligible campus users }
+  /api/v1/search:
+    get:
+      operationId: discoverCampusProjectsAndPeople
+      summary: Search campus projects, student roles and consented student profiles
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { in: query, name: q, schema: { type: string, maxLength: 120 } }
+        - { in: query, name: course_of_study, schema: { type: string, maxLength: 120 } }
+        - { in: query, name: year, schema: { type: integer, minimum: 1, maximum: 12 } }
+        - { in: query, name: semester, schema: { type: integer, minimum: 1, maximum: 24 } }
+        - { in: query, name: section, schema: { type: string, maxLength: 40 } }
+      responses:
+        '200': { description: Campus projects, team roles and consented student results }
+        '403': { description: Campus access is required }
+  /api/v1/academic/pbl:
+    get:
+      operationId: getPBLWorkspace
+      summary: List this user's eligible offerings, teams and coursework evidence
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: Success }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+  /api/v1/academic/pbl/offerings:
+    post:
+      operationId: publishPBLOffering
+      summary: Publish one registration per subject and term (coordinator with fresh MFA)
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PBLOffering' }
+      responses:
+        '200': { description: Recorded }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+        '409': { description: The action conflicts with the current state }
+  /api/v1/academic/pbl/offerings/{offering}/teams:
+    parameters:
+      - { in: path, name: offering, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: registerPBLTeam
+      summary: Submit a private roster as the team leader
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PBLTeam' }
+      responses:
+        '200': { description: Recorded }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+        '409': { description: The action conflicts with the current state }
+  /api/v1/academic/pbl/teams/{team}/roster:
+    parameters:
+      - { in: path, name: team, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: confirmPBLRoster
+      summary: Reconcile the pending roster to verified campus accounts and confirm the team
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PBLRoster' }
+      responses:
+        '200': { description: Success }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+        '409': { description: The action conflicts with the current state }
+  /api/v1/academic/pbl/teams/{team}/faculty:
+    parameters:
+      - { in: path, name: team, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: assignPBLFaculty
+      summary: Assign or reassign active faculty (coordinator with fresh MFA)
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PBLFaculty' }
+      responses:
+        '200': { description: Success }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+        '409': { description: The action conflicts with the current state }
+  /api/v1/academic/pbl/teams/{team}/idea:
+    parameters:
+      - { in: path, name: team, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: submitPBLIdea
+      summary: Submit a coursework idea as leader
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PBLIdea' }
+      responses:
+        '200': { description: Success }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+        '409': { description: The action conflicts with the current state }
+    put:
+      operationId: reviewPBLIdea
+      summary: Approve the idea or request changes as assigned faculty
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PBLIdeaReview' }
+      responses:
+        '200': { description: Success }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+        '409': { description: The action conflicts with the current state }
+  /api/v1/academic/pbl/teams/{team}/attendance:
+    parameters:
+      - { in: path, name: team, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: recordPBLAttendance
+      summary: Record named attendance for the idea or a code checkpoint
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PBLAttendance' }
+      responses:
+        '200': { description: Success }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+        '409': { description: The action conflicts with the current state }
+  /api/v1/academic/pbl/teams/{team}/audit.csv:
+    get:
+      operationId: exportPBLAudit
+      summary: Export bounded team evidence as current assigned faculty or fresh-MFA campus staff
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { in: path, name: team, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Scoped audit rows
+          content:
+            text/csv:
+              schema: { type: string }
+        '404': { description: The team is unavailable to this user }
+  /api/v1/academic/pbl/teams/{team}/rooms/{scope}:
+    parameters:
+      - { in: path, name: team, required: true, schema: { type: string, format: uuid } }
+      - { in: path, name: scope, required: true, schema: { type: string, enum: [team, faculty] } }
+    post:
+      operationId: openPBLRoom
+      summary: Open the team room or assigned-faculty group with current authorization
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200': { description: Success }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+        '409': { description: The action conflicts with the current state }
+  /api/v1/academic/pbl/teams/{team}/repository:
+    parameters:
+      - { in: path, name: team, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getPBLRepository
+      summary: Get the private PBL repository status and, when eligible, clone URL
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: Success }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+    post:
+      operationId: requestPBLRepository
+      summary: Queue a private Forgejo repository or start one-time authorized GitHub copying
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PBLProvision' }
+      responses:
+        '200': { description: Success }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+        '409': { description: The action conflicts with the current state }
+  /api/v1/academic/pbl/teams/{team}/git-credential:
+    parameters:
+      - { in: path, name: team, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: issuePBLCredential
+      summary: Issue a revocable Git credential bound to this team and user
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '201': { description: Recorded }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+        '409': { description: The action conflicts with the current state }
+    delete:
+      operationId: revokePBLCredential
+      summary: Immediately revoke the current user's team Git credential
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204': { description: Revoked }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+        '409': { description: The action conflicts with the current state }
+  /api/v1/academic/pbl/teams/{team}/campus-card:
+    parameters:
+      - { in: path, name: team, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: setPBLCampusCard
+      summary: Publish or hide the restricted campus card
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PBLCard' }
+      responses:
+        '200': { description: Success }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+        '409': { description: The action conflicts with the current state }
+  /api/v1/academic/pbl/teams/{team}/source:
+    parameters:
+      - { in: path, name: team, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: browsePBLSource
+      summary: List refs, read branch history, or view files and diffs at exact revisions
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { in: query, name: ref, schema: { type: string, pattern: '^[0-9a-f]{40}$' } }
+        - { in: query, name: path, schema: { type: string, maxLength: 500 } }
+        - { in: query, name: branch_history, schema: { type: string, maxLength: 200 } }
+        - { in: query, name: view, schema: { type: string, enum: [diff] } }
+      responses:
+        '200': { description: Success }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+  /api/v1/academic/pbl/teams/{team}/evidence:
+    parameters:
+      - { in: path, name: team, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: readPBLEvidence
+      summary: Read separately attributed push and observed commit evidence
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: Success }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+  /api/v1/academic/pbl/teams/{team}/work:
+    parameters:
+      - { in: path, name: team, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: readPBLWork
+      summary: List or inspect authorized issues and same-repository pull requests
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { in: query, name: kind, schema: { type: string, enum: [issues, pulls] } }
+        - { in: query, name: number, schema: { type: integer, format: int64, minimum: 1 } }
+      responses:
+        '200': { description: Success }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+    post:
+      operationId: mutatePBLWork
+      summary: Create and review scoped repository work
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PBLWork' }
+      responses:
+        '200': { description: Success }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+        '409': { description: The action conflicts with the current state }
+  /api/v1/academic/pbl/teams/{team}/checkpoints/{stage}:
+    parameters:
+      - { in: path, name: team, required: true, schema: { type: string, format: uuid } }
+      - { in: path, name: stage, required: true, schema: { type: integer, minimum: 1, maximum: 3 } }
+    post:
+      operationId: submitPBLCheckpoint
+      summary: Pin a previously pushed SHA and record an immutable receipt
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PBLCheckpoint' }
+      responses:
+        '201': { description: Recorded }
+        '200': { description: The existing receipt for the same SHA }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+        '409': { description: The action conflicts with the current state }
+    put:
+      operationId: reviewPBLCheckpoint
+      summary: Record assigned faculty checkpoint feedback
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PBLFeedback' }
+      responses:
+        '200': { description: Success }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+        '409': { description: The action conflicts with the current state }
+  /api/v1/academic/pbl/teams/{team}/checkpoints/{stage}/retry:
+    parameters:
+      - { in: path, name: team, required: true, schema: { type: string, format: uuid } }
+      - { in: path, name: stage, required: true, schema: { type: integer, minimum: 1, maximum: 3 } }
+    post:
+      operationId: retryPBLCheckpoint
+      summary: Retry a failed capture using the original receipt and SHA
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200': { description: Success }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+        '409': { description: The action conflicts with the current state }
+  /api/v1/academic/pbl/teams/{team}/checkpoints/{stage}/download:
+    parameters:
+      - { in: path, name: team, required: true, schema: { type: string, format: uuid } }
+      - { in: path, name: stage, required: true, schema: { type: integer, minimum: 1, maximum: 3 } }
+    get:
+      operationId: downloadPBLCheckpoint
+      summary: Download an authorized immutable checkpoint archive
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: Success }
+        '403': { description: The requested action is forbidden }
+        '404': { description: The resource is unavailable to this user }
+  /api/v1/pbl/git/{repository}/info/refs:
+    get:
+      operationId: advertisePBLGitRefs
+      summary: Advertise Git refs over the scoped PBL HTTPS remote
+      security: [{ pblGitCredential: [] }]
+      parameters:
+        - { in: path, name: repository, required: true, schema: { type: string, description: PBL team UUID followed by .git } }
+        - { in: query, name: service, required: true, schema: { type: string, enum: [git-upload-pack, git-receive-pack] } }
+      responses:
+        '200': { description: Smart HTTP ref advertisement }
+        '401': { description: A current scoped credential is required }
+  /api/v1/pbl/git/{repository}/git-upload-pack:
+    post:
+      operationId: fetchPBLGit
+      summary: Clone or fetch from the private PBL Git remote
+      security: [{ pblGitCredential: [] }]
+      parameters:
+        - { in: path, name: repository, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Git upload-pack result }
+        '401': { description: A current scoped credential is required }
+  /api/v1/pbl/git/{repository}/git-receive-pack:
+    post:
+      operationId: pushPBLGit
+      summary: Push to the team remote with Git ref and project limits
+      security: [{ pblGitCredential: [] }]
+      parameters:
+        - { in: path, name: repository, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Git receive-pack result }
+        '401': { description: A current scoped credential is required }
+        '403': { description: The requested branch update is protected }
+        '413': { description: The pack or repository exceeds its pilot limit }
+  /api/v1/pbl/forgejo/webhooks:
+    post:
+      operationId: receivePBLForgejoWebhook
+      summary: Accept an authenticated Forgejo event with replay deduplication
+      parameters:
+        - { in: header, name: X-Forgejo-Signature, required: true, schema: { type: string } }
+        - { in: header, name: X-Forgejo-Delivery, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '202': { description: Accepted or already seen }
+        '401': { description: Invalid signature }
 components:
   parameters:
     CsrfToken:
@@ -519,11 +934,106 @@ components:
       required: true
       schema: { type: string }
   securitySchemes:
+    pblGitCredential:
+      type: http
+      scheme: basic
+      description: Team-scoped temporary Git credential issued in the PBL workspace
     sessionCookie:
       type: apiKey
       in: cookie
       name: __Host-peergit_session
   schemas:
+    PBLOffering:
+      type: object
+      required: [course_id, term_id, closes_at, phase_one_due, phase_two_due, phase_three_due]
+      properties:
+        course_id: { type: string, format: uuid }
+        term_id: { type: string, format: uuid }
+        closes_at: { type: string, format: date-time }
+        phase_one_due: { type: string, format: date-time }
+        phase_two_due: { type: string, format: date-time }
+        phase_three_due: { type: string, format: date-time }
+    PBLTeam:
+      type: object
+      required: [title, members]
+      properties:
+        title: { type: string, maxLength: 120 }
+        members: { type: array, minItems: 1, maxItems: 12, items: { $ref: '#/components/schemas/PBLTeamMember' } }
+    PBLTeamMember:
+      type: object
+      required: [name, roll_number, section]
+      properties:
+        name: { type: string, maxLength: 120 }
+        roll_number: { type: string, maxLength: 40, writeOnly: true }
+        section: { type: string, maxLength: 40 }
+    PBLRoster:
+      type: object
+      required: [matches]
+      properties:
+        matches: { type: array, maxItems: 12, items: { type: object, required: [entry_id, handle], properties: { entry_id: { type: string, format: uuid }, handle: { type: string } } } }
+    PBLFaculty:
+      type: object
+      required: [faculty_id]
+      properties:
+        faculty_id: { type: string, format: uuid }
+    PBLIdea:
+      type: object
+      required: [idea]
+      properties:
+        idea: { type: string, maxLength: 4000 }
+    PBLIdeaReview:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [approved, revise] }
+        feedback: { type: string, maxLength: 2000 }
+    PBLAttendance:
+      type: object
+      required: [student_id, stage, present]
+      properties:
+        student_id: { type: string, format: uuid }
+        stage: { type: integer, minimum: 0, maximum: 3 }
+        present: { type: boolean }
+    PBLProvision:
+      type: object
+      properties:
+        installation_id: { type: string, format: uuid }
+        repository_id: { type: integer, format: int64, minimum: 1 }
+    PBLCard:
+      type: object
+      required: [visible]
+      properties:
+        visible: { type: boolean }
+    PBLCheckpoint:
+      type: object
+      required: [sha]
+      properties:
+        sha: { type: string, pattern: '^[0-9a-f]{40}$' }
+    PBLFeedback:
+      type: object
+      required: [feedback]
+      properties:
+        feedback: { type: string, maxLength: 2000 }
+    PBLWork:
+      type: object
+      required: [action]
+      properties:
+        action: { type: string, enum: [issue, comment, issue_state, label, pull, review, merge] }
+        number: { type: integer, format: int64, minimum: 1 }
+        title: { type: string, maxLength: 160 }
+        body: { type: string, maxLength: 8000 }
+        head: { type: string, maxLength: 200 }
+        sha: { type: string, pattern: '^[0-9a-f]{40}$' }
+        member: { type: string, format: uuid }
+        decision: { type: string, enum: [open, closed, APPROVED, REQUEST_CHANGES, COMMENT] }
+        labels: { type: array, maxItems: 10, items: { type: integer, format: int64, minimum: 1 } }
+    AcademicProfile:
+      type: object
+      properties:
+        course_of_study: { type: [string, 'null'], maxLength: 120 }
+        year: { type: [integer, 'null'], minimum: 1, maximum: 12 }
+        semester: { type: [integer, 'null'], minimum: 1, maximum: 24 }
+        section: { type: [string, 'null'], maxLength: 40 }
     ProjectCreate:
       type: object
       required: [slug, title, summary]
@@ -570,12 +1080,13 @@ components:
         headline: { type: string, maxLength: 160 }
         bio: { type: string, maxLength: 2000 }
         avatar_media_id: { type: string, format: uuid }
+        academic: { $ref: '#/components/schemas/AcademicProfile' }
         skills: { type: array, maxItems: 30, items: { type: string, minLength: 2, maxLength: 60 } }
     ConsentUpdate:
       type: object
       required: [purpose, policy_version, granted]
       properties:
-        purpose: { type: string, enum: [terms, privacy, profile_discovery, portfolio, recruiter_discovery, analytics] }
+        purpose: { type: string, enum: [terms, privacy, profile_discovery, portfolio, analytics] }
         policy_version: { type: string, maxLength: 40 }
         granted: { type: boolean }
     MfaCode:
@@ -590,14 +1101,14 @@ components:
         email: { type: string, format: email, maxLength: 254 }
         account_type: { type: string, enum: [campus, external] }
         role: { type: string, enum: [student, faculty, alumni_mentor, moderator] }
-        external_access_kind: { type: string, enum: [mentor, recruiter, organization_guest] }
+        external_access_kind: { type: string, enum: [mentor, organization_guest] }
         organization_id: { type: string, format: uuid }
         expires_hours: { type: integer, minimum: 1, maximum: 168, default: 72 }
     OrganizationCreate:
       type: object
       required: [kind, slug, name]
       properties:
-        kind: { type: string, enum: [department, club, innovation_cell, placement_cell, event_body] }
+        kind: { type: string, enum: [department, club, innovation_cell, event_body] }
         slug: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', minLength: 2, maxLength: 80 }
         name: { type: string, minLength: 2, maxLength: 160 }
         description: { type: string, maxLength: 2000 }

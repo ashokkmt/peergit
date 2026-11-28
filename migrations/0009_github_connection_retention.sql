@@ -2,7 +2,7 @@ ALTER TABLE github_repository_authorization_states
     DROP CONSTRAINT github_repository_authorization_states_purpose_check;
 ALTER TABLE github_repository_authorization_states
     ADD CONSTRAINT github_repository_authorization_states_purpose_check
-    CHECK (purpose IN ('connect','refresh','import','link'));
+    CHECK (purpose IN ('connect','refresh','import','link','pbl_copy'));
 
 ALTER TABLE github_repository_authorization_states
     DROP CONSTRAINT github_repository_authorization_states_check;
@@ -11,7 +11,8 @@ ALTER TABLE github_repository_authorization_states
     CHECK (
         (purpose IN ('connect','refresh') AND external_repository_id IS NULL AND project_id IS NULL) OR
         (purpose='import' AND external_repository_id IS NOT NULL AND project_id IS NULL) OR
-        (purpose='link' AND external_repository_id IS NULL AND project_id IS NOT NULL)
+        (purpose='link' AND external_repository_id IS NULL AND project_id IS NOT NULL) OR
+        (purpose='pbl_copy' AND external_repository_id IS NOT NULL AND project_id IS NOT NULL)
     );
 
 ALTER TABLE github_repository_candidates DROP CONSTRAINT github_repository_candidates_pkey;

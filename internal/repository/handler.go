@@ -20,7 +20,6 @@ import (
 	"peergit/internal/github"
 	"peergit/internal/identity"
 	"peergit/internal/platform/errormanager"
-	"peergit/internal/platform/http/request"
 	"peergit/internal/platform/http/response"
 	"peergit/internal/platform/jobs"
 	"peergit/internal/platform/storage"
@@ -33,24 +32,29 @@ type AppConfig struct {
 	OAuthClientID, OAuthClientSecret, OAuthRedirectURL string
 	OAuthAuthorizeURL, OAuthTokenURL, APIURL           string
 	PrivateKey                                         []byte
+	Forge                                              ForgeConfig
 }
 
 type Handler struct {
-	pool  *pgxpool.Pool
-	auth  *identity.Handler
-	api   *github.Client
-	store *storage.Store
-	app   AppConfig
-	log   *slog.Logger
-	err   *errormanager.Manager
+	pool         *pgxpool.Pool
+	auth         *identity.Handler
+	api          *github.Client
+	store        *storage.Store
+	app          AppConfig
+	forge        ForgeConfig
+	pblTransfers chan struct{}
+	log          *slog.Logger
+	err          *errormanager.Manager
 }
 
 func NewHandler(pool *pgxpool.Pool, auth *identity.Handler, api *github.Client, store *storage.Store, app AppConfig, logger *slog.Logger, errors *errormanager.Manager) *Handler {
-	return &Handler{pool: pool, auth: auth, api: api, store: store, app: app, log: logger, err: errors}
+	return &Handler{pool: pool, auth: auth, api: api, store: store, app: app, forge: app.Forge, pblTransfers: make(chan struct{}, 4), log: logger, err: errors}
 }
 
 func (h *Handler) Register(r chi.Router) {
 	r.Post("/github/webhooks", h.webhook)
+	r.HandleFunc("/pbl/git/{repository}/*", h.pblGit)
+	r.Post("/pbl/forgejo/webhooks", h.pblWebhook)
 	r.Group(func(private chi.Router) {
 		private.Use(h.auth.Middleware)
 		private.With(h.auth.RequireCSRF).Post("/github/installations/start", h.startAccountInstallation)
@@ -72,10 +76,8 @@ func (h *Handler) Register(r chi.Router) {
 		private.Get("/projects/{id}/repository/history", h.repositoryHistory)
 		private.Get("/projects/{id}/repository/commit", h.repositoryCommit)
 		private.Get("/projects/{id}/repository/file", h.repositoryFile)
-		private.With(h.auth.RequireCSRF).Post("/projects/{id}/repository/snapshots", h.requestSnapshot)
-		private.Get("/projects/{id}/repository/snapshots/{snapshotID}", h.snapshotStatus)
-		private.With(h.auth.RequireCSRF).Post("/projects/{id}/repository/snapshots/{snapshotID}/retry", h.retrySnapshot)
-		private.Get("/projects/{id}/repository/snapshots/{snapshotID}/download", h.downloadSnapshot)
+
+		h.registerPBL(private)
 	})
 }
 
@@ -93,7 +95,7 @@ func (h *Handler) projectRepository(w http.ResponseWriter, r *http.Request) {
 	var repositoryID string
 	err := h.pool.QueryRow(r.Context(), `SELECT id::text FROM repositories WHERE project_id=$1 AND college_id=$2`, projectID, s.CollegeID).Scan(&repositoryID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		_ = response.OK(w, map[string]any{"repository": nil, "contributions": []any{}, "snapshots": []any{}})
+		_ = response.OK(w, map[string]any{"repository": nil, "contributions": []any{}})
 		return
 	}
 	if err != nil {
@@ -125,7 +127,7 @@ func (h *Handler) projectRepository(w http.ResponseWriter, r *http.Request) {
 		if access != "active" || installationStatus != "active" {
 			htmlURL, readme, description, topics, languageMap = "", "", "", nil, map[string]int64{}
 		}
-		binding = map[string]any{"id": bindingID, "external_repository_id": externalID, "owner": owner, "name": name, "full_name": owner + "/" + name, "html_url": htmlURL, "description": description, "default_branch": defaultBranch, "topics": topics, "languages": languageMap, "readme_markdown": readme, "access_state": access, "sync_health": syncHealth, "last_synced_at": synced, "capabilities": grants, "limitations": "Git LFS objects and submodule contents are not independently captured."}
+		binding = map[string]any{"id": bindingID, "external_repository_id": externalID, "owner": owner, "name": name, "full_name": owner + "/" + name, "html_url": htmlURL, "description": description, "default_branch": defaultBranch, "topics": topics, "languages": languageMap, "readme_markdown": readme, "access_state": access, "sync_health": syncHealth, "last_synced_at": synced, "capabilities": grants, "limitations": "Git LFS objects and submodule contents are not rendered in file views."}
 	}
 	if binding != nil {
 		binding["provider"] = "github"
@@ -169,247 +171,10 @@ func (h *Handler) projectRepository(w http.ResponseWriter, r *http.Request) {
 		h.err.Handle(w, r, err)
 		return
 	}
-	snapshots := make([]map[string]any, 0)
-	srows, err := h.pool.Query(r.Context(), `SELECT s.id::text,s.requested_ref,s.commit_sha,s.state,s.receipt_at,s.archive_bytes,s.archive_sha256,s.failure_code,COALESCE(j.state='dead',false) FROM repository_snapshots s LEFT JOIN jobs j ON j.id=s.job_id WHERE s.project_id=$1 AND s.college_id=$2 ORDER BY s.created_at DESC,s.id DESC LIMIT 50`, projectID, s.CollegeID)
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	defer srows.Close()
-	for srows.Next() {
-		var m map[string]any
-		var id, ref, sha, state string
-		var receipt time.Time
-		var n *int64
-		var hash, code *string
-		var retryAvailable bool
-		if err = srows.Scan(&id, &ref, &sha, &state, &receipt, &n, &hash, &code, &retryAvailable); err != nil {
-			h.err.Handle(w, r, err)
-			return
-		}
-		m = map[string]any{"id": id, "ref": ref, "commit_sha": sha, "state": state, "receipt_at": receipt, "archive_bytes": n, "archive_sha256": hash, "failure_code": code, "retry_available": retryAvailable}
-		snapshots = append(snapshots, m)
-	}
-	_ = response.OK(w, map[string]any{"repository": binding, "contributions": contributions, "snapshots": snapshots})
+	_ = response.OK(w, map[string]any{"repository": binding, "contributions": contributions})
 }
 
-type snapshotRequest struct {
-	BindingID string `json:"binding_id"`
-	Ref       string `json:"ref"`
-}
-
-func (in *snapshotRequest) Validate() error {
-	in.Ref = strings.TrimSpace(in.Ref)
-	if !uuidOK(in.BindingID) || in.Ref == "" || len(in.Ref) > 255 || strings.ContainsAny(in.Ref, "\r\n\x00") {
-		return errors.New("binding ID and a valid branch, tag, or SHA are required")
-	}
-	return nil
-}
-
-func (h *Handler) requestSnapshot(w http.ResponseWriter, r *http.Request) {
-	s, ok := h.campusSession(w, r)
-	if !ok {
-		return
-	}
-	projectID := chi.URLParam(r, "id")
-	if !h.isProjectMember(r.Context(), projectID, s) {
-		h.fail(w, r, 404, "project_not_found", "project was not found", nil)
-		return
-	}
-	in, err := request.Decode[snapshotRequest](r)
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	key := r.Header.Get("Idempotency-Key")
-	if key == "" || len(key) > 200 {
-		h.fail(w, r, 400, "idempotency_key_required", "a valid Idempotency-Key header is required", nil)
-		return
-	}
-	var owner, name, repoID, collegeID, installationID string
-	var externalRepo int64
-	err = h.pool.QueryRow(r.Context(), `SELECT b.owner_login,b.repository_name,b.repository_id::text,b.college_id::text,i.external_installation_id::text,b.external_repository_id
-		FROM repository_bindings b JOIN repositories rp ON rp.id=b.repository_id AND rp.college_id=b.college_id JOIN github_installations i ON i.id=b.installation_id AND i.college_id=b.college_id
-		WHERE b.id=$1 AND b.repository_id=(SELECT id FROM repositories WHERE project_id=$2 AND college_id=$3) AND b.college_id=$3 AND b.is_current AND b.access_state='active' AND i.status='active'`, in.BindingID, projectID, s.CollegeID).Scan(&owner, &name, &repoID, &collegeID, &installationID, &externalRepo)
-	if err != nil {
-		h.fail(w, r, 404, "repository_not_available", "active repository connection was not found", err)
-		return
-	}
-	if h.store == nil {
-		h.fail(w, r, 503, "snapshot_storage_unavailable", "snapshot storage is not configured", nil)
-		return
-	}
-	jwt, err := github.JWT(h.app.ID, h.app.PrivateKey, time.Now())
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	token, err := h.api.Token(r.Context(), installationID, jwt)
-	if err != nil {
-		h.providerFailure(w, r, err)
-		return
-	}
-	sha, err := h.api.Resolve(r.Context(), owner+"/"+name, in.Ref, token)
-	if err != nil {
-		h.providerFailure(w, r, err)
-		return
-	}
-	body, _ := json.Marshal(in)
-	hash := sha256.Sum256(body)
-	tx, err := h.pool.Begin(r.Context())
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	var authorized string
-	err = tx.QueryRow(r.Context(), `SELECT pm.project_id::text FROM project_members pm JOIN projects p ON p.id=pm.project_id AND p.college_id=pm.college_id WHERE pm.project_id=$1 AND pm.college_id=$2 AND pm.user_id=$3 AND p.lifecycle<>'archived' FOR SHARE OF pm,p`, projectID, s.CollegeID, s.UserID).Scan(&authorized)
-	if err != nil {
-		h.fail(w, r, 404, "project_not_found", "project was not found", err)
-		return
-	}
-	var stillBound bool
-	if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM repository_bindings b JOIN github_installations i ON i.id=b.installation_id AND i.college_id=b.college_id WHERE b.id=$1 AND b.repository_id=$2 AND b.college_id=$3 AND b.is_current AND b.access_state='active' AND i.status='active')`, in.BindingID, repoID, s.CollegeID).Scan(&stillBound); err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	if !stillBound {
-		h.fail(w, r, 409, "repository_access_changed", "repository access changed before the snapshot receipt was recorded", nil)
-		return
-	}
-	var members []byte
-	err = tx.QueryRow(r.Context(), `SELECT COALESCE(jsonb_agg(jsonb_build_object('user_id',pm.user_id::text,'role',pm.role) ORDER BY pm.user_id),'[]'::jsonb) FROM project_members pm WHERE pm.project_id=$1 AND pm.college_id=$2`, projectID, s.CollegeID).Scan(&members)
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	var snapshotID string
-	err = tx.QueryRow(r.Context(), `INSERT INTO repository_snapshots(college_id,project_id,repository_id,binding_id,requested_by,idempotency_key,request_hash,requested_ref,commit_sha,membership_snapshot)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-		ON CONFLICT(college_id,requested_by,idempotency_key) DO NOTHING RETURNING id::text`, s.CollegeID, projectID, repoID, in.BindingID, s.UserID, key, hash[:], in.Ref, sha, members).Scan(&snapshotID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		var existingHash []byte
-		err = tx.QueryRow(r.Context(), `SELECT id::text,request_hash FROM repository_snapshots WHERE college_id=$1 AND requested_by=$2 AND idempotency_key=$3 FOR UPDATE`, s.CollegeID, s.UserID, key).Scan(&snapshotID, &existingHash)
-		if err == nil && !hmac.Equal(existingHash, hash[:]) {
-			err = errors.New("snapshot idempotency key was reused with a different request")
-		}
-	}
-	if err != nil {
-		h.fail(w, r, 409, "snapshot_request_conflict", "snapshot request could not be accepted", err)
-		return
-	}
-	var state string
-	if err = tx.QueryRow(r.Context(), `SELECT state FROM repository_snapshots WHERE id=$1`, snapshotID).Scan(&state); err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	if state == "pending" {
-		payload, _ := json.Marshal(map[string]string{"snapshot_id": snapshotID})
-		jobID, enqueueErr := jobs.EnqueueTx(r.Context(), tx, s.CollegeID, s.UserID, "snapshot", "snapshot:"+snapshotID, payload, nil)
-		if enqueueErr != nil {
-			err = enqueueErr
-			h.err.Handle(w, r, err)
-			return
-		}
-		if _, err = tx.Exec(r.Context(), `UPDATE repository_snapshots SET job_id=$2 WHERE id=$1 AND job_id IS NULL`, snapshotID, jobID); err != nil {
-			h.err.Handle(w, r, err)
-			return
-		}
-	}
-	if err = tx.Commit(r.Context()); err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	_ = response.Created(w, map[string]any{"id": snapshotID, "commit_sha": sha, "state": state, "receipt_at": time.Now().UTC()})
-}
-
-func (h *Handler) snapshotStatus(w http.ResponseWriter, r *http.Request) {
-	s, ok := h.campusSession(w, r)
-	if !ok {
-		return
-	}
-	id := chi.URLParam(r, "snapshotID")
-	projectID := chi.URLParam(r, "id")
-	var state, ref, sha string
-	var at time.Time
-	var size *int64
-	var code *string
-	var retryAvailable bool
-	err := h.pool.QueryRow(r.Context(), `SELECT s.state,s.requested_ref,s.commit_sha,s.receipt_at,s.archive_bytes,s.failure_code,COALESCE(j.state='dead' AND EXISTS(SELECT 1 FROM project_members WHERE project_id=$2 AND user_id=$4 AND college_id=$3),false) FROM repository_snapshots s LEFT JOIN jobs j ON j.id=s.job_id WHERE s.id=$1 AND s.project_id=$2 AND s.college_id=$3 AND (EXISTS(SELECT 1 FROM project_members WHERE project_id=$2 AND user_id=$4 AND college_id=$3) OR EXISTS(SELECT 1 FROM academic_submissions sub JOIN academic_assignment_evaluators ae ON ae.assignment_id=sub.assignment_id AND ae.user_id=$4 JOIN faculty_profiles fp ON fp.college_id=ae.college_id AND fp.user_id=ae.user_id AND fp.status='active' WHERE sub.snapshot_id=s.id AND sub.college_id=s.college_id) OR EXISTS(SELECT 1 FROM academic_submissions sub JOIN academic_assignments a ON a.id=sub.assignment_id AND a.college_id=sub.college_id JOIN academic_cohorts co ON co.id=a.cohort_id AND co.college_id=a.college_id JOIN academic_course_staff cs ON cs.course_id=co.course_id AND cs.user_id=$4 JOIN faculty_profiles fp ON fp.college_id=cs.college_id AND fp.user_id=cs.user_id AND fp.status='active' WHERE sub.snapshot_id=s.id AND sub.college_id=s.college_id))`, id, projectID, s.CollegeID, s.UserID).Scan(&state, &ref, &sha, &at, &size, &code, &retryAvailable)
-	if err != nil {
-		h.fail(w, r, 404, "snapshot_not_found", "snapshot was not found", err)
-		return
-	}
-	_ = response.OK(w, map[string]any{"id": id, "state": state, "ref": ref, "commit_sha": sha, "receipt_at": at, "archive_bytes": size, "failure_code": code, "retry_available": retryAvailable})
-}
-
-func (h *Handler) retrySnapshot(w http.ResponseWriter, r *http.Request) {
-	s, ok := h.campusSession(w, r)
-	if !ok {
-		return
-	}
-	snapshotID, projectID := chi.URLParam(r, "snapshotID"), chi.URLParam(r, "id")
-	if !uuidOK(snapshotID) || !uuidOK(projectID) {
-		h.fail(w, r, 404, "snapshot_not_found", "snapshot was not found", nil)
-		return
-	}
-	tx, err := h.pool.Begin(r.Context())
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-	var jobID string
-	err = tx.QueryRow(r.Context(), `SELECT s.job_id::text FROM repository_snapshots s JOIN repository_bindings b ON b.id=s.binding_id AND b.repository_id=s.repository_id AND b.college_id=s.college_id JOIN github_installations i ON i.id=b.installation_id AND i.college_id=b.college_id WHERE s.id=$1 AND s.project_id=$2 AND s.college_id=$3 AND s.state='failed' AND b.is_current AND b.access_state='active' AND i.status='active' AND EXISTS(SELECT 1 FROM project_members WHERE project_id=$2 AND college_id=$3 AND user_id=$4) FOR UPDATE OF s`, snapshotID, projectID, s.CollegeID, s.UserID).Scan(&jobID)
-	if err != nil {
-		h.fail(w, r, 404, "snapshot_retry_unavailable", "failed snapshot is not eligible for retry", err)
-		return
-	}
-	tag, err := tx.Exec(r.Context(), `UPDATE jobs SET state='ready',attempts=0,generation=generation+1,available_at=clock_timestamp(),worker=NULL,lease_until=NULL,last_error_code=NULL,updated_at=clock_timestamp() WHERE id=$1 AND state='dead' AND (deadline_at IS NULL OR deadline_at>clock_timestamp())`, jobID)
-	if err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	if tag.RowsAffected() != 1 {
-		h.fail(w, r, 409, "snapshot_retry_unavailable", "snapshot retry is not available yet", nil)
-		return
-	}
-	if _, err = tx.Exec(r.Context(), `UPDATE repository_snapshots SET state='pending',failure_code=NULL,capture_started_at=NULL WHERE id=$1`, snapshotID); err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	if err = tx.Commit(r.Context()); err != nil {
-		h.err.Handle(w, r, err)
-		return
-	}
-	_ = response.OK(w, map[string]any{"id": snapshotID, "state": "pending"})
-}
-
-func (h *Handler) downloadSnapshot(w http.ResponseWriter, r *http.Request) {
-	s, ok := h.campusSession(w, r)
-	if !ok {
-		return
-	}
-	if h.store == nil {
-		h.fail(w, r, 503, "snapshot_storage_unavailable", "snapshot storage is not configured", nil)
-		return
-	}
-	var key, sha string
-	var projectID = chi.URLParam(r, "id")
-	var id = chi.URLParam(r, "snapshotID")
-	err := h.pool.QueryRow(r.Context(), `SELECT s.object_key,s.commit_sha
-		FROM repository_snapshots s
-		JOIN projects p ON p.id=s.project_id AND p.college_id=s.college_id
-		JOIN repository_bindings b ON b.id=s.binding_id AND b.repository_id=s.repository_id AND b.college_id=s.college_id
-		JOIN github_installations i ON i.id=b.installation_id AND i.college_id=b.college_id
-		WHERE s.id=$1 AND s.project_id=$2 AND s.college_id=$3 AND s.state='verified'
-		AND p.lifecycle<>'archived' AND p.github_revoke_deadline IS NULL
-		AND b.is_current AND b.access_state='active' AND i.status='active'
-		AND (EXISTS(SELECT 1 FROM project_members WHERE project_id=$2 AND college_id=$3 AND user_id=$4) OR EXISTS(SELECT 1 FROM academic_submissions sub JOIN academic_assignment_evaluators ae ON ae.assignment_id=sub.assignment_id AND ae.user_id=$4 JOIN faculty_profiles fp ON fp.college_id=ae.college_id AND fp.user_id=ae.user_id AND fp.status='active' WHERE sub.snapshot_id=s.id AND sub.college_id=s.college_id) OR EXISTS(SELECT 1 FROM academic_submissions sub JOIN academic_assignments a ON a.id=sub.assignment_id AND a.college_id=sub.college_id JOIN academic_cohorts co ON co.id=a.cohort_id AND co.college_id=a.college_id JOIN academic_course_staff cs ON cs.course_id=co.course_id AND cs.user_id=$4 JOIN faculty_profiles fp ON fp.college_id=cs.college_id AND fp.user_id=cs.user_id AND fp.status='active' WHERE sub.snapshot_id=s.id AND sub.college_id=s.college_id))`, id, projectID, s.CollegeID, s.UserID).Scan(&key, &sha)
-	if err != nil {
-		h.fail(w, r, 404, "snapshot_not_found", "verified snapshot is no longer available", err)
-		return
-	}
+func (h *Handler) serveSnapshotFile(w http.ResponseWriter, r *http.Request, key, sha string) {
 	body, err := h.store.Open(r.Context(), key)
 	if err != nil {
 		h.err.Handle(w, r, err)

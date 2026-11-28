@@ -155,7 +155,7 @@ func (h *Handler) saveItems(w http.ResponseWriter, r *http.Request) {
 		var inserted int
 		err = tx.QueryRow(r.Context(), `INSERT INTO portfolio_items(college_id,user_id,project_id,caption,sort_order)
 			SELECT $1,$2,p.id,$4,$5 FROM projects p JOIN project_members pm ON pm.project_id=p.id AND pm.user_id=$2
-			WHERE p.id=$3 AND p.college_id=$1 AND p.github_revoke_deadline IS NULL AND p.lifecycle<>'archived' RETURNING 1`,
+			WHERE p.id=$3 AND p.college_id=$1 AND p.project_context='ordinary' AND p.github_revoke_deadline IS NULL AND p.lifecycle<>'archived' RETURNING 1`,
 			s.CollegeID, s.UserID, item.ProjectID, strings.TrimSpace(item.Caption), index).Scan(&inserted)
 		if errors.Is(err, pgx.ErrNoRows) {
 			h.fail(w, r, http.StatusConflict, "portfolio_project_unavailable", "one or more selected projects are no longer available to you", nil)
@@ -317,7 +317,7 @@ func (h *Handler) portfolioView(w http.ResponseWriter, r *http.Request, handle, 
 	rows, err := h.pool.Query(r.Context(), `SELECT p.id::text,p.title,p.summary,pi.caption,pm.role
 		FROM portfolio_items pi JOIN projects p ON p.id=pi.project_id AND p.college_id=pi.college_id
 		JOIN project_members pm ON pm.project_id=p.id AND pm.user_id=pi.user_id
-		WHERE pi.user_id=$1 AND pi.college_id=$2 AND p.github_revoke_deadline IS NULL AND p.lifecycle='active'
+		WHERE pi.user_id=$1 AND pi.college_id=$2 AND p.project_context='ordinary' AND p.github_revoke_deadline IS NULL AND p.lifecycle='active'
 		AND ($3='public' AND p.visibility='public' AND EXISTS(SELECT 1 FROM repositories rp JOIN repository_bindings rb ON rb.repository_id=rp.id AND rb.is_current AND rb.access_state='active' WHERE rp.project_id=p.id)
 		 OR $3='campus' AND p.visibility IN ('campus','public'))
 		ORDER BY pi.sort_order,pi.created_at,pi.id`, userID, collegeID, audience)
@@ -405,7 +405,7 @@ func (h *Handler) handoverable(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.pool.Query(r.Context(), `SELECT 'project',p.id::text,p.title FROM projects p
 		JOIN project_members pm ON pm.project_id=p.id AND pm.user_id=$2 AND pm.role='owner'
-		WHERE p.college_id=$1 AND p.github_revoke_deadline IS NULL
+		WHERE p.college_id=$1 AND p.project_context='ordinary' AND p.github_revoke_deadline IS NULL
 		UNION ALL
 		SELECT 'organization',o.id::text,o.name FROM organizations o WHERE o.college_id=$1 AND o.owner_user_id=$2
 		ORDER BY 1,3`, s.CollegeID, s.UserID)
@@ -446,7 +446,7 @@ func (h *Handler) eligible(w http.ResponseWriter, r *http.Request, kind string) 
 	id := chi.URLParam(r, "id")
 	var canManage bool
 	if kind == "project" {
-		err := h.pool.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM project_members WHERE project_id=$1 AND college_id=$2 AND user_id=$3 AND role='owner')`, id, s.CollegeID, s.UserID).Scan(&canManage)
+		err := h.pool.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM project_members pm JOIN projects p ON p.id=pm.project_id AND p.college_id=pm.college_id AND p.project_context='ordinary' WHERE pm.project_id=$1 AND pm.college_id=$2 AND pm.user_id=$3 AND pm.role='owner')`, id, s.CollegeID, s.UserID).Scan(&canManage)
 		if err != nil {
 			h.err.Handle(w, r, err)
 			return
@@ -541,7 +541,7 @@ func (h *Handler) proposeHandover(w http.ResponseWriter, r *http.Request, kind s
 			WHEN EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id) THEN 'source_unavailable' ELSE 'not_applicable' END
 			FROM projects p JOIN project_members owner ON owner.project_id=p.id AND owner.user_id=$2 AND owner.role='owner'
 			JOIN project_members successor ON successor.project_id=p.id AND successor.user_id=$3
-			WHERE p.id=$5 AND p.college_id=$1 AND p.github_revoke_deadline IS NULL
+			WHERE p.id=$5 AND p.college_id=$1 AND p.project_context='ordinary' AND p.github_revoke_deadline IS NULL
 			AND EXISTS(SELECT 1 FROM users u WHERE u.id=$3 AND u.college_id=$1 AND u.status='active' AND EXISTS(SELECT 1 FROM campus_verifications v WHERE v.user_id=u.id AND v.college_id=$1 AND v.revoked_at IS NULL))
 			AND EXISTS(SELECT 1 FROM consent_records c WHERE c.user_id=$3 AND c.purpose IN ('terms','privacy') AND c.revoked_at IS NULL GROUP BY c.user_id HAVING count(DISTINCT c.purpose)=2)
 			RETURNING id::text,provider_state`, s.CollegeID, s.UserID, input.ToUserID, input.Message, resourceID).Scan(&id, &providerState)
@@ -645,7 +645,7 @@ func (h *Handler) decideHandover(w http.ResponseWriter, r *http.Request, accept 
 		_ = tx.QueryRow(r.Context(), `SELECT role FROM project_members WHERE project_id=$1 AND college_id=$2 AND user_id=$3 FOR UPDATE`, item.ResourceID, s.CollegeID, item.FromUserID).Scan(&oldRole)
 		_ = tx.QueryRow(r.Context(), `SELECT role FROM project_members WHERE project_id=$1 AND college_id=$2 AND user_id=$3 FOR UPDATE`, item.ResourceID, s.CollegeID, s.UserID).Scan(new(string))
 		var currentOwner, eligibleMember, eligibleUser bool
-		err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM project_members WHERE project_id=$1 AND college_id=$2 AND user_id=$3 AND role='owner'),
+		err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM project_members pm JOIN projects p ON p.id=pm.project_id AND p.college_id=pm.college_id AND p.project_context='ordinary' WHERE pm.project_id=$1 AND pm.college_id=$2 AND pm.user_id=$3 AND pm.role='owner'),
 			EXISTS(SELECT 1 FROM project_members WHERE project_id=$1 AND college_id=$2 AND user_id=$4),
 			EXISTS(SELECT 1 FROM users u WHERE u.id=$3 AND u.college_id=$2 AND u.status='active' AND EXISTS(SELECT 1 FROM campus_verifications v WHERE v.user_id=u.id AND v.college_id=$2 AND v.revoked_at IS NULL)
 			AND EXISTS(SELECT 1 FROM consent_records c WHERE c.user_id=u.id AND c.purpose IN ('terms','privacy') AND c.revoked_at IS NULL GROUP BY c.user_id HAVING count(DISTINCT c.purpose)=2))`, item.ResourceID, s.CollegeID, item.FromUserID, s.UserID).Scan(&currentOwner, &eligibleMember, &eligibleUser)

@@ -38,6 +38,11 @@ type Config struct {
 	GitHubRepositoryClientID     string
 	GitHubRepositoryClientSecret string
 	GitHubRepositoryRedirectURL  string
+	PBLForgeURL                  string
+	PBLForgeOwner                string
+	PBLForgeToken                string
+	PBLWebhookURL                string
+	PBLWebhookSecret             string
 	SMTPHost                     string
 	ResendAPIKey                 string
 	ResendWebhookSecret          string
@@ -94,6 +99,11 @@ func Load() (*Config, error) {
 		GitHubTokenURL:               getEnv("PEERGIT_GITHUB_TOKEN_URL", ""),
 		GitHubAPIURL:                 getEnv("PEERGIT_GITHUB_API_URL", ""),
 		GitHubAppID:                  getEnv("GITHUB_APP_ID", ""),
+		PBLForgeURL:                  getEnv("PBL_FORGE_URL", ""),
+		PBLForgeOwner:                getEnv("PBL_FORGE_OWNER", ""),
+		PBLForgeToken:                getEnv("PBL_FORGE_TOKEN", ""),
+		PBLWebhookURL:                getEnv("PBL_WEBHOOK_URL", ""),
+		PBLWebhookSecret:             getEnv("PBL_WEBHOOK_SECRET", ""),
 		GitHubAppSlug:                getEnv("GITHUB_APP_SLUG", ""),
 		GitHubAppPrivateKey:          getEnv("GITHUB_APP_PRIVATE_KEY_PATH", ""),
 		GitHubWebhookSecret:          getEnv("GITHUB_APP_WEBHOOK_SECRET", ""),
@@ -135,6 +145,18 @@ func (c Config) Validate() error {
 		u, err := url.Parse(c.DatabaseURL)
 		if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") || u.Host == "" || u.Path == "/" || u.Path == "" {
 			return errors.New("DATABASE_URL must be a PostgreSQL URL")
+		}
+	}
+	if c.PBLForgeURL != "" || c.PBLForgeOwner != "" || c.PBLForgeToken != "" || c.PBLWebhookURL != "" || c.PBLWebhookSecret != "" {
+		for _, value := range []string{c.PBLForgeURL, c.PBLWebhookURL} {
+			u, err := url.Parse(value)
+			if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || u.RawQuery != "" || u.Scheme != "https" && u.Scheme != "http" {
+				return errors.New("PBL Forgejo and webhook URLs must be complete HTTP URLs without credentials or query")
+			}
+		}
+		if !regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$`).MatchString(c.PBLForgeOwner) ||
+			len(c.PBLForgeToken) < 32 || len(c.PBLWebhookSecret) < 32 {
+			return errors.New("PBL Git requires a Forgejo owner, access token and separate webhook secret")
 		}
 	}
 	if c.AppEnv == "production" || c.AppEnv == "staging" {

@@ -66,6 +66,7 @@ func (h *Handler) Register(r chi.Router) {
 		api.Get("/me/conversations", h.listConversations)
 		api.With(h.auth.RequireCSRF).Post("/projects/{id}/conversation", h.projectConversation)
 		api.With(h.auth.RequireCSRF).Post("/applications/{id}/conversation", h.applicationConversation)
+		api.With(h.auth.RequireCSRF).Post("/academic/pbl/teams/{team}/rooms/{scope}", h.pblConversation)
 		api.Get("/conversations/{id}/messages", h.listMessages)
 		api.With(h.auth.RequireCSRF).Post("/conversations/{id}/messages", h.createMessage)
 		api.With(h.auth.RequireCSRF).Post("/conversations/{id}/reports", h.reportMessage)
@@ -99,9 +100,12 @@ func (h *Handler) access(w http.ResponseWriter, r *http.Request, s identity.Sess
 		return projectAccess{}, false
 	}
 	var p projectAccess
-	err := h.pool.QueryRow(r.Context(), `SELECT p.college_id::text,COALESCE(m.role,''),p.visibility,p.lifecycle
+	var contextType string
+	err := h.pool.QueryRow(r.Context(), `SELECT p.college_id::text,COALESCE(m.role,''),p.visibility,p.lifecycle,p.project_context
 		FROM projects p LEFT JOIN project_members m ON m.project_id=p.id AND m.user_id=$2
-		WHERE p.id=$1 AND p.github_revoke_deadline IS NULL`, projectID, s.UserID).Scan(&p.collegeID, &p.role, &p.visibility, &p.lifecycle)
+		WHERE p.id=$1 AND p.github_revoke_deadline IS NULL AND (p.project_context='ordinary'
+			OR EXISTS(SELECT 1 FROM pbl_teams t JOIN pbl_active_team_members pa ON pa.team_id=t.id AND pa.user_id=$2
+				WHERE t.project_id=p.id AND t.college_id=p.college_id))`, projectID, s.UserID).Scan(&p.collegeID, &p.role, &p.visibility, &p.lifecycle, &contextType)
 	if errors.Is(err, pgx.ErrNoRows) {
 		fail(w, http.StatusNotFound, "project_not_found", "project was not found")
 		return projectAccess{}, false
@@ -115,6 +119,9 @@ func (h *Handler) access(w http.ResponseWriter, r *http.Request, s identity.Sess
 		return projectAccess{}, false
 	}
 	member := p.role != ""
+	if contextType == "pbl" {
+		p.visibility = "private"
+	}
 	visible := member || (p.lifecycle == "active" && p.visibility != "private")
 	if !visible || (write && (!member || p.lifecycle == "archived")) {
 		fail(w, http.StatusNotFound, "project_not_found", "project was not found")

@@ -26,6 +26,10 @@ CREATE TABLE users (
     status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended','deletion_pending','deleted')),
     email_verified_at timestamptz,
     profile jsonb NOT NULL DEFAULT '{}'::jsonb,
+    course_of_study text NOT NULL DEFAULT '' CHECK (length(course_of_study) <= 120),
+    academic_year smallint CHECK (academic_year BETWEEN 1 AND 12),
+    semester smallint CHECK (semester BETWEEN 1 AND 24),
+    academic_section text NOT NULL DEFAULT '' CHECK (length(academic_section) <= 40),
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     deleted_at timestamptz,
@@ -34,6 +38,9 @@ CREATE TABLE users (
            (account_type IN ('unverified','external','platform') AND college_id IS NULL))
 );
 CREATE INDEX users_campus_idx ON users(college_id, id) WHERE status = 'active';
+CREATE INDEX users_academic_discovery_idx
+    ON users(college_id, lower(course_of_study), academic_year, semester, lower(academic_section))
+    WHERE status = 'active' AND account_type = 'campus';
 
 CREATE TABLE campus_verifications (
     college_id uuid NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
@@ -50,7 +57,7 @@ CREATE TABLE campus_verifications (
 CREATE TABLE external_college_access (
     college_id uuid NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    access_kind text NOT NULL CHECK (access_kind IN ('mentor','recruiter','organization_guest')),
+    access_kind text NOT NULL CHECK (access_kind IN ('mentor','organization_guest')),
     granted_at timestamptz NOT NULL DEFAULT now(),
     revoked_at timestamptz,
     PRIMARY KEY (college_id, user_id, access_kind)
@@ -175,7 +182,7 @@ CREATE TABLE campus_roles (
 CREATE TABLE organizations (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     college_id uuid NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
-    kind text NOT NULL CHECK (kind IN ('department','club','innovation_cell','placement_cell','event_body')),
+    kind text NOT NULL CHECK (kind IN ('department','club','innovation_cell','event_body')),
     slug text NOT NULL CHECK (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
     name text NOT NULL CHECK (length(btrim(name)) BETWEEN 2 AND 160),
     description text NOT NULL DEFAULT '' CHECK (length(description) <= 2000),
@@ -201,7 +208,7 @@ CREATE TABLE invitations (
     email_normalized text NOT NULL,
     account_type text NOT NULL CHECK (account_type IN ('campus','external')),
     role text CHECK (role IN ('student','faculty','alumni_mentor','moderator','campus_admin')),
-    external_access_kind text CHECK (external_access_kind IN ('mentor','recruiter','organization_guest')),
+    external_access_kind text CHECK (external_access_kind IN ('mentor','organization_guest')),
     organization_id uuid,
     token_hash bytea NOT NULL UNIQUE CHECK (octet_length(token_hash) = 32),
     invited_by uuid REFERENCES users(id) ON DELETE SET NULL,
@@ -233,7 +240,7 @@ CREATE TABLE user_skills (
 CREATE TABLE consent_records (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    purpose text NOT NULL CHECK (purpose IN ('terms','privacy','profile_discovery','portfolio','recruiter_discovery','analytics')),
+    purpose text NOT NULL CHECK (purpose IN ('terms','privacy','profile_discovery','portfolio','analytics')),
     policy_version text NOT NULL,
     granted_at timestamptz NOT NULL DEFAULT now(),
     revoked_at timestamptz,

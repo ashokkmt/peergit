@@ -3,6 +3,7 @@ package collaboration
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,6 +48,17 @@ func (h *Handler) search(w http.ResponseWriter, r *http.Request) {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	if len(query) > 120 {
 		fail(w, http.StatusBadRequest, "search_query_invalid", "search text must be 120 characters or fewer")
+		return
+	}
+	filters := r.URL.Query()
+	course, section := strings.TrimSpace(filters.Get("course_of_study")), strings.TrimSpace(filters.Get("section"))
+	year, semester := filters.Get("year"), filters.Get("semester")
+	validNumber := func(raw string, max int) bool {
+		value, err := strconv.Atoi(raw)
+		return raw == "" || err == nil && value >= 1 && value <= max
+	}
+	if len(course) > 120 || len(section) > 40 || !validNumber(year, 12) || !validNumber(semester, 24) {
+		fail(w, http.StatusBadRequest, "academic_filter_invalid", "check the academic search filters")
 		return
 	}
 	if query != "" && len([]rune(query)) < 2 {
@@ -135,23 +147,30 @@ func (h *Handler) search(w http.ResponseWriter, r *http.Request) {
 		DisplayName string   `json:"display_name"`
 		Headline    string   `json:"headline"`
 		Skills      []string `json:"skills"`
+		Course      string   `json:"course_of_study,omitempty"`
+		Year        *int     `json:"year,omitempty"`
+		Semester    *int     `json:"semester,omitempty"`
+		Section     string   `json:"section,omitempty"`
 	}
 	people := []personResult{}
 	rows, err = h.pool.Query(r.Context(), `SELECT u.id::text,u.handle,u.display_name,COALESCE(u.profile->>'headline',''),
-		COALESCE(array_agg(DISTINCT sk.name) FILTER (WHERE sk.name IS NOT NULL),'{}')
+		COALESCE(array_agg(DISTINCT sk.name) FILTER (WHERE sk.name IS NOT NULL),'{}'),
+		u.course_of_study,u.academic_year,u.semester,u.academic_section
 		FROM users u JOIN campus_verifications cv ON cv.user_id=u.id AND cv.college_id=u.college_id AND cv.revoked_at IS NULL
-		JOIN consent_records pc ON pc.user_id=u.id AND pc.purpose='profile_discovery' AND pc.revoked_at IS NULL
 		LEFT JOIN user_skills us ON us.user_id=u.id LEFT JOIN skills sk ON sk.id=us.skill_id
 		WHERE u.college_id=$1 AND u.status='active' AND u.account_type='campus' AND u.id<>$2
+		AND EXISTS(SELECT 1 FROM consent_records pc WHERE pc.user_id=u.id AND pc.purpose='profile_discovery' AND pc.revoked_at IS NULL)
+		AND ($5='' OR lower(u.course_of_study)=lower($5)) AND ($6='' OR lower(u.academic_section)=lower($6))
+		AND ($7='' OR u.academic_year=NULLIF($7,'')::smallint) AND ($8='' OR u.semester=NULLIF($8,'')::smallint)
 		AND ($3='' OR u.profile_search_document @@ plainto_tsquery('english',$3) OR u.display_name OPERATOR(public.%) $3 OR u.handle OPERATOR(public.%) $3)
-		GROUP BY u.id ORDER BY CASE WHEN $3='' THEN 0 ELSE ts_rank(u.profile_search_document,plainto_tsquery('english',$3)) END DESC,u.display_name,u.id LIMIT $4`, s.CollegeID, s.UserID, query, discoveryPageSize)
+		GROUP BY u.id ORDER BY CASE WHEN $3='' THEN 0 ELSE ts_rank(u.profile_search_document,plainto_tsquery('english',$3)) END DESC,u.display_name,u.id LIMIT $4`, s.CollegeID, s.UserID, query, discoveryPageSize, course, section, year, semester)
 	if err != nil {
 		h.err.Handle(w, r, err)
 		return
 	}
 	for rows.Next() {
 		var item personResult
-		if err = rows.Scan(&item.ID, &item.Handle, &item.DisplayName, &item.Headline, &item.Skills); err != nil {
+		if err = rows.Scan(&item.ID, &item.Handle, &item.DisplayName, &item.Headline, &item.Skills, &item.Course, &item.Year, &item.Semester, &item.Section); err != nil {
 			rows.Close()
 			h.err.Handle(w, r, err)
 			return
@@ -193,7 +212,10 @@ func (h *Handler) feed(w http.ResponseWriter, r *http.Request) {
 		WHERE d.college_id=$1 AND d.status='open'
 		), visible AS (
 		SELECT f.* FROM feed_items f JOIN projects p ON p.id=f.project_id AND p.college_id=$1
-		WHERE ((p.lifecycle='active' AND p.visibility IN ('campus','public')) OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$2))
+		WHERE ((p.project_context='ordinary' AND ((p.lifecycle='active' AND p.visibility IN ('campus','public'))
+			 OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$2)))
+			 OR EXISTS(SELECT 1 FROM pbl_teams t JOIN pbl_active_team_members m ON m.team_id=t.id AND m.user_id=$2
+				WHERE t.project_id=p.id AND t.college_id=p.college_id))
 		AND ($3<>'following' OR EXISTS(SELECT 1 FROM project_follows pf WHERE pf.college_id=$1 AND pf.user_id=$2 AND pf.project_id=p.id))
 		)
 		SELECT v.id::text,v.project_id::text,v.project_title,v.actor_id::text,u.display_name,v.kind,v.summary,v.created_at

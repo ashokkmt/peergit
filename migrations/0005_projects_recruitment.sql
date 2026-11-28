@@ -8,6 +8,7 @@ CREATE TABLE projects (
     summary text NOT NULL CHECK (length(btrim(summary)) BETWEEN 1 AND 500),
     description text NOT NULL DEFAULT '' CHECK (length(description) <= 12000),
     project_type text NOT NULL CHECK (project_type IN ('side_project','coursework','research','startup','open_source','hackathon')),
+    project_context text NOT NULL DEFAULT 'ordinary' CHECK (project_context IN ('ordinary','pbl')),
     visibility text NOT NULL DEFAULT 'campus' CHECK (visibility IN ('private','campus','public')),
     lifecycle text NOT NULL DEFAULT 'draft' CHECK (lifecycle IN ('draft','active','on_hold','completed','archived')),
     version integer NOT NULL DEFAULT 1 CHECK (version > 0),
@@ -15,7 +16,9 @@ CREATE TABLE projects (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (id, college_id),
+    UNIQUE (id, college_id, project_context),
     UNIQUE (college_id, slug),
+    CHECK (project_context='ordinary' OR (project_type='coursework' AND visibility<>'public')),
     FOREIGN KEY (created_by, college_id) REFERENCES users(id, college_id)
 );
 CREATE INDEX projects_discovery_idx ON projects(college_id, updated_at DESC, id DESC) WHERE lifecycle='active' AND visibility IN ('campus','public');
@@ -52,6 +55,7 @@ CREATE TABLE project_roles (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     college_id uuid NOT NULL,
     project_id uuid NOT NULL,
+    project_context text GENERATED ALWAYS AS ('ordinary'::text) STORED,
     title text NOT NULL CHECK (length(btrim(title)) BETWEEN 2 AND 100),
     description text NOT NULL CHECK (length(btrim(description)) BETWEEN 1 AND 3000),
     openings integer NOT NULL CHECK (openings BETWEEN 1 AND 20),
@@ -62,7 +66,7 @@ CREATE TABLE project_roles (
     version integer NOT NULL DEFAULT 1 CHECK (version > 0),
     created_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (id, college_id),
-    FOREIGN KEY (project_id, college_id) REFERENCES projects(id, college_id) ON DELETE CASCADE
+    FOREIGN KEY (project_id, college_id, project_context) REFERENCES projects(id, college_id, project_context) ON DELETE CASCADE
 );
 CREATE INDEX project_roles_open_idx ON project_roles(college_id, project_id, created_at) WHERE status='open';
 
@@ -90,6 +94,7 @@ CREATE TABLE project_invitations (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     college_id uuid NOT NULL,
     project_id uuid NOT NULL,
+    project_context text GENERATED ALWAYS AS ('ordinary'::text) STORED,
     invited_user_id uuid NOT NULL,
     role text NOT NULL CHECK (role IN ('maintainer','member','mentor')),
     token_hash bytea NOT NULL UNIQUE CHECK (octet_length(token_hash)=32),
@@ -98,7 +103,7 @@ CREATE TABLE project_invitations (
     accepted_at timestamptz,
     revoked_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
-    FOREIGN KEY (project_id, college_id) REFERENCES projects(id, college_id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id, college_id, project_context) REFERENCES projects(id, college_id, project_context) ON DELETE CASCADE,
     FOREIGN KEY (invited_user_id, college_id) REFERENCES users(id, college_id) ON DELETE CASCADE,
     FOREIGN KEY (invited_by, college_id) REFERENCES users(id, college_id),
     CHECK ((accepted_at IS NULL) OR revoked_at IS NULL)

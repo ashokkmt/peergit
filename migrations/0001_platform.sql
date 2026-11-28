@@ -33,8 +33,7 @@ CREATE TABLE jobs (
     updated_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, job_type, dedupe_key),
     CHECK ((state = 'running' AND worker IS NOT NULL AND lease_until IS NOT NULL) OR
-           (state <> 'running' AND worker IS NULL AND lease_until IS NULL)),
-    CHECK ((state = 'done') = (object_key IS NOT NULL) OR job_type <> 'snapshot')
+           (state <> 'running' AND worker IS NULL AND lease_until IS NULL))
 );
 CREATE INDEX jobs_ready_idx ON jobs (available_at, id) WHERE state = 'ready';
 CREATE INDEX jobs_expired_idx ON jobs (lease_until, id) WHERE state = 'running';

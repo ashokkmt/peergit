@@ -500,14 +500,14 @@ func validRole(role string) bool {
 }
 func validExternal(kind string) bool {
 	switch kind {
-	case "mentor", "recruiter", "organization_guest":
+	case "mentor", "organization_guest":
 		return true
 	}
 	return false
 }
 func validOrganization(kind string) bool {
 	switch kind {
-	case "department", "club", "innovation_cell", "placement_cell", "event_body":
+	case "department", "club", "innovation_cell", "event_body":
 		return true
 	}
 	return false

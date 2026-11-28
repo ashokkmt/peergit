@@ -27,5 +27,5 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('tests/e2e/package-lock.json') }}
-      - name: Run the shared CI and pre-commit test script
+      - name: Run the shared suite with disposable PostgreSQL and Forgejo
         run: node scripts/test.mjs

@@ -14,7 +14,7 @@ type Message = {
 type ConversationData = {
   items: Message[];
   next_cursor?: string | null;
-  context_type: "project" | "application";
+  context_type: "project" | "application" | "pbl_team" | "pbl_faculty";
   project_id: string;
   application_id?: string;
   state: "open" | "closed";
@@ -184,6 +184,8 @@ export function ConversationRoom({ conversationID }: { conversationID: string })
             <h1 className="m-0 font-display text-[clamp(1.5rem,2.5vw,2rem)] font-semibold leading-[1.19] tracking-[-0.015em]">
               {context?.context_type === "application"
                 ? "Application conversation"
+                : context?.context_type === "pbl_team" ? "PBL team room"
+                : context?.context_type === "pbl_faculty" ? "PBL faculty group"
                 : "Project team conversation"}
             </h1>
             {context && (
@@ -199,7 +201,7 @@ export function ConversationRoom({ conversationID }: { conversationID: string })
             )}
           </div>
           <p className="mb-0 mt-1.5 text-sm text-muted">
-            {context ? (
+            {context?.project_id ? (
               <>
                 Project{" "}
                 <a className="font-mono text-xs text-link" href={`/projects/${context.project_id}`}>
@@ -210,17 +212,18 @@ export function ConversationRoom({ conversationID }: { conversationID: string })
                   : ""}
               </>
             ) : (
-              "Context unavailable"
+              context ? "Coursework conversation" : "Context unavailable"
             )}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {context && (
+          {context?.project_id && (
             <a className={secondaryButton} href={`/projects/${context.project_id}`}>
               Open project →
             </a>
           )}
+          {context && !context.project_id && <a className={secondaryButton} href="/academics/pbl">Open PBL workspace</a>}
           <button
             className={secondaryButton}
             onClick={() => void load(undefined, true)}

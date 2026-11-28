@@ -241,6 +241,21 @@ func (h *Handler) session(w http.ResponseWriter, r *http.Request) {
 	_ = response.OK(w, map[string]any{"authenticated": true, "csrf_token": csrf, "user": map[string]any{"id": s.UserID, "email": s.Email, "display_name": s.DisplayName, "account_type": s.AccountType, "campus_status": campusStatus, "college_id": s.CollegeID, "campus_admin": s.CampusAdmin, "mfa_enabled": s.MFAEnabled, "mfa_verified": s.MFAFresh, "terms_accepted": s.TermsAccepted, "privacy_accepted": s.PrivacyAccepted}})
 }
 
+type academicDetails struct {
+	CourseOfStudy string `json:"course_of_study"`
+	Year          *int16 `json:"year"`
+	Semester      *int16 `json:"semester"`
+	Section       string `json:"section"`
+}
+
+func (a *academicDetails) valid() bool {
+	a.CourseOfStudy = strings.TrimSpace(a.CourseOfStudy)
+	a.Section = strings.TrimSpace(a.Section)
+	return len(a.CourseOfStudy) <= 120 && len(a.Section) <= 40 &&
+		(a.Year == nil || *a.Year >= 1 && *a.Year <= 12) &&
+		(a.Semester == nil || *a.Semester >= 1 && *a.Semester <= 24)
+}
+
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 	s, ok := CurrentSession(r.Context())
 	if !ok {
@@ -248,9 +263,11 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var profile json.RawMessage
+	var academic academicDetails
 	skills := []string{}
 	consents := []string{}
-	if err := h.pool.QueryRow(r.Context(), `SELECT profile FROM users WHERE id=$1`, s.UserID).Scan(&profile); err != nil {
+	if err := h.pool.QueryRow(r.Context(), `SELECT profile,course_of_study,academic_year,semester,academic_section FROM users WHERE id=$1`, s.UserID).
+		Scan(&profile, &academic.CourseOfStudy, &academic.Year, &academic.Semester, &academic.Section); err != nil {
 		h.err.Handle(w, r, err)
 		return
 	}
@@ -304,17 +321,18 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 	} else if s.AccountType == "external" {
 		campusStatus = "external"
 	}
-	_ = response.OK(w, map[string]any{"id": s.UserID, "college_id": s.CollegeID, "campus_status": campusStatus, "email": s.Email, "display_name": s.DisplayName, "account_type": s.AccountType, "profile": profile, "skills": skills, "consents": consents, "campus_admin": s.CampusAdmin, "mfa_enabled": s.MFAEnabled})
+	_ = response.OK(w, map[string]any{"id": s.UserID, "college_id": s.CollegeID, "campus_status": campusStatus, "email": s.Email, "display_name": s.DisplayName, "account_type": s.AccountType, "profile": profile, "academic": academic, "skills": skills, "consents": consents, "campus_admin": s.CampusAdmin, "mfa_enabled": s.MFAEnabled})
 }
 
 func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	s, _ := CurrentSession(r.Context())
 	input, err := request.Decode[struct {
-		DisplayName   string   `json:"display_name"`
-		Bio           string   `json:"bio"`
-		Headline      string   `json:"headline"`
-		AvatarMediaID string   `json:"avatar_media_id"`
-		Skills        []string `json:"skills"`
+		DisplayName   string           `json:"display_name"`
+		Bio           string           `json:"bio"`
+		Headline      string           `json:"headline"`
+		AvatarMediaID string           `json:"avatar_media_id"`
+		Skills        []string         `json:"skills"`
+		Academic      *academicDetails `json:"academic"`
 	}](r)
 	if err != nil {
 		h.err.Handle(w, r, err)
@@ -325,6 +343,10 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	input.Headline = strings.TrimSpace(input.Headline)
 	if len(input.DisplayName) < 1 || len(input.DisplayName) > 120 || len(input.Bio) > 2000 || len(input.Headline) > 160 || len(input.Skills) > 30 {
 		h.fail(w, r, http.StatusBadRequest, "profile_invalid", "profile fields exceed the allowed limits", nil)
+		return
+	}
+	if input.Academic != nil && (s.CollegeID == "" || !input.Academic.valid()) {
+		h.fail(w, r, http.StatusBadRequest, "academic_profile_invalid", "valid academic fields require verified campus access", nil)
 		return
 	}
 	if input.AvatarMediaID != "" {
@@ -348,6 +370,13 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	if _, err = tx.Exec(r.Context(), `UPDATE users SET display_name=$2,profile=$3,updated_at=now() WHERE id=$1`, s.UserID, input.DisplayName, profile); err != nil {
 		h.err.Handle(w, r, err)
 		return
+	}
+	if academic := input.Academic; academic != nil {
+		if _, err = tx.Exec(r.Context(), `UPDATE users SET course_of_study=$3,academic_year=$4,semester=$5,academic_section=$6
+			WHERE id=$1 AND college_id=$2`, s.UserID, s.CollegeID, academic.CourseOfStudy, academic.Year, academic.Semester, academic.Section); err != nil {
+			h.err.Handle(w, r, err)
+			return
+		}
 	}
 	if _, err = tx.Exec(r.Context(), `DELETE FROM user_skills WHERE user_id=$1`, s.UserID); err != nil {
 		h.err.Handle(w, r, err)
@@ -394,7 +423,7 @@ func (h *Handler) updateConsent(w http.ResponseWriter, r *http.Request) {
 		h.err.Handle(w, r, err)
 		return
 	}
-	allowed := map[string]bool{"terms": true, "privacy": true, "profile_discovery": true, "portfolio": true, "recruiter_discovery": true, "analytics": true}
+	allowed := map[string]bool{"terms": true, "privacy": true, "profile_discovery": true, "portfolio": true, "analytics": true}
 	if !allowed[input.Purpose] || input.PolicyVersion == "" || len(input.PolicyVersion) > 40 || input.Purpose == "terms" && input.PolicyVersion != termsPolicyVersion || input.Purpose == "privacy" && input.PolicyVersion != privacyPolicyVersion {
 		h.fail(w, r, http.StatusBadRequest, "consent_invalid", "consent request is invalid", nil)
 		return

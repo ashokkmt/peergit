@@ -143,7 +143,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		COALESCE(array_agg(DISTINCT sk.name) FILTER(WHERE sk.name IS NOT NULL),'{}'::text[]),
 		EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id) AS has_repository
 		FROM projects p LEFT JOIN project_skills ps ON ps.project_id=p.id LEFT JOIN skills sk ON sk.id=ps.skill_id
-		WHERE p.github_revoke_deadline IS NULL AND ((p.visibility='public' AND p.lifecycle='active' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)) OR (p.college_id=$1 AND ((p.lifecycle='active' AND p.visibility='campus' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)) OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$4))))
+		WHERE p.github_revoke_deadline IS NULL AND ((p.visibility='public' AND p.lifecycle='active' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)) OR (p.college_id=$1 AND ((p.lifecycle='active' AND p.visibility='campus' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)) OR (p.project_context='ordinary' AND EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$4)) OR EXISTS(SELECT 1 FROM pbl_teams t JOIN pbl_active_team_members m ON m.team_id=t.id AND m.user_id=$4 WHERE t.project_id=p.id AND t.college_id=p.college_id))))
 		AND ($2::uuid IS NULL OR p.id<$2) AND ($3='' OR p.title ILIKE '%'||$3||'%' OR p.summary ILIKE '%'||$3||'%')
 		GROUP BY p.id ORDER BY p.id DESC LIMIT 51`, s.CollegeID, nullUUID(cursorID), q, s.UserID)
 	} else {
@@ -209,6 +209,7 @@ type projectView struct {
 	Recruiting    bool      `json:"recruiting"`
 	Skills        []string  `json:"skills"`
 	HasRepository bool      `json:"-"`
+	Context       string    `json:"project_context,omitempty"`
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
@@ -220,10 +221,10 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	var description, creator, projectCollegeID string
 	var err error
 	if campusAccess {
-		err = h.pool.QueryRow(r.Context(), `SELECT p.id::text,p.slug,p.title,p.summary,p.description,p.project_type,p.visibility,p.lifecycle,p.version,p.updated_at,p.created_by::text,p.college_id::text,
+		err = h.pool.QueryRow(r.Context(), `SELECT p.id::text,p.slug,p.title,p.summary,p.description,p.project_type,p.visibility,p.lifecycle,p.version,p.updated_at,p.created_by::text,p.college_id::text,p.project_context,
 		EXISTS(SELECT 1 FROM project_roles rr WHERE rr.project_id=p.id AND rr.status='open'),COALESCE(array_agg(DISTINCT sk.name) FILTER(WHERE sk.name IS NOT NULL),'{}'::text[]),EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)
 		FROM projects p LEFT JOIN project_skills ps ON ps.project_id=p.id LEFT JOIN skills sk ON sk.id=ps.skill_id
-		WHERE p.id=$1 AND p.github_revoke_deadline IS NULL AND ((p.visibility='public' AND p.lifecycle='active' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)) OR (p.college_id=$2 AND ((p.lifecycle='active' AND p.visibility='campus' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)) OR EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$3)))) GROUP BY p.id`, id, s.CollegeID, s.UserID).Scan(&v.ID, &v.Slug, &v.Title, &v.Summary, &description, &v.Type, &v.Visibility, &v.Lifecycle, &v.Version, &v.UpdatedAt, &creator, &projectCollegeID, &v.Recruiting, &v.Skills, &v.HasRepository)
+		WHERE p.id=$1 AND p.github_revoke_deadline IS NULL AND ((p.visibility='public' AND p.lifecycle='active' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)) OR (p.college_id=$2 AND ((p.lifecycle='active' AND p.visibility='campus' AND EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)) OR (p.project_context='ordinary' AND EXISTS(SELECT 1 FROM project_members pm WHERE pm.project_id=p.id AND pm.user_id=$3)) OR EXISTS(SELECT 1 FROM pbl_teams t JOIN pbl_active_team_members m ON m.team_id=t.id AND m.user_id=$3 WHERE t.project_id=p.id AND t.college_id=p.college_id)))) GROUP BY p.id`, id, s.CollegeID, s.UserID).Scan(&v.ID, &v.Slug, &v.Title, &v.Summary, &description, &v.Type, &v.Visibility, &v.Lifecycle, &v.Version, &v.UpdatedAt, &creator, &projectCollegeID, &v.Context, &v.Recruiting, &v.Skills, &v.HasRepository)
 	} else {
 		err = h.pool.QueryRow(r.Context(), `SELECT p.id::text,p.slug,p.title,p.summary,p.project_type,p.visibility,p.lifecycle,p.version,p.updated_at,
 		EXISTS(SELECT 1 FROM project_roles rr WHERE rr.project_id=p.id AND rr.status='open'),COALESCE(array_agg(DISTINCT sk.name) FILTER(WHERE sk.name IS NOT NULL),'{}'::text[]),EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id)
@@ -245,7 +246,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 		}
 		v.Recruiting = false
 	}
-	if !campusAccess || projectCollegeID != s.CollegeID {
+	if !campusAccess || projectCollegeID != s.CollegeID || v.Context == "pbl" {
 		_ = response.OK(w, map[string]any{"project": v, "description": "", "created_by": "", "viewer_role": "", "members": []any{}})
 		return
 	}
@@ -288,7 +289,7 @@ func (h *Handler) people(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var manager bool
-	if err := h.pool.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM project_members WHERE project_id=$1 AND college_id=$2 AND user_id=$3 AND role IN('owner','maintainer'))`, chi.URLParam(r, "id"), s.CollegeID, s.UserID).Scan(&manager); err != nil {
+	if err := h.pool.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM project_members pm JOIN projects p ON p.id=pm.project_id AND p.college_id=pm.college_id AND p.project_context='ordinary' WHERE pm.project_id=$1 AND pm.college_id=$2 AND pm.user_id=$3 AND pm.role IN('owner','maintainer'))`, chi.URLParam(r, "id"), s.CollegeID, s.UserID).Scan(&manager); err != nil {
 		h.err.Handle(w, r, err)
 		return
 	}
@@ -383,7 +384,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	var next int
-	err = tx.QueryRow(r.Context(), `UPDATE projects p SET summary=$4,description=$5,visibility=$6,lifecycle=$7,version=version+1,updated_at=now() WHERE p.id=$1 AND p.college_id=$2 AND p.github_revoke_deadline IS NULL AND p.version=$3 AND EXISTS(SELECT 1 FROM project_members m WHERE m.project_id=p.id AND m.user_id=$8 AND m.role IN ('owner','maintainer')) AND (EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id) OR ($6='private' AND $7 IN ('draft','archived'))) RETURNING version`, id, s.CollegeID, in.Version, in.Summary, in.Description, in.Visibility, in.Lifecycle, s.UserID).Scan(&next)
+	err = tx.QueryRow(r.Context(), `UPDATE projects p SET summary=$4,description=$5,visibility=$6,lifecycle=$7,version=version+1,updated_at=now() WHERE p.id=$1 AND p.college_id=$2 AND p.project_context='ordinary' AND p.github_revoke_deadline IS NULL AND p.version=$3 AND EXISTS(SELECT 1 FROM project_members m WHERE m.project_id=p.id AND m.user_id=$8 AND m.role IN ('owner','maintainer')) AND (EXISTS(SELECT 1 FROM repositories rp WHERE rp.project_id=p.id AND rp.college_id=p.college_id) OR ($6='private' AND $7 IN ('draft','archived'))) RETURNING version`, id, s.CollegeID, in.Version, in.Summary, in.Description, in.Visibility, in.Lifecycle, s.UserID).Scan(&next)
 	if errors.Is(err, pgx.ErrNoRows) {
 		h.fail(w, r, 409, "project_changed_or_forbidden", "project changed or you cannot edit it", nil)
 		return
@@ -447,7 +448,7 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	var lockedProject string
-	if err = tx.QueryRow(r.Context(), `SELECT id::text FROM projects WHERE id=$1 AND college_id=$2 FOR UPDATE`, pid, s.CollegeID).Scan(&lockedProject); err != nil {
+	if err = tx.QueryRow(r.Context(), `SELECT id::text FROM projects WHERE id=$1 AND college_id=$2 AND project_context='ordinary' FOR UPDATE`, pid, s.CollegeID).Scan(&lockedProject); err != nil {
 		h.fail(w, r, 404, "project_or_user_not_found", "project or campus user not found", nil)
 		return
 	}
@@ -546,7 +547,7 @@ func (h *Handler) changeMemberRole(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	var locked string
-	if err = tx.QueryRow(r.Context(), `SELECT id::text FROM projects WHERE id=$1 AND college_id=$2 FOR UPDATE`, pid, s.CollegeID).Scan(&locked); err != nil {
+	if err = tx.QueryRow(r.Context(), `SELECT id::text FROM projects WHERE id=$1 AND college_id=$2 AND project_context='ordinary' FOR UPDATE`, pid, s.CollegeID).Scan(&locked); err != nil {
 		h.fail(w, r, 404, "project_not_found", "project not found", nil)
 		return
 	}
@@ -592,7 +593,7 @@ func (h *Handler) removeMember(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	var locked string
-	if err = tx.QueryRow(r.Context(), `SELECT id::text FROM projects WHERE id=$1 AND college_id=$2 FOR UPDATE`, pid, s.CollegeID).Scan(&locked); err != nil {
+	if err = tx.QueryRow(r.Context(), `SELECT id::text FROM projects WHERE id=$1 AND college_id=$2 AND project_context='ordinary' FOR UPDATE`, pid, s.CollegeID).Scan(&locked); err != nil {
 		h.fail(w, r, 404, "project_not_found", "project not found", nil)
 		return
 	}

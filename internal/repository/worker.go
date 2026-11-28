@@ -23,11 +23,11 @@ func JobHandlers(pool *pgxpool.Pool, api *github.Client, appID string, privateKe
 		"github_webhook":   w.webhook,
 		"github_reconcile": w.reconcile,
 		"github_overview":  w.overview,
-		"snapshot":         w.capture,
 	}
 }
 
 type worker struct {
+	forge      ForgeConfig
 	pool       *pgxpool.Pool
 	api        *github.Client
 	appID      string
@@ -361,84 +361,6 @@ func (w *worker) saveCommit(ctx context.Context, bindingID string, commit github
 	return tx.Commit(ctx)
 }
 
-func (w *worker) capture(ctx context.Context, claim jobs.Claim) (string, error) {
-	var payload snapshotJob
-	if err := json.Unmarshal(claim.Payload, &payload); err != nil || !uuidOK(payload.SnapshotID) {
-		return "", errors.New("invalid snapshot job")
-	}
-	if w.store == nil {
-		return "", errors.New("snapshot storage is not configured")
-	}
-	var projectID, repoID, bindingID, owner, name, sha, installID, state, existingKey string
-	var externalRepo int64
-	err := w.pool.QueryRow(ctx, `SELECT s.project_id::text,s.repository_id::text,s.binding_id::text,b.owner_login,b.repository_name,s.commit_sha,i.external_installation_id::text,s.state,COALESCE(s.object_key,''),b.external_repository_id
-		FROM repository_snapshots s JOIN repository_bindings b ON b.id=s.binding_id AND b.repository_id=s.repository_id AND b.college_id=s.college_id JOIN github_installations i ON i.id=b.installation_id AND i.college_id=b.college_id
-		JOIN projects p ON p.id=s.project_id AND p.college_id=s.college_id WHERE s.id=$1 AND p.github_revoke_deadline IS NULL AND b.is_current AND b.access_state='active' AND i.status='active'`, payload.SnapshotID).Scan(&projectID, &repoID, &bindingID, &owner, &name, &sha, &installID, &state, &existingKey, &externalRepo)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", errors.New("snapshot repository permission is no longer active")
-	}
-	if err != nil {
-		return "", err
-	}
-	if state == "verified" && existingKey != "" {
-		return existingKey, nil
-	}
-	if state != "pending" && state != "failed" && state != "capturing" {
-		return "", fmt.Errorf("snapshot has invalid state %q", state)
-	}
-	if err = w.beginCapture(ctx, claim, payload.SnapshotID); err != nil {
-		return "", err
-	}
-	jwt, err := github.JWT(w.appID, w.privateKey, time.Now())
-	if err != nil {
-		w.failCapture(ctx, claim, payload.SnapshotID, "app_auth_failed")
-		return "", err
-	}
-	token, err := w.api.Token(ctx, installID, jwt)
-	if err != nil {
-		if github.IsDenied(err) {
-			w.markBindingPermissionLost(ctx, bindingID, "installation_access_lost")
-		}
-		w.failCapture(ctx, claim, payload.SnapshotID, "installation_token_failed")
-		return "", err
-	}
-	repo, err := w.api.Repository(ctx, owner+"/"+name, token)
-	if err != nil {
-		if github.IsDenied(err) {
-			w.markBindingPermissionLost(ctx, bindingID, "repository_access_lost")
-		}
-		w.failCapture(ctx, claim, payload.SnapshotID, "repository_access_failed")
-		return "", err
-	}
-	if repo.ID != externalRepo {
-		w.failCapture(ctx, claim, payload.SnapshotID, "repository_identity_mismatch")
-		return "", errors.New("repository identity changed")
-	}
-	archive, err := w.api.Archive(ctx, owner+"/"+name, sha, token)
-	if err != nil {
-		if github.IsDenied(err) {
-			w.markBindingPermissionLost(ctx, bindingID, "repository_access_lost")
-		}
-		w.failCapture(ctx, claim, payload.SnapshotID, "archive_download_failed")
-		return "", err
-	}
-	defer archive.Close()
-	receipt, err := w.store.Capture(ctx, archive, "snapshots/"+projectID+"/"+payload.SnapshotID, maxArchiveBytes)
-	if err != nil {
-		w.failCapture(ctx, claim, payload.SnapshotID, "archive_capture_failed")
-		return "", err
-	}
-	if err = w.finishCapture(ctx, claim, payload.SnapshotID, receipt); err != nil {
-		_ = w.store.Delete(context.Background(), receipt.Key)
-		return "", err
-	}
-	return receipt.Key, nil
-}
-
-func (w *worker) markBindingPermissionLost(ctx context.Context, bindingID, code string) {
-	_, _ = w.pool.Exec(ctx, `UPDATE repository_bindings SET access_state='permission_lost',sync_health='failed',last_error_code=$2 WHERE id=$1 AND is_current`, bindingID, code)
-}
-
 func (w *worker) beginCapture(ctx context.Context, c jobs.Claim, snapshotID string) error {
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
@@ -452,14 +374,14 @@ func (w *worker) beginCapture(ctx context.Context, c jobs.Claim, snapshotID stri
 	if !yes {
 		return jobs.ErrStale
 	}
-	_, err = tx.Exec(ctx, `UPDATE repository_snapshots SET state='capturing',attempt_generation=$2,capture_started_at=clock_timestamp(),failure_code=NULL WHERE id=$1 AND state<>'verified' AND attempt_generation<$2`, snapshotID, c.Generation)
+	_, err = tx.Exec(ctx, `UPDATE repository_snapshots s SET state='capturing',attempt_generation=$2,capture_started_at=clock_timestamp(),failure_code=NULL WHERE s.id=$1 AND s.state<>'verified' AND s.attempt_generation<$2 AND EXISTS(SELECT 1 FROM pbl_checkpoints p JOIN pbl_teams t ON t.id=p.team_id AND t.project_id=p.project_id AND t.college_id=p.college_id WHERE p.snapshot_id=s.id AND t.confirmed_at IS NOT NULL) AND EXISTS(SELECT 1 FROM repository_bindings b WHERE b.id=s.binding_id AND b.repository_id=s.repository_id AND b.college_id=s.college_id AND b.provider='forgejo')`, snapshotID, c.Generation)
 	if err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 func (w *worker) failCapture(ctx context.Context, c jobs.Claim, snapshotID, code string) {
-	_, _ = w.pool.Exec(ctx, `UPDATE repository_snapshots SET state='failed',failure_code=$3 WHERE id=$1 AND attempt_generation=$2 AND state='capturing'`, snapshotID, c.Generation, code)
+	_, _ = w.pool.Exec(ctx, `UPDATE repository_snapshots s SET state='failed',failure_code=$3 WHERE s.id=$1 AND s.attempt_generation=$2 AND s.state='capturing' AND EXISTS(SELECT 1 FROM pbl_checkpoints p WHERE p.snapshot_id=s.id) AND EXISTS(SELECT 1 FROM repository_bindings b WHERE b.id=s.binding_id AND b.repository_id=s.repository_id AND b.college_id=s.college_id AND b.provider='forgejo')`, snapshotID, c.Generation, code)
 }
 func (w *worker) finishCapture(ctx context.Context, c jobs.Claim, snapshotID string, receipt storage.Receipt) error {
 	tx, err := w.pool.Begin(ctx)
@@ -474,7 +396,7 @@ func (w *worker) finishCapture(ctx context.Context, c jobs.Claim, snapshotID str
 	if !yes {
 		return jobs.ErrStale
 	}
-	tag, err := tx.Exec(ctx, `UPDATE repository_snapshots s SET state='verified',object_key=$3,archive_bytes=$4,archive_sha256=$5,verified_at=clock_timestamp(),failure_code=NULL WHERE s.id=$1 AND s.attempt_generation=$2 AND s.state='capturing' AND EXISTS(SELECT 1 FROM projects p WHERE p.id=s.project_id AND p.college_id=s.college_id AND p.github_revoke_deadline IS NULL)`, snapshotID, c.Generation, receipt.Key, receipt.Bytes, receipt.SHA256)
+	tag, err := tx.Exec(ctx, `UPDATE repository_snapshots s SET state='verified',object_key=$3,archive_bytes=$4,archive_sha256=$5,verified_at=clock_timestamp(),failure_code=NULL WHERE s.id=$1 AND s.attempt_generation=$2 AND s.state='capturing' AND EXISTS(SELECT 1 FROM pbl_checkpoints c JOIN pbl_teams t ON t.id=c.team_id AND t.project_id=c.project_id AND t.college_id=c.college_id WHERE c.snapshot_id=s.id AND t.confirmed_at IS NOT NULL) AND EXISTS(SELECT 1 FROM repository_bindings b WHERE b.id=s.binding_id AND b.repository_id=s.repository_id AND b.college_id=s.college_id AND b.provider='forgejo')`, snapshotID, c.Generation, receipt.Key, receipt.Bytes, receipt.SHA256)
 	if err != nil {
 		return err
 	}

@@ -27,7 +27,7 @@ VALUES ('<college-id>','example.edu',now());
 COMMIT;
 ```
 
-The first administrator creates an account with GitHub and proves campus affiliation through the campus-email challenge. If no administrator exists yet, an authorized institution operator verifies the person's identity out of band, then performs the one-time audited bootstrap below using that account's PeerGit ID. This bootstrap procedure is distinct from normal self-service role APIs, which cannot grant campus administrator:
+The first administrator creates an account with GitHub. For an account already verified through campus email, use the local test procedure below on the disposable campus. The existing bootstrap SQL in this section is for an unverified account after authorized out-of-band verification. Production bootstrap requires the institution's approval.
 
 ```sql
 BEGIN;
@@ -65,6 +65,36 @@ COMMIT;
 After sign-in, the administrator sets up TOTP MFA and saves the one-time recovery codes. Administrative APIs require a fresh MFA verification. Regular campus administrators can create campus invitations, scoped external invitations, organizations, grant non-admin campus roles, and suspend/reactivate non-admin accounts. Suspending an account revokes its sessions immediately. Administrator suspension/promotion requires the separately documented break-glass operator procedure.
 
 Campus verification email delivers the expiring link and OTP through the PostgreSQL-backed worker. Administrative approval is audited and does not claim mailbox ownership. Email-bound invitations still require GitHub identity matching and do not bypass campus verification; external grants remain scoped. Production delivery requires an approved authenticated-TLS email provider.
+
+### Local PBL test coordinator
+
+Use this one-time grant on the disposable `local-campus` fixture after your coordinator account completes campus email verification. Replace the handle below with that account's exact PeerGit handle. A fresh database has one initial coordinator after this command. Rerunning it returns no row if the campus already has a campus administrator.
+
+```powershell
+$pblCoordinator = 'campus_coordinator'
+@'
+WITH target AS (
+  SELECT u.id,u.college_id
+  FROM users u JOIN colleges c ON c.id=u.college_id AND c.slug='local-campus'
+  JOIN campus_verifications v ON v.college_id=u.college_id AND v.user_id=u.id
+  WHERE u.handle=:'pbl_coordinator' AND u.status='active' AND u.account_type='campus'
+    AND v.revoked_at IS NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM campus_roles r WHERE r.college_id=c.id AND r.role='campus_admin'
+    )
+), granted AS (
+  INSERT INTO campus_roles(college_id,user_id,role)
+  SELECT college_id,id,'campus_admin' FROM target
+  ON CONFLICT DO NOTHING RETURNING college_id,user_id
+)
+INSERT INTO audit_log(tenant_id,actor_id,action,resource_type,resource_id,details)
+SELECT college_id,user_id,'campus_admin.bootstrapped','user',user_id,
+       '{"reason":"disposable local PBL fixture"}'::jsonb
+FROM granted RETURNING resource_id;
+'@ | docker compose -f deploy/compose/local.yml exec -T postgres psql -v ON_ERROR_STOP=1 -v "pbl_coordinator=$pblCoordinator" -U peergit -d peergit
+```
+
+Sign out and back in. In `/account/settings`, choose **Set up authenticator** and confirm the first TOTP code. Use **Verify for 10 minutes** before privileged PBL actions when the session is no longer fresh. Continue with [manual PBL validation](../plans/peergit-test.md#manual-pbl-validation).
 
 ## Local object storage and image rules
 
